@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: agafari-menu-backend
+
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/agafari_menu
+    username: postgres
+    password: 0911021148
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+    open-in-view: false
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: method
+    tagsSorter: alpha
+
+server:
+  port: 8080
+
+app:
+  jwt:
+    # generate your own long secret for production
+    secret: "CHANGE_ME_TO_A_LONG_RANDOM_SECRET_CHANGE_ME_TO_A_LONG_RANDOM_SECRET"
+    expiresMinutes: 120

@@ -16,4 +16,12 @@ public interface MenuRepository extends JpaRepository<Menu, String> {
     Optional<Menu> findByIdAndBusiness_Id(String id, String businessId);
 
     boolean existsByIdAndBusiness_Id(String id, String businessId);
+
+
+    @EntityGraph(attributePaths = {"menuType"})
+    List<Menu> findByBusiness_IdAndIsActiveTrue(String businessId);
+
+    default List<Menu> findActiveMenusWithMenuType(String businessId) {
+        return findByBusiness_IdAndIsActiveTrue(businessId);
+    }
 }

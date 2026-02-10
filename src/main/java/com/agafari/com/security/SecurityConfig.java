@@ -38,7 +38,9 @@ public class SecurityConfig {
                                 "/v3/api-docs/**",
                                 "/api/auth/register",
                                 "/api/auth/login",
-                                "/actuator/**"
+                                "/actuator/**",
+                                "/venue/**",
+                                "/venue/items/**"
                         ).permitAll()
 
                         // public endpoints

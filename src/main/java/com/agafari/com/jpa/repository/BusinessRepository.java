@@ -12,4 +12,10 @@ public interface BusinessRepository extends JpaRepository<Business, String> {
     @Query("select b from Business b where b.owner.id = :ownerId")
     Optional<Business> findByOwnerId(String ownerId);
 
+    @Query("""
+        select b from Business b
+        where b.id = :id
+    """)
+    Optional<Business> findPublicById(String id);
+
 }

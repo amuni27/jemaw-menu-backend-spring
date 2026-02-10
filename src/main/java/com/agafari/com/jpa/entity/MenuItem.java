@@ -1,16 +1,17 @@
 package com.agafari.com.jpa.entity;
 
 
-import com.agafari.com.enums.ItemStatus;
+import com.agafari.com.enums.MenuItemStatus;
 import com.agafari.com.enums.SpiceLevel;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.annotations.Type;
 import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 
 
 @Data
@@ -22,6 +23,7 @@ import java.math.BigDecimal;
 public class MenuItem extends AuditableEntity {
 
     @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
     @Column(nullable = false)
     private String id;
 
@@ -46,21 +48,22 @@ public class MenuItem extends AuditableEntity {
     @Column(name = "imageUrl")
     private String imageUrl;
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(columnDefinition = "jsonb", nullable = false)
-    private Object ingredients;
 
+    @Column(name = "ingredients", columnDefinition = "jsonb")
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(columnDefinition = "jsonb", nullable = false)
-    private Object allergens;
+    private List<String> ingredients;
 
+    @Column(name = "allergens", columnDefinition = "jsonb", nullable = false)
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(columnDefinition = "jsonb", nullable = false)
-    private Object tags;
+    private List<String> allergens = new ArrayList<>();
+
+    @Column(name = "tags", columnDefinition = "jsonb", nullable = false)
+    @JdbcTypeCode(SqlTypes.JSON)
+    private List<String> tags = new ArrayList<>();
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private ItemStatus status = ItemStatus.AVAILABLE;
+    private MenuItemStatus status = MenuItemStatus.AVAILABLE;
 
     @Column(name = "isFeatured", nullable = false)
     private boolean isFeatured = false;

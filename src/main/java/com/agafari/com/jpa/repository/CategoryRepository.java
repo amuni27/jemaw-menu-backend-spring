@@ -28,4 +28,17 @@ public interface CategoryRepository extends JpaRepository<Category, String> {
             String menuId,
             String businessId
     );
+
+    // category must belong to menu + business
+    Optional<Category> findByIdAndMenu_IdAndMenu_Business_Id(String categoryId, String menuId, String businessId);
+
+    // for updates: category must belong to same menu
+    Optional<Category> findByIdAndMenu_Id(String categoryId, String menuId);
+
+    @EntityGraph(attributePaths = {"menu"})
+    List<Category> findByMenu_IdInAndIsActiveTrueOrderBySortOrderAscCreatedAtAsc(List<String> menuIds);
+
+    default List<Category> findActiveByMenuIds(List<String> menuIds) {
+        return findByMenu_IdInAndIsActiveTrueOrderBySortOrderAscCreatedAtAsc(menuIds);
+    }
 }

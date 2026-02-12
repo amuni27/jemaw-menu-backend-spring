@@ -2,31 +2,33 @@
 FROM maven:3.9-eclipse-temurin-17 AS build
 WORKDIR /app
 
-# Cache dependencies first (faster rebuilds)
+# Cache dependencies first
 COPY pom.xml .
-RUN mvn -q -DskipTests dependency:go-offline
+RUN mvn -DskipTests dependency:go-offline
 
-# Build
-COPY src ./src
-RUN mvn -q -DskipTests clean package
+# Copy project (safer than only src)
+COPY . .
+
+# Build jar
+RUN mvn -DskipTests clean package
 
 # ---------- Run stage ----------
 FROM eclipse-temurin:17-jre
 WORKDIR /app
 
-# Optional: Run as non-root user
+# Run as non-root
 RUN useradd -m appuser
 USER appuser
 
-# Copy the jar (adjust if your jar name is different)
+# Copy the jar
 COPY --from=build /app/target/*.jar app.jar
 
-# Render sets PORT env var; Spring must use it
+# Render injects PORT; default 8080 locally
 ENV PORT=8080
 EXPOSE 8080
 
-# Good JVM defaults for containers
+# JVM defaults for containers
 ENV JAVA_OPTS="-XX:MaxRAMPercentage=75 -XX:+UseContainerSupport"
 
-# Start
-CMD ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+# Start (bind Spring to Render's PORT)
+CMD ["sh", "-c", "java $JAVA_OPTS -Dserver.port=${PORT} -jar app.jar"]

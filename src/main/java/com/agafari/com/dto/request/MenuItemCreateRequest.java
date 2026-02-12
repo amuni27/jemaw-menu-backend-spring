@@ -29,6 +29,7 @@ public class MenuItemCreateRequest {
     private List<@NotBlank String> ingredients;
 
     private String description;
+    private ImageMeta image;
 
     @Min(0)
     private Integer calories;

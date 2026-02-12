@@ -1,9 +1,10 @@
 package com.agafari.com.controller;
 
-
+import com.agafari.com.dto.request.ConfirmImageUploadRequest;
 import com.agafari.com.dto.request.MenuItemCreateRequest;
 import com.agafari.com.dto.request.MenuItemStatusUpdateRequest;
 import com.agafari.com.dto.request.MenuItemUpdateRequest;
+import com.agafari.com.dto.response.CreateMenuItemWithUploadResponse;
 import com.agafari.com.dto.response.MenuItemResponse;
 import com.agafari.com.enums.MenuItemStatus;
 import com.agafari.com.service.MenuItemService;
@@ -33,11 +34,33 @@ public class MenuItemController {
     }
 
     @PostMapping("/menus/{menuId}/items")
-    public ResponseEntity<MenuItemResponse> create(
+    public ResponseEntity<CreateMenuItemWithUploadResponse> create(
             @PathVariable String menuId,
             @Valid @RequestBody MenuItemCreateRequest request
     ) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(menuItemService.create(menuId, request));
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(menuItemService.createWithImageUpload(menuId, request));
+    }
+
+    /**
+     * ✅ confirm the image upload (frontend calls after PUT to R2 succeeds)
+     */
+    @PostMapping("/items/{itemId}/image/confirm")
+    public ResponseEntity<MenuItemResponse> confirmImage(
+            @PathVariable String itemId,
+            @Valid @RequestBody ConfirmImageUploadRequest req
+    ) {
+        return ResponseEntity.ok(menuItemService.confirmImageUpload(itemId, req));
+    }
+
+    /**
+     * ✅ optional: regenerate upload URL (useful for retry)
+     */
+    @PostMapping("/items/{itemId}/image/presign")
+    public ResponseEntity<CreateMenuItemWithUploadResponse> presignImageUpload(
+            @PathVariable String itemId
+    ) {
+        return ResponseEntity.ok(menuItemService.presignImageUpload(itemId));
     }
 
     @GetMapping("/items/{itemId}")
@@ -46,14 +69,18 @@ public class MenuItemController {
     }
 
     @PutMapping("/items/{itemId}")
-    public ResponseEntity<MenuItemResponse> update(@PathVariable String itemId,
-                                                   @RequestBody MenuItemUpdateRequest request) {
+    public ResponseEntity<MenuItemResponse> update(
+            @PathVariable String itemId,
+            @RequestBody MenuItemUpdateRequest request
+    ) {
         return ResponseEntity.ok(menuItemService.update(itemId, request));
     }
 
     @PutMapping("/items/{itemId}/status")
-    public ResponseEntity<MenuItemResponse> updateStatus(@PathVariable String itemId,
-                                                         @Valid @RequestBody MenuItemStatusUpdateRequest request) {
+    public ResponseEntity<MenuItemResponse> updateStatus(
+            @PathVariable String itemId,
+            @Valid @RequestBody MenuItemStatusUpdateRequest request
+    ) {
         return ResponseEntity.ok(menuItemService.updateStatus(itemId, request));
     }
 

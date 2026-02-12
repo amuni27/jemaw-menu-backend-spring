@@ -31,3 +31,11 @@ app:
     # generate your own long secret for production
     secret: "CHANGE_ME_TO_A_LONG_RANDOM_SECRET_CHANGE_ME_TO_A_LONG_RANDOM_SECRET"
     expiresMinutes: 120
+
+
+cloudflare:
+  accessKey: 69fad8fb63b5427a617146d2e343985d
+  secretKey: 0792bc0056c8662b6f3de1c2cdb64c226f46e7cc7783aa9d8e3b4a51d4a95dc6
+  bucket: agafari-assets-x9q4zt
+  endpoint: https://6a2ab21173cfe83a6268873c44e13379.r2.cloudflarestorage.com
+  publicBaseUrl: https://pub-e0b4117a2d05469283e0d47d6a92ceb7.r2.dev

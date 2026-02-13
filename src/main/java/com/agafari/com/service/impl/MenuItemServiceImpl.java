@@ -196,7 +196,7 @@ public class MenuItemServiceImpl implements MenuItemService {
     @Override
     @Transactional(readOnly = true)
     public MenuItemResponse get(String itemId) {
-
+        log.info("Helolololololo");
         String businessId = currentUser.businessId();
 
         MenuItem item = itemRepo.findByIdAndMenu_Business_Id(itemId, businessId)
@@ -208,6 +208,7 @@ public class MenuItemServiceImpl implements MenuItemService {
     @Override
     @Transactional(readOnly = true)
     public MenuItemResponse getById(String itemId) {
+        log.info("bloblobloblo");
         MenuItem item = itemRepo.findById(itemId)
                 .orElseThrow(() -> new NotFoundException("Item not found"));
         return toResponsePublicUrl(item);

@@ -9,6 +9,7 @@ import com.agafari.com.service.PublicMenuService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +26,9 @@ public class PublicMenuServiceImpl implements PublicMenuService {
     private final MenuRepository menuRepo;
     private final CategoryRepository categoryRepo;
     private final MenuItemRepository menuItemRepo;
+
+    @Value("${cloudflare.publicBaseUrl}")
+    private String publicBaseUrl;
 
     @Override
     @Transactional(readOnly = true)
@@ -178,12 +182,18 @@ public class PublicMenuServiceImpl implements PublicMenuService {
     }
 
     private MenuItemPublicResponse toItemDto(MenuItem i) {
+        String imageUrl = i.getImageUrl();
+
+        if (imageUrl != null && !imageUrl.startsWith("http")) {
+            imageUrl = publicBaseUrl.replaceAll("/$", "") + "/" +
+                    imageUrl.replaceAll("^/", "");
+        }
         return MenuItemPublicResponse.builder()
                 .id(i.getId())
                 .name(i.getName())
                 .description(i.getDescription())
                 .price(i.getPrice())
-                .imageUrl(i.getImageUrl())
+                .imageUrl(imageUrl)
                 .calories(i.getCalories())
                 .isFeatured(i.isFeatured())
                 .prepTimeMinutes(i.getPrepTimeMinutes())

@@ -56,7 +56,7 @@ public class MenuItemController {
     /**
      * ✅ optional: regenerate upload URL (useful for retry)
      */
-    @PostMapping("/items/{itemId}/image/presign")
+    @GetMapping("/items/{itemId}/image/presign")
     public ResponseEntity<CreateMenuItemWithUploadResponse> presignImageUpload(
             @PathVariable String itemId
     ) {

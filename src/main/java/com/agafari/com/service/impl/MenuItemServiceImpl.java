@@ -25,15 +25,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
-import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -45,17 +44,23 @@ public class MenuItemServiceImpl implements MenuItemService {
     private final CategoryRepository categoryRepo;
     private final MenuItemRepository itemRepo;
 
-    // ✅ for confirm check
+    // confirm check
     private final S3Client s3Client;
 
-    // ✅ for presign
+    // presign
     private final S3Presigner r2Presigner;
 
     @Value("${cloudflare.bucket}")
     private String bucket;
 
+    /**
+     * Example: https://pub-xxxx.r2.dev  OR  https://cdn.yourdomain.com
+     * Must be publicly readable if you want to render images without presigned GET.
+     */
     @Value("${cloudflare.publicBaseUrl}")
     private String publicBaseUrl;
+
+    // ---------------- PUBLIC LIST ----------------
 
     @Override
     @Transactional(readOnly = true)
@@ -71,6 +76,8 @@ public class MenuItemServiceImpl implements MenuItemService {
                 .map(this::toResponsePublicUrl)
                 .toList();
     }
+
+    // ---------------- CREATE ----------------
 
     @Override
     @Transactional
@@ -93,7 +100,7 @@ public class MenuItemServiceImpl implements MenuItemService {
         item.setDescription(nullIfBlank(req.getDescription()));
         item.setPrice(money(req.getPrice()));
 
-        // ✅ stop accepting external url for create (senior approach)
+        // IMPORTANT: always store ONLY objectKey in DB (not full URL)
         item.setImageUrl(null);
 
         item.setIngredients(ingredients);
@@ -110,7 +117,7 @@ public class MenuItemServiceImpl implements MenuItemService {
 
         item = itemRepo.save(item);
 
-        // If no image meta provided, return item only
+        // no image meta => return item only
         if (req.getImage() == null || req.getImage().getContentType() == null) {
             return CreateMenuItemWithUploadResponse.builder()
                     .item(toResponsePublicUrl(item))
@@ -118,14 +125,14 @@ public class MenuItemServiceImpl implements MenuItemService {
                     .build();
         }
 
-        // ✅ generate stable object key and store it in DB imageUrl (as key)
+        // stable key
         String ext = guessExt(req.getImage().getFileName(), req.getImage().getContentType());
         String objectKey = "agafari/menu-items/" + item.getId() + "/main" + ext;
 
-        item.setImageUrl(objectKey);
+        item.setImageUrl(objectKey);          // store key
+        item = itemRepo.save(item);
 
-        // presign
-        UploadInfo upload = presignPut(objectKey, req.getImage().getContentType());
+        UploadInfo upload = presignPut(objectKey);
 
         return CreateMenuItemWithUploadResponse.builder()
                 .item(toResponsePublicUrl(item))
@@ -133,11 +140,10 @@ public class MenuItemServiceImpl implements MenuItemService {
                 .build();
     }
 
-    /**
-     * ✅ Optional retry: regenerate upload URL for existing item
-     */
+    // ---------------- PRESIGN (RETRY / EDIT) ----------------
+
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public CreateMenuItemWithUploadResponse presignImageUpload(String itemId) {
         log.info("presign image upload {}", itemId);
         String businessId = currentUser.businessId();
@@ -145,13 +151,21 @@ public class MenuItemServiceImpl implements MenuItemService {
         MenuItem item = itemRepo.findByIdAndMenu_Business_Id(itemId, businessId)
                 .orElseThrow(() -> new NotFoundException("Item not found"));
 
-        if (item.getImageUrl() == null) {
-            // if item has no key yet, generate one (default to jpg)
-            String objectKey = "agafari/menu-items/" + item.getId() + "/main.jpg";
-            item.setImageUrl(objectKey);
+        // IMPORTANT: imageUrl in DB must be a KEY.
+        // If DB accidentally contains a full URL, strip it to key (fixes broken keys).
+        String key = toObjectKey(item.getImageUrl());
+
+        if (key == null) {
+            key = "agafari/menu-items/" + item.getId() + "/main.jpg";
         }
 
-        UploadInfo upload = presignPut(item.getImageUrl(), "image/jpeg");
+        // persist key only
+        if (!Objects.equals(item.getImageUrl(), key)) {
+            item.setImageUrl(key);
+            item = itemRepo.save(item);
+        }
+
+        UploadInfo upload = presignPut(key);
 
         return CreateMenuItemWithUploadResponse.builder()
                 .item(toResponsePublicUrl(item))
@@ -159,30 +173,31 @@ public class MenuItemServiceImpl implements MenuItemService {
                 .build();
     }
 
-    /**
-     * ✅ Confirm upload by checking object exists in R2 (HEAD)
-     */
+    // ---------------- CONFIRM ----------------
+
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public MenuItemResponse confirmImageUpload(String itemId, ConfirmImageUploadRequest req) {
         String businessId = currentUser.businessId();
 
         MenuItem item = itemRepo.findByIdAndMenu_Business_Id(itemId, businessId)
                 .orElseThrow(() -> new NotFoundException("Item not found"));
 
-        if (item.getImageUrl() == null) {
-            throw new BadRequestException("Item has no image objectKey");
-        }
+        String key = toObjectKey(item.getImageUrl());
+        if (key == null) throw new BadRequestException("Item has no image objectKey");
 
-        if (!item.getImageUrl().equals(req.getObjectKey())) {
+        String reqKey = toObjectKey(req.getObjectKey());
+        if (reqKey == null) throw new BadRequestException("objectKey is required");
+
+        if (!key.equals(reqKey)) {
             throw new BadRequestException("objectKey does not match item image key");
         }
 
-        // ✅ verify object exists
+        // verify object exists
         try {
             s3Client.headObject(HeadObjectRequest.builder()
                     .bucket(bucket)
-                    .key(req.getObjectKey())
+                    .key(reqKey)
                     .build());
         } catch (Exception e) {
             throw new BadRequestException("Image not found in storage (upload not completed)");
@@ -191,12 +206,11 @@ public class MenuItemServiceImpl implements MenuItemService {
         return toResponsePublicUrl(item);
     }
 
-    // ---------------- existing methods ----------------
+    // ---------------- GET ----------------
 
     @Override
     @Transactional(readOnly = true)
     public MenuItemResponse get(String itemId) {
-        log.info("Helolololololo");
         String businessId = currentUser.businessId();
 
         MenuItem item = itemRepo.findByIdAndMenu_Business_Id(itemId, businessId)
@@ -208,11 +222,12 @@ public class MenuItemServiceImpl implements MenuItemService {
     @Override
     @Transactional(readOnly = true)
     public MenuItemResponse getById(String itemId) {
-        log.info("bloblobloblo");
         MenuItem item = itemRepo.findById(itemId)
                 .orElseThrow(() -> new NotFoundException("Item not found"));
         return toResponsePublicUrl(item);
     }
+
+    // ---------------- UPDATE ----------------
 
     @Override
     @Transactional
@@ -233,7 +248,7 @@ public class MenuItemServiceImpl implements MenuItemService {
         if (req.getDescription() != null) item.setDescription(nullIfBlank(req.getDescription()));
         if (req.getPrice() != null) item.setPrice(money(req.getPrice()));
 
-        // ✅ block manual URL updates (senior: image is managed via presign/upload)
+        // block manual URL updates
         if (req.getImageUrl() != null) {
             throw new BadRequestException("imageUrl cannot be set directly. Use image upload endpoints.");
         }
@@ -248,6 +263,7 @@ public class MenuItemServiceImpl implements MenuItemService {
         if (req.getSpiceLevel() != null) item.setSpiceLevel(req.getSpiceLevel());
         if (req.getStatus() != null) item.setStatus(req.getStatus());
 
+        item = itemRepo.save(item);
         return toResponsePublicUrl(item);
     }
 
@@ -256,11 +272,12 @@ public class MenuItemServiceImpl implements MenuItemService {
     public MenuItemResponse updateStatus(String itemId, MenuItemStatusUpdateRequest req) {
         String businessId = currentUser.businessId();
 
-        // ✅ security fix: enforce ownership (Node version doesn't)
         MenuItem item = itemRepo.findByIdAndMenu_Business_Id(itemId, businessId)
                 .orElseThrow(() -> new NotFoundException("Item not found"));
 
         item.setStatus(req.getStatus());
+        item = itemRepo.save(item);
+
         return toResponsePublicUrl(item);
     }
 
@@ -275,13 +292,12 @@ public class MenuItemServiceImpl implements MenuItemService {
         itemRepo.delete(item);
     }
 
-    // ---------------- helpers ----------------
+    // ---------------- PRESIGN HELPERS ----------------
 
-    private UploadInfo presignPut(String objectKey, String contentType) {
+    private UploadInfo presignPut(String objectKey) {
         PutObjectRequest put = PutObjectRequest.builder()
                 .bucket(bucket)
                 .key(objectKey)
-                .contentType(contentType)
                 .build();
 
         PutObjectPresignRequest presignReq = PutObjectPresignRequest.builder()
@@ -298,12 +314,35 @@ public class MenuItemServiceImpl implements MenuItemService {
                 .build();
     }
 
+    /**
+     * Ensures DB stores ONLY objectKey.
+     * - If full URL exists, strip publicBaseUrl prefix.
+     * - If starts with "/", remove it.
+     */
+    private String toObjectKey(String imageUrlOrKey) {
+        if (imageUrlOrKey == null) return null;
+
+        String s = imageUrlOrKey.trim();
+        if (s.isEmpty()) return null;
+
+        if (s.startsWith("http")) {
+            String base = publicBaseUrl.replaceAll("/$", "") + "/";
+            if (s.startsWith(base)) {
+                return s.substring(base.length()).replaceAll("^/+", "");
+            }
+            // if it's some other URL, we refuse because it will break presign & URLs
+            throw new BadRequestException("imageUrl must be an object key, not a full URL");
+        }
+
+        return s.replaceAll("^/+", "");
+    }
+
+    // ---------------- RESPONSE MAPPING ----------------
+
     private MenuItemResponse toResponsePublicUrl(MenuItem i) {
         MenuItemResponse r = toResponse(i);
 
         if (r.getImageUrl() != null && !r.getImageUrl().startsWith("http")) {
-
-            // remove accidental double slashes
             r.setImageUrl(
                     publicBaseUrl.replaceAll("/$", "") + "/" +
                             r.getImageUrl().replaceAll("^/", "")
@@ -321,6 +360,7 @@ public class MenuItemServiceImpl implements MenuItemService {
                 .name(i.getName())
                 .description(i.getDescription())
                 .price(i.getPrice())
+                // IMPORTANT: DB stores key; this mapper converts to full public URL
                 .imageUrl(i.getImageUrl())
                 .ingredients(i.getIngredients())
                 .allergens(i.getAllergens())
@@ -336,21 +376,12 @@ public class MenuItemServiceImpl implements MenuItemService {
                 .build();
     }
 
-    // ------------------ normalization & validation ------------------
+    // ---------------- VALIDATION HELPERS ----------------
 
     private BigDecimal money(BigDecimal v) {
         if (v == null) return null;
         if (v.signum() < 0) throw new BadRequestException("price must be nonnegative");
         return v.setScale(2, RoundingMode.HALF_UP);
-    }
-
-    private String normalizeUrl(String v) {
-        if (v == null) return null;
-        String s = v.trim();
-        if (s.isEmpty()) return null;
-        if (!s.matches("(?i)^https?://.*")) s = "https://" + s;
-        if (!s.matches("(?i)^https?://.+")) throw new BadRequestException("Invalid url");
-        return s;
     }
 
     private List<String> normalizeIngredients(List<String> ingredients) {
@@ -371,12 +402,16 @@ public class MenuItemServiceImpl implements MenuItemService {
             throw new BadRequestException("ingredients must be unique (case-insensitive)");
         }
 
-        return trimmed;
+        return new ArrayList<>(trimmed);
     }
 
     private List<String> normalizeNullableList(List<String> v) {
         if (v == null) return null;
-        return v.stream().filter(Objects::nonNull).map(String::trim).toList();
+        return v.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
     }
 
     private String normalizeSearch(String s) {

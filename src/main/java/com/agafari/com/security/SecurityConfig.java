@@ -56,27 +56,22 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
 
-        // Allow all origins
-        configuration.setAllowedOriginPatterns(List.of("*"));
+        configuration.setAllowedOrigins(List.of(
+                "http://localhost:5175",
+                "http://127.0.0.1:5175"
+        ));
 
-        // Allow all HTTP methods
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-
-        // Allow all headers
         configuration.setAllowedHeaders(List.of("*"));
 
-        // Allow credentials
         configuration.setAllowCredentials(true);
-
-        // Set max age for preflight requests
         configuration.setMaxAge(3600L);
 
-        // Apply to all URLs
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
-
         return source;
     }
+
 
     @Bean
     public org.springframework.security.crypto.password.PasswordEncoder passwordEncoder() {

@@ -40,7 +40,8 @@ public class SecurityConfig {
                                 "/api/auth/login",
                                 "/actuator/**",
                                 "/venue/**",
-                                "/venue/items/**"
+                                "/venue/items/**",
+                                "/api/business/**"
                         ).permitAll()
 
                         // public endpoints

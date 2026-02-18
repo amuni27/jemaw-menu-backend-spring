@@ -43,6 +43,9 @@ public class Business extends AuditableEntity {
     @Column(nullable = false)
     private String zipcode;
 
+    @Column(name = "logoKey")
+    private String logoKey;
+
     @Column(name = "customSubdomain", nullable = false, unique = true)
     private String customSubdomain;
 

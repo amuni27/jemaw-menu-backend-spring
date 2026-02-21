@@ -40,8 +40,7 @@ public class User extends AuditableEntity {
     private UserStatus status = UserStatus.ACTIVE;
 
     // businessId is nullable (on delete set null)
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "businessId")
+    @OneToOne(mappedBy = "owner", cascade = CascadeType.ALL, orphanRemoval = true)
     private Business business;
 
     // One business owner (unique ownerUserId) -> handled in Business side

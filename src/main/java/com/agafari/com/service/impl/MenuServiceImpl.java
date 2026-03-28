@@ -19,6 +19,8 @@ import com.agafari.com.security.CurrentUser;
 import com.agafari.com.service.MenuService;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -28,6 +30,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class MenuServiceImpl implements MenuService {
 
+    private static final Logger log = LoggerFactory.getLogger(MenuServiceImpl.class);
     private final MenuRepository menuRepo;
     private final BusinessRepository businessRepo;
     private final MenuTypeRepository menuTypeRepo;
@@ -52,13 +55,14 @@ public class MenuServiceImpl implements MenuService {
     @Transactional
     @Override
     public MenuResponse createMenu(MenuCreateRequest request) {
+        log.info("Menu create starting for {}", request);
         String businessId = currentUser.businessId();
 
         Business business = businessRepo.findById(businessId)
                 .orElseThrow(() -> new NotFoundException("Business not found. Cannot create menu."));
 
         // Node: validate menuType exists using data.menuId (menuTypeId)
-        MenuType menuType = menuTypeRepo.findById(request.getMenuId())
+        MenuType menuType = menuTypeRepo.findById(request.getMenuTypeId())
                 .orElseThrow(() -> new BadRequestException("Invalid menu type for this business."));
 
         Menu menu = new Menu();

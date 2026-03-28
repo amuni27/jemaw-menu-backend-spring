@@ -9,7 +9,7 @@ import lombok.Data;
 public class MenuCreateRequest {
 
     @NotNull
-    private String menuId; // menuTypeId
+    private String menuTypeId; // menuTypeId
 
     @NotBlank
     private String name;

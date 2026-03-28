@@ -8,11 +8,13 @@ import com.agafari.com.jpa.entity.MenuType;
 import com.agafari.com.service.MenuService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/menus")
 @RequiredArgsConstructor
@@ -35,6 +37,7 @@ public class MenuController {
      */
     @PostMapping
     public ResponseEntity<MenuResponse> create(@Valid @RequestBody MenuCreateRequest request) {
+        log.info("Create menu: {}", request);
         MenuResponse created = menuService.createMenu(request);
         return ResponseEntity.status(201).body(created);
     }

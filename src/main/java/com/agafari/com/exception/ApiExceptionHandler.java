@@ -34,5 +34,11 @@ public class ApiExceptionHandler {
         log.error("error happened ", e.getMessage());
         return ResponseEntity.status(409).body(Map.of("message", e.getMessage()));
     }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<?> unknown(Exception e){
+        log.error("error happened ", e.getMessage());
+        return ResponseEntity.status(500).body(Map.of("message", e.getMessage()));
+    }
 }
 

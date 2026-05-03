@@ -76,6 +76,18 @@ public class AuthService {
         // Node-style validation for businessHours
         validateBusinessHours(req.isOpen24_7(), req.getBusinessHours());
 
+        // Check if email already exists
+        if (userRepo.findByEmail(email).isPresent()) {
+            log.warn("event=auth.register.email_exists email={}", email);
+            throw new BadRequestException("This email is already registered.");
+        }
+
+        // Check if subdomain already exists
+        if (businessRepo.findByCustomSubdomain(subdomain).isPresent()) {
+            log.warn("event=auth.register.subdomain_exists subdomain={}", subdomain);
+            throw new BadRequestException("This business link is already registered.");
+        }
+
         try {
             User user = new User();
             user.setId(UUID.randomUUID().toString());
@@ -128,7 +140,7 @@ public class AuthService {
             log.warn("event=auth.register.conflict email={} subdomain={} duration_ms={} errorClass={} error={}",
                     email, subdomain, ms, ex.getClass().getSimpleName(), rootMsg(ex));
             throw new ConflictException("This email, phone number, or business link is already registered.");
-        } catch (RuntimeException ex) {
+        } catch (Exception ex) {
             long ms = System.currentTimeMillis() - start;
             log.error("event=auth.register.error email={} subdomain={} duration_ms={} errorClass={} error={}",
                     email, subdomain, ms, ex.getClass().getSimpleName(), rootMsg(ex), ex);

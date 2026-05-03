@@ -60,7 +60,7 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(List.of(
                 "http://localhost:5175",
                 "http://127.0.0.1:5175",
-                "https://agafari-menu.onrender.com/"
+                "https://agafari-menu.onrender.com"
         ));
 
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));

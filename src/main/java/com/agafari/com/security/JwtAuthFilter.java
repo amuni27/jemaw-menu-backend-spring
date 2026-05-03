@@ -29,12 +29,13 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
         // Skip JWT check for non-admin routes + login + swagger
-        return path.startsWith("/auth/register")
-                || path.startsWith("/auth/login")
+        return path.startsWith("/api/auth/register")
+                || path.startsWith("/api/auth/login")
                 || path.startsWith("/swagger-ui")
                 || path.startsWith("/v3/api-docs")
                 || path.equals("/swagger-ui.html")
-                || path.startsWith("/actuator");
+                || path.startsWith("/actuator")
+                || path.startsWith("/venue");
     }
 
     @Override

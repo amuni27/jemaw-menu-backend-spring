@@ -156,7 +156,7 @@ public class AuthService {
 
         User user = userRepo.findByEmail(email)
                 .orElseThrow(() -> {
-                    log.warn("event=auth.login.invalid_email email={}", email);
+                    log.error("event=auth.login.invalid_email email={}", email);
                     return new BadRequestException("Invalid credentials");
                 });
 

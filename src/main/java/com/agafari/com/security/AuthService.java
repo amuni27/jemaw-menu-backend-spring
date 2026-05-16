@@ -3,6 +3,7 @@ package com.agafari.com.security;
 import com.agafari.com.dto.request.AuthLoginRequest;
 import com.agafari.com.dto.request.AuthRegisterRequest;
 import com.agafari.com.dto.request.BusinessHourDto;
+import com.agafari.com.dto.request.ChangePasswordRequest;
 import com.agafari.com.dto.response.AuthRegisterResponse;
 import com.agafari.com.dto.response.AuthTokenResponse;
 import com.agafari.com.enums.DayOfWeekEnum;
@@ -231,6 +232,25 @@ public class AuthService {
                         biz.getCustomSubdomain()
                 )
         );
+    }
+
+    @Transactional
+    public void changePassword(String emailFromJwt, ChangePasswordRequest req) {
+        String email = normalizeEmail(emailFromJwt);
+        log.info("event=auth.change_password.start email={}", email);
+
+        User user = userRepo.findByEmail(email)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+
+        if (!passwordEncoder.matches(req.getCurrentPassword(), user.getPasswordHash())) {
+            log.warn("event=auth.change_password.wrong_current email={} userId={}", email, user.getId());
+            throw new BadRequestException("Current password is incorrect");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(req.getNewPassword()));
+        userRepo.save(user);
+
+        log.info("event=auth.change_password.success email={} userId={}", email, user.getId());
     }
 
     private void validateBusinessHours(boolean open24_7, List<BusinessHourDto> hours) {

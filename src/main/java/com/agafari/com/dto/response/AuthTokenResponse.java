@@ -5,6 +5,8 @@ import com.agafari.com.jpa.entity.User;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 @AllArgsConstructor
 public class AuthTokenResponse {
@@ -16,6 +18,7 @@ public class AuthTokenResponse {
     public static class UserSummary {
         private String id;
         private String fullName;
+        private String phoneNumber;
         private String email;
         private String role;
     }
@@ -25,5 +28,11 @@ public class AuthTokenResponse {
         private String id;
         private String name;
         private String customSubdomain;
+        private String businessPhone;
+        private String streetAddress;
+        private String city;
+        private String state;
+        private boolean open24_7;
+        private List<BusinessHoursResponse> businessHours;
     }
 }

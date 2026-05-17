@@ -6,6 +6,7 @@ import com.agafari.com.dto.request.BusinessHourDto;
 import com.agafari.com.dto.request.ChangePasswordRequest;
 import com.agafari.com.dto.response.AuthRegisterResponse;
 import com.agafari.com.dto.response.AuthTokenResponse;
+import com.agafari.com.dto.response.BusinessHoursResponse;
 import com.agafari.com.enums.DayOfWeekEnum;
 import com.agafari.com.enums.UserRole;
 import com.agafari.com.enums.UserStatus;
@@ -183,13 +184,22 @@ public class AuthService {
                 new AuthTokenResponse.UserSummary(
                         user.getId(),
                         user.getFullName(),
+                        user.getPhoneNumber(),
                         user.getEmail(),
                         user.getRole().name()
                 ),
                 new AuthTokenResponse.BusinessSummary(
                         biz.getId(),
                         biz.getName(),
-                        biz.getCustomSubdomain()
+                        biz.getCustomSubdomain(),
+                        biz.getBusinessPhone(),
+                        biz.getStreetAddress(),
+                        biz.getCity(),
+                        biz.getState(),
+                        biz.isOpen24_7(),
+                        biz.getBusinessHours().stream()
+                                .map(BusinessHoursResponse::from)
+                                .toList()
                 )
         );
     }
@@ -223,13 +233,22 @@ public class AuthService {
                 new AuthTokenResponse.UserSummary(
                         user.getId(),
                         user.getFullName(),
+                        user.getPhoneNumber(),
                         user.getEmail(),
                         user.getRole().name()
                 ),
                 new AuthTokenResponse.BusinessSummary(
                         biz.getId(),
                         biz.getName(),
-                        biz.getCustomSubdomain()
+                        biz.getCustomSubdomain(),
+                        biz.getBusinessPhone(),
+                        biz.getStreetAddress(),
+                        biz.getCity(),
+                        biz.getState(),
+                        biz.isOpen24_7(),
+                        biz.getBusinessHours().stream()
+                                .map(BusinessHoursResponse::from)
+                                .toList()
                 )
         );
     }

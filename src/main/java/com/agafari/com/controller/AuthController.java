@@ -8,6 +8,7 @@ import com.agafari.com.dto.response.AuthTokenResponse;
 import com.agafari.com.security.AuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
@@ -34,6 +36,7 @@ public class AuthController {
 
     @GetMapping("/me")
     public ResponseEntity<AuthTokenResponse> me(@AuthenticationPrincipal UserDetails principal) {
+        log.info("Get current user: {}", principal.getUsername());
         return ResponseEntity.ok(authService.me(principal.getUsername()));
     }
 

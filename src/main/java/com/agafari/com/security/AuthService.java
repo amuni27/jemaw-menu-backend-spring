@@ -21,6 +21,7 @@ import com.agafari.com.jpa.repository.UserRepository;
 import com.agafari.com.service.JwtService;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -41,15 +42,28 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
 
+    @Value("${app.baseDomain:agafarimenu.com}")
+    private String baseDomain;
+
     private static final List<DayOfWeekEnum> DAYS = List.of(
             DayOfWeekEnum.MONDAY, DayOfWeekEnum.TUESDAY, DayOfWeekEnum.WEDNESDAY,
             DayOfWeekEnum.THURSDAY, DayOfWeekEnum.FRIDAY, DayOfWeekEnum.SATURDAY, DayOfWeekEnum.SUNDAY
     );
 
     private static final Pattern HHMM = Pattern.compile("^([01]\\d|2[0-3]):([0-5]\\d)$");
+    private static final Pattern SUBDOMAIN = Pattern.compile("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$");
 
     private static String normalizeEmail(String email) { return email.trim().toLowerCase(); }
     private static String normalizeSubdomain(String sub) { return sub.trim().toLowerCase(); }
+
+    private void validateSubdomainFormat(String sub) {
+        if (!SUBDOMAIN.matcher(sub).matches()) {
+            throw new BadRequestException(
+                "Invalid subdomain: only lowercase letters, digits, and hyphens are allowed. " +
+                "It must not start or end with a hyphen, and dots are not permitted."
+            );
+        }
+    }
 
     private static int timeToMinutes(String t) {
         int hh = Integer.parseInt(t.substring(0, 2));
@@ -62,7 +76,9 @@ public class AuthService {
         long start = System.currentTimeMillis();
 
         String email = normalizeEmail(req.getEmail());
-        String subdomain = normalizeSubdomain(req.getCustomSubdomain());
+        String subdomainLabel = normalizeSubdomain(req.getCustomSubdomain());
+        validateSubdomainFormat(subdomainLabel);
+        String subdomain = subdomainLabel + "." + baseDomain;
         String phone = (req.getPhoneNumber() == null || req.getPhoneNumber().trim().isEmpty())
                 ? null : req.getPhoneNumber().trim();
         String zipcode = (req.getZipcode() == null) ? "" : req.getZipcode().trim();

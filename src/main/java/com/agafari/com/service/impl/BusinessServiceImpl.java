@@ -36,6 +36,20 @@ public class BusinessServiceImpl implements BusinessService {
     @Value("${cloudflare.publicBaseUrl}")
     private String publicBaseUrl;
 
+    @Value("${app.baseDomain}")
+    private String baseDomain;
+
+    private static final Pattern SUBDOMAIN = Pattern.compile("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$");
+
+    private void validateSubdomainFormat(String sub) {
+        if (!SUBDOMAIN.matcher(sub).matches()) {
+            throw new BadRequestException(
+                "Invalid subdomain: only lowercase letters, digits, and hyphens are allowed. " +
+                "It must not start or end with a hyphen, and dots are not permitted."
+            );
+        }
+    }
+
     private static final List<DayOfWeekEnum> DAYS = List.of(
             DayOfWeekEnum.MONDAY, DayOfWeekEnum.TUESDAY, DayOfWeekEnum.WEDNESDAY,
             DayOfWeekEnum.THURSDAY, DayOfWeekEnum.FRIDAY, DayOfWeekEnum.SATURDAY, DayOfWeekEnum.SUNDAY
@@ -114,7 +128,9 @@ public class BusinessServiceImpl implements BusinessService {
         if (request.getCurrency() != null)       business.setCurrency(request.getCurrency().trim());
 
         if (request.getCustomSubdomain() != null) {
-            String newSubdomain = request.getCustomSubdomain().trim().toLowerCase();
+            String label = request.getCustomSubdomain().trim().toLowerCase();
+            validateSubdomainFormat(label);
+            String newSubdomain = label + "." + baseDomain;
             if (!newSubdomain.equals(business.getCustomSubdomain())) {
                 if (businessRepo.findByCustomSubdomain(newSubdomain).isPresent()) {
                     throw new ConflictException("This business link is already taken");

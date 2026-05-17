@@ -1,10 +1,13 @@
 package com.agafari.com.service.impl;
 
 import com.agafari.com.dto.request.BusinessHourDto;
+import com.agafari.com.dto.request.BusinessUpdateRequest;
 import com.agafari.com.dto.request.UpdateBusinessHoursRequest;
 import com.agafari.com.dto.response.BusinessHoursResponse;
+import com.agafari.com.dto.response.BusinessResponse;
 import com.agafari.com.enums.DayOfWeekEnum;
 import com.agafari.com.exception.BadRequestException;
+import com.agafari.com.exception.ConflictException;
 import com.agafari.com.exception.NotFoundException;
 import com.agafari.com.jpa.entity.Business;
 import com.agafari.com.jpa.entity.BusinessHours;
@@ -14,6 +17,7 @@ import com.agafari.com.security.CurrentUser;
 import com.agafari.com.service.BusinessService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +32,9 @@ public class BusinessServiceImpl implements BusinessService {
     private final CurrentUser currentUser;
     private final BusinessRepository businessRepo;
     private final BusinessHoursRepository hoursRepo;
+
+    @Value("${cloudflare.publicBaseUrl}")
+    private String publicBaseUrl;
 
     private static final List<DayOfWeekEnum> DAYS = List.of(
             DayOfWeekEnum.MONDAY, DayOfWeekEnum.TUESDAY, DayOfWeekEnum.WEDNESDAY,
@@ -83,6 +90,47 @@ public class BusinessServiceImpl implements BusinessService {
         log.info("Business hours updated for businessId: {}", businessId);
 
         return newHours.stream().map(BusinessHoursResponse::from).toList();
+    }
+
+    @Override
+    @Transactional
+    public BusinessResponse updateBusiness(String businessId, BusinessUpdateRequest request) {
+        log.info("Updating business businessId: {}", businessId);
+
+        String currentBusinessId = currentUser.businessId();
+        if (!businessId.equals(currentBusinessId)) {
+            throw new BadRequestException("Not allowed");
+        }
+
+        Business business = businessRepo.findById(businessId)
+                .orElseThrow(() -> new NotFoundException("Business not found"));
+
+        if (request.getName() != null)          business.setName(request.getName().trim());
+        if (request.getBusinessPhone() != null)  business.setBusinessPhone(request.getBusinessPhone().trim());
+        if (request.getStreetAddress() != null)  business.setStreetAddress(request.getStreetAddress().trim());
+        if (request.getCity() != null)           business.setCity(request.getCity().trim());
+        if (request.getState() != null)          business.setState(request.getState().trim());
+        if (request.getZipcode() != null)        business.setZipcode(request.getZipcode().trim());
+        if (request.getCurrency() != null)       business.setCurrency(request.getCurrency().trim());
+
+        if (request.getCustomSubdomain() != null) {
+            String newSubdomain = request.getCustomSubdomain().trim().toLowerCase();
+            if (!newSubdomain.equals(business.getCustomSubdomain())) {
+                if (businessRepo.findByCustomSubdomain(newSubdomain).isPresent()) {
+                    throw new ConflictException("This business link is already taken");
+                }
+                business.setCustomSubdomain(newSubdomain);
+            }
+        }
+
+        businessRepo.save(business);
+
+        String logoUrl = business.getLogoKey() != null
+                ? publicBaseUrl.replaceAll("/$", "") + "/" + business.getLogoKey().replaceAll("^/", "")
+                : null;
+
+        log.info("Business updated businessId: {}", businessId);
+        return BusinessResponse.from(business, logoUrl);
     }
 
     private void validateHours(boolean open24_7, List<BusinessHourDto> hours) {

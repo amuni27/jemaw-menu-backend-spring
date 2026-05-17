@@ -1,7 +1,9 @@
 package com.agafari.com.controller;
 
+import com.agafari.com.dto.request.BusinessUpdateRequest;
 import com.agafari.com.dto.request.UpdateBusinessHoursRequest;
 import com.agafari.com.dto.response.BusinessHoursResponse;
+import com.agafari.com.dto.response.BusinessResponse;
 import com.agafari.com.service.BusinessService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -28,5 +30,13 @@ public class BusinessController {
             @Valid @RequestBody UpdateBusinessHoursRequest request
     ) {
         return ResponseEntity.ok(businessService.updateBusinessHours(businessId, request));
+    }
+
+    @PatchMapping("/{businessId}")
+    public ResponseEntity<BusinessResponse> updateBusiness(
+            @PathVariable String businessId,
+            @RequestBody BusinessUpdateRequest request
+    ) {
+        return ResponseEntity.ok(businessService.updateBusiness(businessId, request));
     }
 }

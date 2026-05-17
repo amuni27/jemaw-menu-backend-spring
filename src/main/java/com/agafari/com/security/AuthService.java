@@ -196,6 +196,7 @@ public class AuthService {
                         biz.getStreetAddress(),
                         biz.getCity(),
                         biz.getState(),
+                        biz.getZipcode(),
                         biz.isOpen24_7(),
                         biz.getBusinessHours().stream()
                                 .map(BusinessHoursResponse::from)
@@ -245,6 +246,7 @@ public class AuthService {
                         biz.getStreetAddress(),
                         biz.getCity(),
                         biz.getState(),
+                        biz.getZipcode(),
                         biz.isOpen24_7(),
                         biz.getBusinessHours().stream()
                                 .map(BusinessHoursResponse::from)

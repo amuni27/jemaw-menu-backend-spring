@@ -32,6 +32,7 @@ public class AuthTokenResponse {
         private String streetAddress;
         private String city;
         private String state;
+        private String zipcode;
         private boolean open24_7;
         private List<BusinessHoursResponse> businessHours;
     }

@@ -1,0 +1,22 @@
+# Test profile (AGF-S1-03). Dummy values only: no real credentials, no network access.
+spring:
+  datasource:
+    # Used only with AGAFARI_TEST_EXTERNAL_DB=true; otherwise Testcontainers supplies the connection
+    url: ${AGAFARI_TEST_DB_URL:jdbc:postgresql://localhost:5432/agafari_test}
+    username: ${AGAFARI_TEST_DB_USERNAME:postgres}
+    password: ${AGAFARI_TEST_DB_PASSWORD:postgres}
+  jpa:
+    hibernate:
+      # Until AGF-S1-08B: then the schema comes from Flyway migrations with ddl-auto=validate
+      ddl-auto: create-drop
+
+app:
+  jwt:
+    secret: test-only-jwt-secret-not-used-anywhere-else-0123456789
+
+cloudflare:
+  accessKey: test-access-key
+  secretKey: test-secret-key
+  bucket: test-bucket
+  endpoint: https://r2.test.invalid
+  publicBaseUrl: https://images.test.invalid

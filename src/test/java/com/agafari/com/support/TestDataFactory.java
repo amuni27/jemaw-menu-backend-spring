@@ -1,0 +1,165 @@
+package com.agafari.com.support;
+
+import com.agafari.com.enums.MenuItemStatus;
+import com.agafari.com.enums.MenuVisibility;
+import com.agafari.com.enums.UserRole;
+import com.agafari.com.enums.UserStatus;
+import com.agafari.com.jpa.entity.Business;
+import com.agafari.com.jpa.entity.Category;
+import com.agafari.com.jpa.entity.Menu;
+import com.agafari.com.jpa.entity.MenuItem;
+import com.agafari.com.jpa.entity.MenuType;
+import com.agafari.com.jpa.entity.User;
+import com.agafari.com.jpa.repository.BusinessRepository;
+import com.agafari.com.jpa.repository.CategoryRepository;
+import com.agafari.com.jpa.repository.MenuItemRepository;
+import com.agafari.com.jpa.repository.MenuRepository;
+import com.agafari.com.jpa.repository.MenuTypeRepository;
+import com.agafari.com.jpa.repository.UserRepository;
+import com.agafari.com.service.JwtService;
+import org.springframework.boot.test.context.TestComponent;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Builds tenant data for integration tests. Example — two isolated tenants:
+ * <pre>
+ * var a = data.tenant("alpha");
+ * var b = data.tenant("bravo");
+ * data.item(data.category(data.menu(a, "Lunch"), "Mains"), "Burger");
+ * data.item(data.category(data.menu(b, "Lunch"), "Mains"), "Pasta");
+ * mockMvc.perform(get("/api/menus").header("Authorization", data.bearer(a)));
+ * </pre>
+ */
+@TestComponent
+public class TestDataFactory {
+
+    public static final String PASSWORD = "Test-Passw0rd!";
+
+    public record Tenant(User owner, Business business) {
+        public String businessId() {
+            return business.getId();
+        }
+    }
+
+    private final UserRepository users;
+    private final BusinessRepository businesses;
+    private final MenuTypeRepository menuTypes;
+    private final MenuRepository menus;
+    private final CategoryRepository categories;
+    private final MenuItemRepository items;
+    private final PasswordEncoder passwordEncoder;
+    private final JwtService jwtService;
+    private final JdbcTemplate jdbc;
+
+    public TestDataFactory(UserRepository users, BusinessRepository businesses, MenuTypeRepository menuTypes,
+                           MenuRepository menus, CategoryRepository categories, MenuItemRepository items,
+                           PasswordEncoder passwordEncoder, JwtService jwtService, JdbcTemplate jdbc) {
+        this.users = users;
+        this.businesses = businesses;
+        this.menuTypes = menuTypes;
+        this.menus = menus;
+        this.categories = categories;
+        this.items = items;
+        this.passwordEncoder = passwordEncoder;
+        this.jwtService = jwtService;
+        this.jdbc = jdbc;
+    }
+
+    /** Active VENUE owner with one business. Login password: {@link #PASSWORD}. */
+    public Tenant tenant(String label) {
+        User owner = new User();
+        owner.setId(UUID.randomUUID().toString());
+        owner.setFullName(label + " Owner");
+        owner.setEmail(label + "@test.agafari.local");
+        owner.setPasswordHash(passwordEncoder.encode(PASSWORD));
+        owner.setRole(UserRole.VENUE);
+        owner.setStatus(UserStatus.ACTIVE);
+        users.save(owner);
+
+        Business business = new Business();
+        business.setId(UUID.randomUUID().toString());
+        business.setOwner(owner);
+        business.setName(label + " Restaurant");
+        business.setBusinessPhone("+251911000000");
+        business.setStreetAddress("1 Test Street");
+        business.setCity("Addis Ababa");
+        business.setState("Addis Ababa");
+        business.setZipcode("");
+        business.setCustomSubdomain(label + ".test.agafari.local");
+        businesses.save(business);
+        return new Tenant(owner, business);
+    }
+
+    /** Authorization header value for the tenant's owner. */
+    public String bearer(Tenant tenant) {
+        User owner = tenant.owner();
+        return "Bearer " + jwtService.signToken(owner.getEmail(), owner.getId(), tenant.businessId(), owner.getRole().name());
+    }
+
+    public MenuType menuType(String name) {
+        return menuTypes.findAll().stream()
+                .filter(t -> t.getName().equals(name))
+                .findFirst()
+                .orElseGet(() -> {
+                    MenuType type = new MenuType();
+                    type.setId(UUID.randomUUID().toString());
+                    type.setName(name);
+                    return menuTypes.save(type);
+                });
+    }
+
+    /** Active, PUBLIC menu. */
+    public Menu menu(Tenant tenant, String name) {
+        return menu(tenant, name, true, MenuVisibility.PUBLIC);
+    }
+
+    public Menu menu(Tenant tenant, String name, boolean active, MenuVisibility visibility) {
+        Menu menu = new Menu();
+        menu.setId(UUID.randomUUID().toString());
+        menu.setBusiness(tenant.business());
+        menu.setMenuType(menuType("Lunch"));
+        menu.setName(name);
+        menu.setActive(active);
+        menu.setVisibility(visibility);
+        return menus.save(menu);
+    }
+
+    /** Active category. */
+    public Category category(Menu menu, String name) {
+        return category(menu, name, true);
+    }
+
+    public Category category(Menu menu, String name, boolean active) {
+        Category category = new Category();
+        category.setMenu(menu);
+        category.setName(name);
+        category.setActive(active);
+        return categories.save(category);
+    }
+
+    /** AVAILABLE item priced 10.00 with one ingredient. */
+    public MenuItem item(Category category, String name) {
+        return item(category, name, MenuItemStatus.AVAILABLE);
+    }
+
+    public MenuItem item(Category category, String name, MenuItemStatus status) {
+        MenuItem item = new MenuItem();
+        item.setMenu(category.getMenu());
+        item.setCategory(category);
+        item.setName(name);
+        item.setPrice(new BigDecimal("10.00"));
+        item.setIngredients(List.of("ingredient"));
+        item.setStatus(status);
+        return items.save(item);
+    }
+
+    /** Removes all rows so every test starts from an empty database. */
+    public void deleteAll() {
+        jdbc.execute("TRUNCATE TABLE menu_item, category, menu, menu_type, business_hours, business, users CASCADE");
+    }
+}

@@ -43,3 +43,17 @@ Environment variables override values from the local file.
 ## Frontend note
 
 The frontend (`JemawMenus`) has no secrets. Every variable prefixed with `VITE_` is compiled into the public JavaScript bundle and must never contain a credential.
+
+## Secret scanning (AGF-S1-02)
+
+- CI runs [gitleaks](https://github.com/gitleaks/gitleaks) 8.30.1 over the **full Git history** on every push and pull request (`secret-scan` job). Any new finding fails the build; output is redacted.
+- `.gitleaks.toml` extends the default rules. Its allowlist covers only explicit placeholders (`change-me-…`, `test-only-…`, `${ENV_VAR}`).
+- `.gitleaksignore` lists the **known historical** R2 credential findings by fingerprint only. They are ignored so CI can block new leaks, but they remain exposed until rotated. Don't add entries without security review.
+- Optional local pre-commit check (requires a local gitleaks install):
+
+  ```bash
+  printf '#!/bin/sh\nexec gitleaks git --pre-commit --staged --redact --no-banner\n' > .git/hooks/pre-commit
+  chmod +x .git/hooks/pre-commit
+  ```
+
+If a scan fails: don't push. Remove the secret from the commit (amend or rewrite the unpushed commits) and treat the credential as compromised. If it was already pushed, rotate it immediately.

@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -49,16 +50,11 @@ public interface MenuItemRepository extends JpaRepository<MenuItem, String> {
     """)
     int maxSortOrder(@Param("menuId") String menuId, @Param("categoryId") String categoryId);
 
+    // public menu: items in the given menus/categories whose status is guest-visible
     @EntityGraph(attributePaths = {"menu", "category"})
-    List<MenuItem> findByMenu_IdInAndCategory_IdInAndStatusOrderBySortOrderAscCreatedAtAsc(
+    List<MenuItem> findByMenu_IdInAndCategory_IdInAndStatusInOrderBySortOrderAscCreatedAtAsc(
             List<String> menuIds,
             List<String> categoryIds,
-            MenuItemStatus status
+            Collection<MenuItemStatus> statuses
     );
-
-    default List<MenuItem> findAvailableByMenuIdsAndCategoryIds(List<String> menuIds, List<String> categoryIds) {
-        return findByMenu_IdInAndCategory_IdInAndStatusOrderBySortOrderAscCreatedAtAsc(
-                menuIds, categoryIds, MenuItemStatus.AVAILABLE
-        );
-    }
 }

@@ -6,6 +6,7 @@ import com.agafari.com.exception.NotFoundException;
 import com.agafari.com.jpa.entity.*;
 import com.agafari.com.jpa.repository.*;
 import com.agafari.com.service.PublicMenuService;
+import com.agafari.com.service.PublicVisibilityPolicy;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,8 +42,9 @@ public class PublicMenuServiceImpl implements PublicMenuService {
 
         BusinessPublicResponse businessDto = toBusinessDto(business);
 
-        // 2) menus (active) + menuType
-        List<Menu> menusRaw = menuRepo.findActiveMenusWithMenuType(businessId);
+        // 2) menus (active + PUBLIC) + menuType
+        List<Menu> menusRaw = menuRepo.findByBusiness_IdAndIsActiveTrueAndVisibility(
+                businessId, PublicVisibilityPolicy.PUBLIC_MENU_VISIBILITY);
         if (menusRaw.isEmpty()) {
             return new PublicBusinessMenuResponse(businessDto, List.of());
         }
@@ -60,8 +62,9 @@ public class PublicMenuServiceImpl implements PublicMenuService {
 
         List<String> categoryIds = categories.stream().map(Category::getId).toList();
 
-        // 4) items AVAILABLE only
-        List<MenuItem> items = menuItemRepo.findAvailableByMenuIdsAndCategoryIds(menuIds, categoryIds);
+        // 4) items with a guest-visible status (AVAILABLE, OUT_OF_STOCK)
+        List<MenuItem> items = menuItemRepo.findByMenu_IdInAndCategory_IdInAndStatusInOrderBySortOrderAscCreatedAtAsc(
+                menuIds, categoryIds, PublicVisibilityPolicy.PUBLIC_ITEM_STATUSES);
 
         // itemsByCategoryId
         Map<String, List<MenuItem>> itemsByCategoryId =

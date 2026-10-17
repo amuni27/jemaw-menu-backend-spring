@@ -31,3 +31,11 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Local configuration and secrets (AGF-S1-01) ###
+application-local.yml
+.env
+.env.*
+!.env.example
+*.pem
+*.key

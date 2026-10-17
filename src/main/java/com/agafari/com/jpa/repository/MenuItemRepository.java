@@ -1,6 +1,7 @@
 package com.agafari.com.jpa.repository;
 
 import com.agafari.com.enums.MenuItemStatus;
+import com.agafari.com.enums.MenuVisibility;
 import com.agafari.com.jpa.entity.MenuItem;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -49,6 +50,25 @@ public interface MenuItemRepository extends JpaRepository<MenuItem, String> {
         where i.menu.id = :menuId and i.category.id = :categoryId
     """)
     int maxSortOrder(@Param("menuId") String menuId, @Param("categoryId") String categoryId);
+
+    // public item detail: one query applying the full guest visibility rule (businessId null = any business)
+    @Query("""
+        select i from MenuItem i
+        join fetch i.menu m
+        join fetch i.category c
+        where i.id = :itemId
+          and (:businessId is null or m.business.id = :businessId)
+          and m.isActive = true
+          and m.visibility = :visibility
+          and c.isActive = true
+          and i.status in :statuses
+    """)
+    Optional<MenuItem> findPubliclyVisibleItem(
+            @Param("itemId") String itemId,
+            @Param("businessId") String businessId,
+            @Param("visibility") MenuVisibility visibility,
+            @Param("statuses") Collection<MenuItemStatus> statuses
+    );
 
     // public menu: items in the given menus/categories whose status is guest-visible
     @EntityGraph(attributePaths = {"menu", "category"})

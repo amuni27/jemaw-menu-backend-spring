@@ -20,5 +20,4 @@ public interface MenuItemService {
     MenuItemResponse update(String itemId, MenuItemUpdateRequest req);
     MenuItemResponse updateStatus(String itemId, MenuItemStatusUpdateRequest req);
     void delete(String itemId);
-    MenuItemResponse getById(String itemId);
 }

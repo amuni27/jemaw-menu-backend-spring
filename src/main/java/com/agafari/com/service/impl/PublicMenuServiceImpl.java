@@ -117,6 +117,30 @@ public class PublicMenuServiceImpl implements PublicMenuService {
         return new PublicBusinessMenuResponse(businessDto, menusNested);
     }
 
+    // ---------------- public item detail ----------------
+
+    @Override
+    @Transactional(readOnly = true)
+    public MenuItemPublicResponse getPublicItem(String businessId, String itemId) {
+        return findPublicItem(businessId, itemId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public MenuItemPublicResponse getPublicItem(String itemId) {
+        return findPublicItem(null, itemId);
+    }
+
+    // Same rule as the public menu. Hidden and non-existent items share one 404 so existence is not revealed.
+    private MenuItemPublicResponse findPublicItem(String businessId, String itemId) {
+        return menuItemRepo.findPubliclyVisibleItem(
+                        itemId, businessId,
+                        PublicVisibilityPolicy.PUBLIC_MENU_VISIBILITY,
+                        PublicVisibilityPolicy.PUBLIC_ITEM_STATUSES)
+                .map(this::toItemDto)
+                .orElseThrow(() -> new NotFoundException("Item not found"));
+    }
+
     // ---------------- sorting logic (same as Node) ----------------
 
     private List<Menu> sortMenusByClosestMenuTypeTimeOfDay(List<Menu> menusRaw) {

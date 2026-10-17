@@ -219,14 +219,6 @@ public class MenuItemServiceImpl implements MenuItemService {
         return toResponsePublicUrl(item);
     }
 
-    @Override
-    @Transactional(readOnly = true)
-    public MenuItemResponse getById(String itemId) {
-        MenuItem item = itemRepo.findById(itemId)
-                .orElseThrow(() -> new NotFoundException("Item not found"));
-        return toResponsePublicUrl(item);
-    }
-
     // ---------------- UPDATE ----------------
 
     @Override

@@ -62,4 +62,4 @@ Until AGF-S1-08B, tests build the schema with Hibernate `ddl-auto=create-drop`. 
 
 ## CI
 
-`.github/workflows/ci.yml` runs `sh ./mvnw -B verify` on JDK 21 for every pull request and every push to `main`. Test reports are uploaded when the build fails. The Dockerfile still builds with `-DskipTests`, because tests run in CI rather than in the image build.
+`.github/workflows/ci.yml` runs `sh ./mvnw -B verify` on JDK 21 for every pull request, every push to `main` or any `feature/**` branch, and on manual dispatch. Test reports are uploaded when the build fails. The Dockerfile still builds with `-DskipTests`, because tests run in CI rather than in the image build.

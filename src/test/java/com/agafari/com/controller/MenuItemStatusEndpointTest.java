@@ -80,10 +80,7 @@ class MenuItemStatusEndpointTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.status").value("AVAILABLE"));
     }
 
-    /**
-     * Characterization of current behavior: PATCH is not mapped and the catch-all handler
-     * turns it into 500. AGF-S1-10 changes this to 405; update this test then.
-     */
+    /** PATCH is not mapped on the status endpoint: 405 Method Not Allowed (AGF-S1-10; completes S1-12 AC7). */
     @Test
     void patchIsNotSupportedOnStatusEndpoint() throws Exception {
         var owner = data.tenant("alpha");
@@ -93,6 +90,6 @@ class MenuItemStatusEndpointTest extends AbstractIntegrationTest {
                         .header("Authorization", data.bearer(owner))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"status\":\"UNAVAILABLE\"}"))
-                .andExpect(status().isInternalServerError());
+                .andExpect(status().isMethodNotAllowed());
     }
 }

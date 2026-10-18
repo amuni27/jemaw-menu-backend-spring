@@ -58,7 +58,7 @@ public class MenuController {
      */
     @PatchMapping("/{menuId}")
     public ResponseEntity<MenuResponse> patch(@PathVariable String menuId,
-                                              @RequestBody MenuUpdateRequest request) {
+                                              @Valid @RequestBody MenuUpdateRequest request) {
         return ResponseEntity.ok(menuService.patchMenu(menuId, request));
     }
 

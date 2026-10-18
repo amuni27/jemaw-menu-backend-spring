@@ -71,7 +71,7 @@ public class MenuItemController {
     @PatchMapping("/items/{itemId}")
     public ResponseEntity<MenuItemResponse> update(
             @PathVariable String itemId,
-            @RequestBody MenuItemUpdateRequest request
+            @Valid @RequestBody MenuItemUpdateRequest request
     ) {
         return ResponseEntity.ok(menuItemService.update(itemId, request));
     }

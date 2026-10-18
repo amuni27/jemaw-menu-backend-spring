@@ -13,6 +13,7 @@ import java.util.List;
 public class MenuItemCreateRequest {
 
     @NotBlank
+    @Size(max = 255)
     private String name;
 
     @NotNull

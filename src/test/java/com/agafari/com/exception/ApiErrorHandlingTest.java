@@ -182,6 +182,10 @@ class ApiErrorHandlingTest extends AbstractIntegrationTest {
         assertThat(m.find()).isTrue();
         String traceId = m.group(1);
         assertThat(output.getAll()).contains(traceId).contains("java.lang.IllegalStateException");
+        // AGF-S1-16: the entry also identifies the endpoint and the caller
+        assertThat(output.getAll()).contains("path=/api/items/" + item.getId() + "/image/presign")
+                .contains("userId=" + owner.owner().getId())
+                .contains("businessId=" + owner.businessId());
     }
 
     @Test

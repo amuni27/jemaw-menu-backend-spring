@@ -1,5 +1,6 @@
 package com.agafari.com.exception;
 
+import com.agafari.com.security.AppUserDetails;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -7,6 +8,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.ErrorResponse;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
@@ -119,8 +122,17 @@ public class ApiExceptionHandler {
             return client(status, known != null ? known.getReasonPhrase() : "Request error");
         }
         String traceId = UUID.randomUUID().toString();
-        log.error("event=api.unexpected_error traceId={} method={} path={}", traceId, request.getMethod(), request.getRequestURI(), e);
+        // AGF-S1-16: traceId, endpoint and caller (ids only, never the email) for troubleshooting
+        AppUserDetails caller = currentCaller();
+        log.error("event=api.unexpected_error traceId={} method={} path={} userId={} businessId={}", traceId,
+                request.getMethod(), request.getRequestURI(),
+                caller != null ? caller.getId() : "-", caller != null ? caller.getBusinessId() : "-", e);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiError.unexpected(traceId));
+    }
+
+    private static AppUserDetails currentCaller() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return (auth != null && auth.getPrincipal() instanceof AppUserDetails user) ? user : null;
     }
 
     private ResponseEntity<ApiError> domain(HttpStatus status, RuntimeException e) {

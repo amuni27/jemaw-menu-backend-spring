@@ -37,7 +37,6 @@ public class MenuController {
      */
     @PostMapping
     public ResponseEntity<MenuResponse> create(@Valid @RequestBody MenuCreateRequest request) {
-        log.info("Create menu: {}", request);
         MenuResponse created = menuService.createMenu(request);
         return ResponseEntity.status(201).body(created);
     }

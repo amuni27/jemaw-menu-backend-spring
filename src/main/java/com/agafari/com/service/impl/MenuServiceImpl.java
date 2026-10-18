@@ -55,8 +55,8 @@ public class MenuServiceImpl implements MenuService {
     @Transactional
     @Override
     public MenuResponse createMenu(MenuCreateRequest request) {
-        log.info("Menu create starting for {}", request);
         String businessId = currentUser.businessId();
+        log.info("event=menu.create.start businessId={} menuTypeId={}", businessId, request.getMenuTypeId());
 
         Business business = businessRepo.findById(businessId)
                 .orElseThrow(() -> new NotFoundException("Business not found. Cannot create menu."));

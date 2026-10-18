@@ -11,13 +11,22 @@ spring:
     hibernate:
       ddl-auto: update
     database-platform: org.hibernate.dialect.PostgreSQLDialect
-    show-sql: true
+    # AGF-S1-16: never log SQL in production
+    show-sql: false
     properties:
       hibernate:
-        format_sql: true
+        format_sql: false
 
 
 
+# AGF-S1-16 / PO-3: no API documentation in production (development keeps Swagger)
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+# Only health and info are exposed; info carries no custom properties
 management:
   endpoints:
     web:

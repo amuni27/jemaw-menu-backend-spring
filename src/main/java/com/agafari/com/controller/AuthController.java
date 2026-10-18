@@ -36,7 +36,6 @@ public class AuthController {
 
     @GetMapping("/me")
     public ResponseEntity<AuthTokenResponse> me(@AuthenticationPrincipal UserDetails principal) {
-        log.info("Get current user: {}", principal.getUsername());
         return ResponseEntity.ok(authService.me(principal.getUsername()));
     }
 

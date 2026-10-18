@@ -163,7 +163,7 @@ class TenantIsolationTest extends AbstractIntegrationTest {
         TENANT_RESOURCE_ENDPOINTS.put("PUT /api/items/{itemId}/status",
                 x -> json(put("/api/items/{id}/status", x.bItem().getId()), "{\"status\":\"UNAVAILABLE\"}"));
         TENANT_RESOURCE_ENDPOINTS.put("GET /api/items/{itemId}/image/presign",
-                x -> get("/api/items/{id}/image/presign", x.bItem().getId()));
+                x -> get("/api/items/{id}/image/presign", x.bItem().getId()).param("contentType", "image/png"));
         TENANT_RESOURCE_ENDPOINTS.put("POST /api/items/{itemId}/image/confirm",
                 x -> json(post("/api/items/{id}/image/confirm", x.bItem().getId()), "{\"objectKey\":\"menu-items/x.jpg\"}"));
     }

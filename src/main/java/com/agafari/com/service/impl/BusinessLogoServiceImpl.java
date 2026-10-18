@@ -9,12 +9,15 @@ import com.agafari.com.exception.NotFoundException;
 import com.agafari.com.jpa.repository.BusinessRepository;
 import com.agafari.com.security.CurrentUser;
 import com.agafari.com.service.BusinessLogoService;
+import com.agafari.com.service.ImagePolicy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
@@ -41,16 +44,11 @@ public class BusinessLogoServiceImpl implements BusinessLogoService {
     public PresignLogoResponse presignLogo(String businessId, PresignLogoRequest req) {
         currentUser.requireOwnBusiness(businessId);
 
-        var business = businessRepo.findById(businessId)
+        businessRepo.findById(businessId)
                 .orElseThrow(() -> new NotFoundException("Business not found"));
 
-        String ext = guessExt(req.getFileName(), req.getContentType());
-        String objectKey = "business-logo-asset/" + businessId + "/main" + ext;
-
-        // store ONLY key
-        business.setLogoKey(objectKey); // create this column (logoKey) OR reuse imageUrl
-        businessRepo.save(business);
-
+        // AGF-S1-17: allowed image types only; key from the type (file name ignored); saved at confirm
+        String objectKey = ImagePolicy.objectKey(logoPrefix(businessId), req.getContentType());
         String uploadUrl = presignPut(objectKey, req.getContentType());
 
         return PresignLogoResponse.builder()
@@ -61,29 +59,42 @@ public class BusinessLogoServiceImpl implements BusinessLogoService {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    // Keep a cleared reference even though the request then fails with 400 (AGF-S1-17)
+    @Transactional(noRollbackFor = BadRequestException.class)
     public BusinessResponse confirmLogo(String businessId, ConfirmImageUploadRequest req) {
         currentUser.requireOwnBusiness(businessId);
 
         var business = businessRepo.findById(businessId)
                 .orElseThrow(() -> new NotFoundException("Business not found"));
 
-        String key = business.getLogoKey();
-        if (key == null) throw new BadRequestException("Business has no logo key");
+        String key = req.getObjectKey() == null ? null : req.getObjectKey().trim();
+        String ext = ImagePolicy.extensionOfKey(key, logoPrefix(businessId));
+        if (ext == null) throw new BadRequestException("objectKey does not match this business's logo upload");
 
-        if (!key.equals(req.getObjectKey())) {
-            throw new BadRequestException("objectKey does not match stored logo key");
-        }
-
-        // confirm exists in R2
+        HeadObjectResponse head;
         try {
-            s3Client.headObject(HeadObjectRequest.builder()
-                    .bucket(bucket)
-                    .key(key)
-                    .build());
+            head = s3Client.headObject(HeadObjectRequest.builder().bucket(bucket).key(key).build());
         } catch (Exception e) {
             throw new BadRequestException("Logo not found in storage (upload not completed)");
         }
+
+        // AGF-S1-17: invalid uploads are deleted and never referenced
+        String problem = ImagePolicy.problemWith(head, ext);
+        if (problem != null) {
+            try {
+                s3Client.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key).build());
+            } catch (Exception ignored) {
+                // object stays orphaned under the business prefix; it is never referenced
+            }
+            if (key.equals(business.getLogoKey())) {
+                business.setLogoKey(null);
+                businessRepo.save(business);
+            }
+            throw new BadRequestException(problem);
+        }
+
+        business.setLogoKey(key);
+        businessRepo.save(business);
 
         // return business with public URL
         String publicUrl = publicBaseUrl.replaceAll("/$", "") + "/" + key.replaceAll("^/", "");
@@ -94,8 +105,8 @@ public class BusinessLogoServiceImpl implements BusinessLogoService {
         PutObjectRequest put = PutObjectRequest.builder()
                 .bucket(bucket)
                 .key(objectKey)
-                // Optional: enforce content type
-                .contentType(contentType)
+                // Signed: R2 rejects an upload whose Content-Type differs (AGF-S1-17)
+                .contentType(ImagePolicy.normalize(contentType))
                 .build();
 
         PutObjectPresignRequest presignReq = PutObjectPresignRequest.builder()
@@ -106,11 +117,8 @@ public class BusinessLogoServiceImpl implements BusinessLogoService {
         return r2Presigner.presignPutObject(presignReq).url().toString();
     }
 
-    private String guessExt(String fileName, String contentType) {
-        if (fileName != null && fileName.contains(".")) return fileName.substring(fileName.lastIndexOf("."));
-        if ("image/png".equalsIgnoreCase(contentType)) return ".png";
-        if ("image/webp".equalsIgnoreCase(contentType)) return ".webp";
-        return ".jpg";
+    private static String logoPrefix(String businessId) {
+        return "business-logo-asset/" + businessId;
     }
 }
 

@@ -13,7 +13,7 @@ import java.util.List;
 public interface MenuItemService {
     CreateMenuItemWithUploadResponse createWithImageUpload(String menuId, MenuItemCreateRequest req);
     MenuItemResponse confirmImageUpload(String itemId, ConfirmImageUploadRequest req);
-    CreateMenuItemWithUploadResponse presignImageUpload(String itemId);
+    CreateMenuItemWithUploadResponse presignImageUpload(String itemId, String contentType);
     List<MenuItemResponse> list(String menuId, String categoryId, MenuItemStatus status, String search);
 //    MenuItemResponse create(String menuId, MenuItemCreateRequest req);
     MenuItemResponse get(String itemId);

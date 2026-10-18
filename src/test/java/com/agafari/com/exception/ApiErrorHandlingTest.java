@@ -167,7 +167,7 @@ class ApiErrorHandlingTest extends AbstractIntegrationTest {
         when(s3Presigner.presignPutObject(any(PutObjectPresignRequest.class)))
                 .thenThrow(new IllegalStateException("internal detail jdbc:postgresql://db.internal:5432/prod password=hunter2"));
 
-        String body = mockMvc.perform(get("/api/items/{id}/image/presign", item.getId())
+        String body = mockMvc.perform(get("/api/items/{id}/image/presign", item.getId()).param("contentType", "image/jpeg")
                         .header("Authorization", data.bearer(owner)))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.status").value(500))
@@ -218,7 +218,7 @@ class ApiErrorHandlingTest extends AbstractIntegrationTest {
         when(s3Presigner.presignPutObject(any(PutObjectPresignRequest.class))).thenThrow(new RuntimeException("boom"));
 
         List<MvcResult> results = new ArrayList<>();
-        results.add(mockMvc.perform(get("/api/items/{id}/image/presign", item.getId()).header("Authorization", data.bearer(owner))).andReturn());
+        results.add(mockMvc.perform(get("/api/items/{id}/image/presign", item.getId()).param("contentType", "image/jpeg").header("Authorization", data.bearer(owner))).andReturn());
         results.add(mockMvc.perform(patch("/api/items/{id}/status", item.getId()).header("Authorization", data.bearer(owner))
                 .contentType(MediaType.APPLICATION_JSON).content("{}")).andReturn());
         results.add(mockMvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON).content("{bad")).andReturn());

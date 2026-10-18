@@ -58,9 +58,10 @@ public class MenuItemController {
      */
     @GetMapping("/items/{itemId}/image/presign")
     public ResponseEntity<CreateMenuItemWithUploadResponse> presignImageUpload(
-            @PathVariable String itemId
+            @PathVariable String itemId,
+            @RequestParam String contentType // AGF-S1-17: JPEG, PNG or WebP; signed into the upload URL
     ) {
-        return ResponseEntity.ok(menuItemService.presignImageUpload(itemId));
+        return ResponseEntity.ok(menuItemService.presignImageUpload(itemId, contentType));
     }
 
     @GetMapping("/items/{itemId}")

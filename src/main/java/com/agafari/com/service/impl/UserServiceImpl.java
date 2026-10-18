@@ -9,6 +9,7 @@ import com.agafari.com.jpa.entity.User;
 import com.agafari.com.jpa.repository.UserRepository;
 import com.agafari.com.security.CurrentUser;
 import com.agafari.com.service.JwtService;
+import com.agafari.com.validation.StrongPasswordValidator;
 import com.agafari.com.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,7 +47,8 @@ public class UserServiceImpl implements UserService {
                 if (request.getCurrentPassword() == null || request.getCurrentPassword().isBlank()) {
                     throw new BadRequestException("Current password is required to change email");
                 }
-                if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
+                if (StrongPasswordValidator.exceedsBcryptLimit(request.getCurrentPassword())
+                        || !passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
                     log.warn("event=user.email_change.wrong_password userId={}", userId);
                     throw new BadRequestException("Current password is incorrect");
                 }

@@ -11,6 +11,7 @@ import com.agafari.com.enums.DayOfWeekEnum;
 import com.agafari.com.enums.UserRole;
 import com.agafari.com.enums.UserStatus;
 import com.agafari.com.exception.AccountInactiveException;
+import com.agafari.com.validation.StrongPasswordValidator;
 import com.agafari.com.exception.BadRequestException;
 import com.agafari.com.exception.ConflictException;
 import com.agafari.com.exception.ForbiddenException;
@@ -179,7 +180,8 @@ public class AuthService {
                     return new BadRequestException("Invalid credentials");
                 });
 
-        if (!passwordEncoder.matches(req.getPassword(), user.getPasswordHash())) {
+        if (StrongPasswordValidator.exceedsBcryptLimit(req.getPassword())
+                || !passwordEncoder.matches(req.getPassword(), user.getPasswordHash())) {
             log.warn("event=auth.login.invalid_password email={} userId={}", LogMasking.maskEmail(email), user.getId());
             throw new BadRequestException("Invalid credentials");
         }
@@ -286,7 +288,8 @@ public class AuthService {
         User user = userRepo.findByEmail(email)
                 .orElseThrow(() -> new NotFoundException("User not found"));
 
-        if (!passwordEncoder.matches(req.getCurrentPassword(), user.getPasswordHash())) {
+        if (StrongPasswordValidator.exceedsBcryptLimit(req.getCurrentPassword())
+                || !passwordEncoder.matches(req.getCurrentPassword(), user.getPasswordHash())) {
             log.warn("event=auth.change_password.wrong_current email={} userId={}", LogMasking.maskEmail(email), user.getId());
             throw new BadRequestException("Current password is incorrect");
         }

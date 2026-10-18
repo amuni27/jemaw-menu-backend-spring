@@ -57,6 +57,13 @@ public class ApiExceptionHandler {
                 .body(ApiError.of(HttpStatus.FORBIDDEN, AccountInactiveException.CODE, e.getMessage()));
     }
 
+    @ExceptionHandler(RateLimitedException.class)
+    public ResponseEntity<ApiError> rateLimited(RateLimitedException e) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.getRetryAfterSeconds()))
+                .body(ApiError.of(HttpStatus.TOO_MANY_REQUESTS, RateLimitedException.CODE, e.getMessage()));
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> conf(ConflictException e) {
         return domain(HttpStatus.CONFLICT, e);

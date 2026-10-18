@@ -1,5 +1,6 @@
 package com.agafari.com.support;
 
+import com.agafari.com.security.AuthRateLimiter;
 import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -34,8 +35,12 @@ public abstract class AbstractIntegrationTest {
     @MockitoBean
     protected S3Presigner s3Presigner;
 
+    @Autowired
+    private AuthRateLimiter rateLimiter;
+
     @AfterEach
     void cleanDatabase() {
         data.deleteAll();
+        rateLimiter.reset(); // AGF-S1-19: in-memory counters are shared by the cached context
     }
 }

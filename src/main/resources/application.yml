@@ -35,6 +35,22 @@ app:
     secret: ${APP_JWT_SECRET}
     expiresMinutes: 120
   baseDomain: ${APP_BASE_DOMAIN:agafarimenu.com}
+  # AGF-S1-19: authentication rate limits (in memory, per application instance)
+  rate-limit:
+    enabled: ${APP_RATE_LIMIT_ENABLED:true}
+    login-per-email:            # failed logins for one email
+      limit: 5
+      window: 15m
+    login-per-ip:               # failed logins from one client IP (any email)
+      limit: 20
+      window: 15m
+    register-per-ip:            # registration attempts from one client IP
+      limit: 10
+      window: 1h
+    change-password-per-ip:     # change-password attempts from one client IP
+      limit: 10
+      window: 15m
+    max-tracked-keys: 100000    # memory bound for the counters
 
 
 # All Cloudflare R2 values are supplied at runtime. No defaults: startup fails if any is missing.

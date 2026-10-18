@@ -11,4 +11,7 @@ public class MenuUpdateRequest {
     private String description;
     private Boolean isActive;
     private MenuVisibility visibility;
+
+    /** Optional: change the menu type (AGF-S1-14); must reference an existing type. */
+    private String menuTypeId;
 }

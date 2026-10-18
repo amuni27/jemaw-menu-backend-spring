@@ -71,7 +71,7 @@ public class MenuServiceImpl implements MenuService {
         menu.setMenuType(menuType);
 
         menu.setName(request.getName());
-        menu.setDescription(request.getDescription());
+        menu.setDescription(blankToNull(request.getDescription()));
 
         menu.setVisibility(request.getVisibility() == null ? MenuVisibility.PUBLIC : request.getVisibility());
         // isActive default true in entity
@@ -100,11 +100,16 @@ public class MenuServiceImpl implements MenuService {
 
         if (request.getName() != null) menu.setName(request.getName());
 
-        // If you want "nullable" behavior like Node (zod nullable), this is OK:
-        // - send description: null => clears description
-        // - omit description => unchanged
-        if (request.getDescription() != null || (request.getDescription() == null && requestWasProvidedDescription(request))) {
-            menu.setDescription(request.getDescription());
+        // AGF-S1-14: omitted (or null) description = unchanged; "" (or blank) clears it
+        if (request.getDescription() != null) {
+            menu.setDescription(blankToNull(request.getDescription()));
+        }
+
+        // AGF-S1-14: the menu type can be changed; it must exist (types are global, not tenant-owned)
+        if (request.getMenuTypeId() != null) {
+            MenuType menuType = menuTypeRepo.findById(request.getMenuTypeId())
+                    .orElseThrow(() -> new BadRequestException("Invalid menu type"));
+            menu.setMenuType(menuType);
         }
 
         if (request.getIsActive() != null) menu.setActive(request.getIsActive());
@@ -171,8 +176,7 @@ public class MenuServiceImpl implements MenuService {
      * If you don't need "clear description" feature, delete this logic and only:
      * if (request.getDescription() != null) menu.setDescription(request.getDescription());
      */
-    private boolean requestWasProvidedDescription(MenuUpdateRequest request) {
-        // simplest default: return false => we only update description when non-null
-        return false;
+    private static String blankToNull(String value) {
+        return (value == null || value.isBlank()) ? null : value;
     }
 }

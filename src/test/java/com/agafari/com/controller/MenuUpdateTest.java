@@ -108,7 +108,7 @@ class MenuUpdateTest extends AbstractIntegrationTest {
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.description").value(nullValue()))
                     .andExpect(jsonPath("$.visibility").value("PUBLIC"))
-                    .andExpect(jsonPath("$.active").value(true));
+                    .andExpect(jsonPath("$.active").value(false)); // AGF-S1-15 / PO-2: new menus start unpublished
         }
     }
 }

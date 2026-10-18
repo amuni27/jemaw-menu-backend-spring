@@ -74,7 +74,9 @@ public class MenuServiceImpl implements MenuService {
         menu.setDescription(blankToNull(request.getDescription()));
 
         menu.setVisibility(request.getVisibility() == null ? MenuVisibility.PUBLIC : request.getVisibility());
-        // isActive default true in entity
+        // AGF-S1-15 / PO-2: new menus start unpublished unless the client explicitly publishes them.
+        // Existing rows are not touched.
+        menu.setActive(Boolean.TRUE.equals(request.getIsActive()));
 
         return toResponse(menuRepo.save(menu));
     }

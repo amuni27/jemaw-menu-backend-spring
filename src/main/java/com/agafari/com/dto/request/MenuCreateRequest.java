@@ -19,5 +19,8 @@ public class MenuCreateRequest {
     private String description;
 
     private MenuVisibility visibility = MenuVisibility.PUBLIC;
+
+    /** Optional published state; omitted = unpublished (AGF-S1-15, PO-2). */
+    private Boolean isActive;
 }
 

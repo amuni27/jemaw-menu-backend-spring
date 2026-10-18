@@ -1,15 +1,18 @@
 package com.agafari.com.support;
 
+import com.agafari.com.enums.DayOfWeekEnum;
 import com.agafari.com.enums.MenuItemStatus;
 import com.agafari.com.enums.MenuVisibility;
 import com.agafari.com.enums.UserRole;
 import com.agafari.com.enums.UserStatus;
 import com.agafari.com.jpa.entity.Business;
+import com.agafari.com.jpa.entity.BusinessHours;
 import com.agafari.com.jpa.entity.Category;
 import com.agafari.com.jpa.entity.Menu;
 import com.agafari.com.jpa.entity.MenuItem;
 import com.agafari.com.jpa.entity.MenuType;
 import com.agafari.com.jpa.entity.User;
+import com.agafari.com.jpa.repository.BusinessHoursRepository;
 import com.agafari.com.jpa.repository.BusinessRepository;
 import com.agafari.com.jpa.repository.CategoryRepository;
 import com.agafari.com.jpa.repository.MenuItemRepository;
@@ -55,10 +58,12 @@ public class TestDataFactory {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final JdbcTemplate jdbc;
+    private final BusinessHoursRepository businessHours;
 
     public TestDataFactory(UserRepository users, BusinessRepository businesses, MenuTypeRepository menuTypes,
                            MenuRepository menus, CategoryRepository categories, MenuItemRepository items,
-                           PasswordEncoder passwordEncoder, JwtService jwtService, JdbcTemplate jdbc) {
+                           PasswordEncoder passwordEncoder, JwtService jwtService, JdbcTemplate jdbc,
+                           BusinessHoursRepository businessHours) {
         this.users = users;
         this.businesses = businesses;
         this.menuTypes = menuTypes;
@@ -68,16 +73,22 @@ public class TestDataFactory {
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.jdbc = jdbc;
+        this.businessHours = businessHours;
     }
 
     /** Active VENUE owner with one business. Login password: {@link #PASSWORD}. */
     public Tenant tenant(String label) {
+        return tenant(label, UserRole.VENUE);
+    }
+
+    /** Active user with the given role and one business (AGF-S1-06 role tests). */
+    public Tenant tenant(String label, UserRole role) {
         User owner = new User();
         owner.setId(UUID.randomUUID().toString());
         owner.setFullName(label + " Owner");
         owner.setEmail(label + "@test.agafari.local");
         owner.setPasswordHash(passwordEncoder.encode(PASSWORD));
-        owner.setRole(UserRole.VENUE);
+        owner.setRole(role);
         owner.setStatus(UserStatus.ACTIVE);
         users.save(owner);
 
@@ -99,6 +110,20 @@ public class TestDataFactory {
     public String bearer(Tenant tenant) {
         User owner = tenant.owner();
         return "Bearer " + jwtService.signToken(owner.getEmail(), owner.getId(), tenant.businessId(), owner.getRole().name());
+    }
+
+    /** Seven open days, 09:00-17:00. */
+    public void hours(Tenant tenant) {
+        for (DayOfWeekEnum day : DayOfWeekEnum.values()) {
+            BusinessHours row = new BusinessHours();
+            row.setId(UUID.randomUUID().toString());
+            row.setBusiness(tenant.business());
+            row.setDayOfWeek(day);
+            row.setOpen(true);
+            row.setStartTime("09:00");
+            row.setEndTime("17:00");
+            businessHours.save(row);
+        }
     }
 
     public MenuType menuType(String name) {

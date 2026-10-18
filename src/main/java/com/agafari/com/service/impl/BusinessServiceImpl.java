@@ -61,7 +61,7 @@ public class BusinessServiceImpl implements BusinessService {
     public List<BusinessHoursResponse> getBusinessHours(String businessId) {
 
         log.info("Getting business hours for businessId: {}", businessId);
-        currentUser.me();
+        currentUser.requireOwnBusiness(businessId);
 
         Business business = businessRepo.findById(businessId)
                 .orElseThrow(() -> new NotFoundException("No business hour found"));
@@ -82,10 +82,7 @@ public class BusinessServiceImpl implements BusinessService {
     public List<BusinessHoursResponse> updateBusinessHours(String businessId, UpdateBusinessHoursRequest request) {
         log.info("Updating business hours for businessId: {}", businessId);
 
-        String currentBusinessId = currentUser.businessId();
-        if (!businessId.equals(currentBusinessId)) {
-            throw new BadRequestException("Not allowed");
-        }
+        currentUser.requireOwnBusiness(businessId);
 
         Business business = businessRepo.findById(businessId)
                 .orElseThrow(() -> new NotFoundException("No business hour found"));
@@ -111,10 +108,7 @@ public class BusinessServiceImpl implements BusinessService {
     public BusinessResponse updateBusiness(String businessId, BusinessUpdateRequest request) {
         log.info("Updating business businessId: {}", businessId);
 
-        String currentBusinessId = currentUser.businessId();
-        if (!businessId.equals(currentBusinessId)) {
-            throw new BadRequestException("Not allowed");
-        }
+        currentUser.requireOwnBusiness(businessId);
 
         Business business = businessRepo.findById(businessId)
                 .orElseThrow(() -> new NotFoundException("Business not found"));

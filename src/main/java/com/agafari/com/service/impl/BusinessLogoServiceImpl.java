@@ -39,12 +39,7 @@ public class BusinessLogoServiceImpl implements BusinessLogoService {
     @Override
     @Transactional
     public PresignLogoResponse presignLogo(String businessId, PresignLogoRequest req) {
-        String currentBusinessId = currentUser.businessId();
-
-        // ✅ only allow your own business
-        if (!businessId.equals(currentBusinessId)) {
-            throw new BadRequestException("Not allowed");
-        }
+        currentUser.requireOwnBusiness(businessId);
 
         var business = businessRepo.findById(businessId)
                 .orElseThrow(() -> new NotFoundException("Business not found"));
@@ -68,10 +63,7 @@ public class BusinessLogoServiceImpl implements BusinessLogoService {
     @Override
     @Transactional(readOnly = true)
     public BusinessResponse confirmLogo(String businessId, ConfirmImageUploadRequest req) {
-        String currentBusinessId = currentUser.businessId();
-        if (!businessId.equals(currentBusinessId)) {
-            throw new BadRequestException("Not allowed");
-        }
+        currentUser.requireOwnBusiness(businessId);
 
         var business = businessRepo.findById(businessId)
                 .orElseThrow(() -> new NotFoundException("Business not found"));

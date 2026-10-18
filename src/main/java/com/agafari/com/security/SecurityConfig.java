@@ -40,11 +40,18 @@ public class SecurityConfig {
                                 "/api/auth/login",
                                 "/actuator/**",
                                 "/venue/**",
-                                "/venue/items/**",
-                                "/api/business/**"
+                                "/venue/items/**"
                         ).permitAll()
 
-                        // public endpoints
+                        // owner APIs: restaurant owners only (AGF-S1-06); tenant ownership is checked in the services
+                        .requestMatchers(
+                                "/api/menus/**",
+                                "/api/categories/**",
+                                "/api/items/**",
+                                "/api/business/**",
+                                "/api/user/**"
+                        ).hasRole("VENUE")
+
                         .anyRequest().authenticated()
                 )
                 // IMPORTANT: add JWT filter into Spring Security chain

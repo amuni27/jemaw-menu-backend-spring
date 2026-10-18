@@ -10,6 +10,7 @@ import com.agafari.com.dto.response.BusinessHoursResponse;
 import com.agafari.com.enums.DayOfWeekEnum;
 import com.agafari.com.enums.UserRole;
 import com.agafari.com.enums.UserStatus;
+import com.agafari.com.exception.AccountInactiveException;
 import com.agafari.com.exception.BadRequestException;
 import com.agafari.com.exception.ConflictException;
 import com.agafari.com.exception.ForbiddenException;
@@ -181,6 +182,12 @@ public class AuthService {
         if (!passwordEncoder.matches(req.getPassword(), user.getPasswordHash())) {
             log.warn("event=auth.login.invalid_password email={} userId={}", email, user.getId());
             throw new BadRequestException("Invalid credentials");
+        }
+
+        // Checked after the password, so the account status is only revealed to someone who knows it
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            log.warn("event=auth.login.account_inactive userId={} status={}", user.getId(), user.getStatus());
+            throw new AccountInactiveException();
         }
 
         Business biz = businessRepo.findByOwnerId(user.getId())

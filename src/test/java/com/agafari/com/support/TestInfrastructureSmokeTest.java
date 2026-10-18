@@ -44,14 +44,11 @@ class TestInfrastructureSmokeTest extends AbstractIntegrationTest {
                 .andExpect(content().string(not(containsString("Pasta"))));
     }
 
-    /**
-     * Characterization of current behavior: a request without a token is rejected with 403
-     * (Spring's default for this configuration). AGF-S1-07 changes this to 401.
-     */
+    /** A request without a token is rejected with 401 (AGF-S1-07; was Spring's default 403). */
     @Test
     void protectedEndpointWithoutTokenIsRejected() throws Exception {
         mockMvc.perform(get("/api/menus"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

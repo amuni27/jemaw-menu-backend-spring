@@ -19,9 +19,11 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+    private final SecurityErrorResponses errorResponses;
 
-    public SecurityConfig(JwtAuthFilter jwtAuthFilter) {
+    public SecurityConfig(JwtAuthFilter jwtAuthFilter, SecurityErrorResponses errorResponses) {
         this.jwtAuthFilter = jwtAuthFilter;
+        this.errorResponses = errorResponses;
     }
 
     @Bean
@@ -55,6 +57,10 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 // IMPORTANT: add JWT filter into Spring Security chain
+                // JSON 401 for missing/invalid tokens and 403 for forbidden roles (AGF-S1-07)
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint(errorResponses.authenticationEntryPoint())
+                        .accessDeniedHandler(errorResponses.accessDeniedHandler()))
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

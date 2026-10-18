@@ -47,6 +47,13 @@ public class ApiExceptionHandler {
         return domain(HttpStatus.NOT_FOUND, e);
     }
 
+    @ExceptionHandler(AccountInactiveException.class)
+    public ResponseEntity<ApiError> accountInactive(AccountInactiveException e) {
+        log.info("event=api.account_inactive");
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiError.of(HttpStatus.FORBIDDEN, AccountInactiveException.CODE, e.getMessage()));
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> conf(ConflictException e) {
         return domain(HttpStatus.CONFLICT, e);

@@ -11,6 +11,7 @@ import com.agafari.com.jpa.repository.MenuItemRepository;
 import com.agafari.com.jpa.repository.MenuRepository;
 import com.agafari.com.jpa.repository.UserRepository;
 import com.agafari.com.support.AbstractIntegrationTest;
+import com.agafari.com.support.TestDataFactory;
 import com.agafari.com.support.TestDataFactory.Tenant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -252,7 +253,7 @@ class TenantIsolationTest extends AbstractIntegrationTest {
     void profileUpdatesNeverTouchAnotherOwner() throws Exception {
         String bEmail = f.b().owner().getEmail();
 
-        mockMvc.perform(json(patch("/api/user"), "{\"email\":\"" + bEmail + "\"}").header("Authorization", data.bearer(f.a())))
+        mockMvc.perform(json(patch("/api/user"), "{\"email\":\"" + bEmail + "\",\"currentPassword\":\"" + TestDataFactory.PASSWORD + "\"}").header("Authorization", data.bearer(f.a())))
                 .andExpect(status().isConflict());
         mockMvc.perform(json(patch("/api/user"), "{\"fullName\":\"Alpha Renamed\"}").header("Authorization", data.bearer(f.a())))
                 .andExpect(status().isOk())
@@ -317,9 +318,10 @@ class TenantIsolationTest extends AbstractIntegrationTest {
     void businessEndpointsRejectRequestsWithoutToken(String endpoint) throws Exception {
         String before = snapshot(f.b());
 
-        // 403 until AGF-S1-07 adds a 401 entry point; the AC5 assertion becomes isUnauthorized() then
+        // S1-06 AC5, finalized by AGF-S1-07's JSON 401 entry point
         mockMvc.perform(BUSINESS_ENDPOINTS.get(endpoint).apply(f))
-                .andExpect(status().is(anyOf(is(401), is(403))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_REQUIRED"))
                 .andExpect(content().string(not(containsString("dayOfWeek"))));
 
         assertThat(snapshot(f.b())).isEqualTo(before);
@@ -329,7 +331,7 @@ class TenantIsolationTest extends AbstractIntegrationTest {
     void businessPathsRequireAuthenticationAtTheFilterLevel() throws Exception {
         // An unmapped path under /api/business is refused before routing (it was a 404 while the path was permitAll)
         mockMvc.perform(get("/api/business/{id}/no-such-endpoint", f.b().businessId()))
-                .andExpect(status().is(anyOf(is(401), is(403))));
+                .andExpect(status().isUnauthorized());
     }
 
     // ---------------------------------------------------------------------------------------

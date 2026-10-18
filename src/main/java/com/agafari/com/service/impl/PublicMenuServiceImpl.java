@@ -6,6 +6,7 @@ import com.agafari.com.exception.NotFoundException;
 import com.agafari.com.jpa.entity.*;
 import com.agafari.com.jpa.repository.*;
 import com.agafari.com.service.PublicMenuService;
+import com.agafari.com.service.CurrencyPolicy;
 import com.agafari.com.service.PublicVisibilityPolicy;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -108,6 +109,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                             .isActive(menu.isActive())
                             .visibility(menu.getVisibility())
                             .menuType(toMenuTypeDto(menu.getMenuType()))
+                            .currency(businessDto.getCurrency())
                             .categories(cats)
                             .build();
                 })
@@ -196,6 +198,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .zipcode(b.getZipcode())
                 .customSubdomain(b.getCustomSubdomain())
                 .open24_7(b.isOpen24_7())
+                .currency(CurrencyPolicy.displayCurrency(b.getCurrency()))
                 .build();
     }
 
@@ -230,6 +233,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .ingredients(i.getIngredients())
                 .allergens(i.getAllergens())
                 .tags(i.getTags())
+                .currency(CurrencyPolicy.displayCurrency(i.getMenu().getBusiness().getCurrency()))
                 .build();
     }
 }

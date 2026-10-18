@@ -17,6 +17,7 @@ import com.agafari.com.jpa.repository.MenuRepository;
 import com.agafari.com.jpa.repository.MenuTypeRepository;
 import com.agafari.com.security.CurrentUser;
 import com.agafari.com.service.MenuService;
+import com.agafari.com.service.CurrencyPolicy;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -151,9 +152,8 @@ public class MenuServiceImpl implements MenuService {
     }
 
     private MenuResponse toResponse(Menu m) {
-        String currency = (m.getBusiness() != null && m.getBusiness().getCurrency() != null)
-                ? m.getBusiness().getCurrency()
-                : "USD";
+        // AGF-S2-02: the restaurant's currency; ETB (the entity default) when missing, never USD
+        String currency = CurrencyPolicy.displayCurrency(m.getBusiness() != null ? m.getBusiness().getCurrency() : null);
 
         return MenuResponse.builder()
                 .id(m.getId())

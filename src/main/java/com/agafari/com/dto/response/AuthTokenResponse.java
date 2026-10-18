@@ -35,5 +35,7 @@ public class AuthTokenResponse {
         private String zipcode;
         private boolean open24_7;
         private List<BusinessHoursResponse> businessHours;
+        /** AGF-S2-02 */
+        private String currency;
     }
 }

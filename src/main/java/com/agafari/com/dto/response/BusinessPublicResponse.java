@@ -15,4 +15,6 @@ public class BusinessPublicResponse {
     private String zipcode;
     private String customSubdomain;
     private boolean open24_7;
+    /** AGF-S2-02 */
+    private String currency;
 }

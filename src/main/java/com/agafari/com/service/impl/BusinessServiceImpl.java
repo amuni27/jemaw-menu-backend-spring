@@ -15,6 +15,7 @@ import com.agafari.com.jpa.repository.BusinessHoursRepository;
 import com.agafari.com.jpa.repository.BusinessRepository;
 import com.agafari.com.security.CurrentUser;
 import com.agafari.com.service.BusinessService;
+import com.agafari.com.service.CurrencyPolicy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -119,7 +120,7 @@ public class BusinessServiceImpl implements BusinessService {
         if (request.getCity() != null)           business.setCity(request.getCity().trim());
         if (request.getState() != null)          business.setState(request.getState().trim());
         if (request.getZipcode() != null)        business.setZipcode(request.getZipcode().trim());
-        if (request.getCurrency() != null)       business.setCurrency(request.getCurrency().trim());
+        if (request.getCurrency() != null)       business.setCurrency(CurrencyPolicy.requireSupported(request.getCurrency())); // AGF-S2-02
 
         if (request.getCustomSubdomain() != null) {
             String label = request.getCustomSubdomain().trim().toLowerCase();

@@ -11,6 +11,7 @@ import com.agafari.com.enums.DayOfWeekEnum;
 import com.agafari.com.enums.UserRole;
 import com.agafari.com.enums.UserStatus;
 import com.agafari.com.exception.AccountInactiveException;
+import com.agafari.com.service.CurrencyPolicy;
 import com.agafari.com.validation.StrongPasswordValidator;
 import com.agafari.com.exception.BadRequestException;
 import com.agafari.com.exception.ConflictException;
@@ -225,7 +226,8 @@ public class AuthService {
                         biz.isOpen24_7(),
                         biz.getBusinessHours().stream()
                                 .map(BusinessHoursResponse::from)
-                                .toList()
+                                .toList(),
+                        CurrencyPolicy.displayCurrency(biz.getCurrency())
                 )
         );
     }
@@ -275,7 +277,8 @@ public class AuthService {
                         biz.isOpen24_7(),
                         biz.getBusinessHours().stream()
                                 .map(BusinessHoursResponse::from)
-                                .toList()
+                                .toList(),
+                        CurrencyPolicy.displayCurrency(biz.getCurrency())
                 )
         );
     }

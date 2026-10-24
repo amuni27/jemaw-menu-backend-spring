@@ -24,7 +24,14 @@ public class CloudflareR2Config {
     @Value("${cloudflare.endpoint}")
     private String endpoint;
 
+    @Value("${cloudflare.bucket}")
+    private String bucket;
+
+    @Value("${cloudflare.publicBaseUrl}")
+    private String publicBaseUrl;
+
     private StaticCredentialsProvider creds() {
+        requireConfigured();
         AwsBasicCredentials credentials = AwsBasicCredentials.create(accessKey, secretKey);
         return StaticCredentialsProvider.create(credentials);
     }
@@ -57,5 +64,23 @@ public class CloudflareR2Config {
                         .pathStyleAccessEnabled(true) // ✅ IMPORTANT for R2
                         .build())
                 .build();
+    }
+
+    /**
+     * Fail fast at startup when an R2 setting is present but blank.
+     * Missing settings already fail placeholder resolution. Messages never include values.
+     */
+    private void requireConfigured() {
+        requireText(accessKey, "cloudflare.accessKey", "CLOUDFLARE_R2_ACCESS_KEY");
+        requireText(secretKey, "cloudflare.secretKey", "CLOUDFLARE_R2_SECRET_KEY");
+        requireText(endpoint, "cloudflare.endpoint", "CLOUDFLARE_R2_ENDPOINT");
+        requireText(bucket, "cloudflare.bucket", "CLOUDFLARE_R2_BUCKET");
+        requireText(publicBaseUrl, "cloudflare.publicBaseUrl", "CLOUDFLARE_R2_PUBLIC_BASE_URL");
+    }
+
+    private static void requireText(String value, String property, String envVar) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException(property + " must not be blank; set the " + envVar + " environment variable");
+        }
     }
 }

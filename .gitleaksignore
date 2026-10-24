@@ -1,0 +1,8 @@
+# Known historical findings (AGF-S1-02). Format: commit:file:rule:line. No secret values here.
+# These Cloudflare R2 credentials were committed before AGF-S1-01 and remain in public history.
+# They are ignored ONLY so CI can block NEW leaks. They are NOT safe: they must be rotated (task M1).
+# See docs/AGAFARI_SECRET_EXPOSURE_REPORT.md. Remove these lines only if history is rewritten (separate approval).
+9e7de34f6c019b461239159d3c00316cf79ddc88:src/main/resources/application.yml:generic-api-key:37
+9e7de34f6c019b461239159d3c00316cf79ddc88:src/main/resources/application.yml:generic-api-key:38
+ea82b887e46b922c118a04bb5204e0ffc23bd375:src/main/resources/application-prod.yml:generic-api-key:38
+ea82b887e46b922c118a04bb5204e0ffc23bd375:src/main/resources/application-prod.yml:generic-api-key:39

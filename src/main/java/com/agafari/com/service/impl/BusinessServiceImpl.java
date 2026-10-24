@@ -11,10 +11,10 @@ import com.agafari.com.exception.ConflictException;
 import com.agafari.com.exception.NotFoundException;
 import com.agafari.com.jpa.entity.Business;
 import com.agafari.com.jpa.entity.BusinessHours;
-import com.agafari.com.jpa.repository.BusinessHoursRepository;
 import com.agafari.com.jpa.repository.BusinessRepository;
 import com.agafari.com.security.CurrentUser;
 import com.agafari.com.service.BusinessService;
+import com.agafari.com.service.CurrencyPolicy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,7 +31,6 @@ public class BusinessServiceImpl implements BusinessService {
 
     private final CurrentUser currentUser;
     private final BusinessRepository businessRepo;
-    private final BusinessHoursRepository hoursRepo;
 
     @Value("${cloudflare.publicBaseUrl}")
     private String publicBaseUrl;
@@ -61,7 +60,7 @@ public class BusinessServiceImpl implements BusinessService {
     public List<BusinessHoursResponse> getBusinessHours(String businessId) {
 
         log.info("Getting business hours for businessId: {}", businessId);
-        currentUser.me();
+        currentUser.requireOwnBusiness(businessId);
 
         Business business = businessRepo.findById(businessId)
                 .orElseThrow(() -> new NotFoundException("No business hour found"));
@@ -82,22 +81,21 @@ public class BusinessServiceImpl implements BusinessService {
     public List<BusinessHoursResponse> updateBusinessHours(String businessId, UpdateBusinessHoursRequest request) {
         log.info("Updating business hours for businessId: {}", businessId);
 
-        String currentBusinessId = currentUser.businessId();
-        if (!businessId.equals(currentBusinessId)) {
-            throw new BadRequestException("Not allowed");
-        }
+        currentUser.requireOwnBusiness(businessId);
 
         Business business = businessRepo.findById(businessId)
                 .orElseThrow(() -> new NotFoundException("No business hour found"));
 
         validateHours(request.isOpen24_7(), request.getBusinessHours());
 
-        hoursRepo.deleteAll(business.getBusinessHours());
-        hoursRepo.flush();
+        // AGF-S2-03: replace the week through the owning collection. Deleting the rows directly while the
+        // business still referenced them (cascade ALL) left them in place, so every edit added 7 more rows.
+        // orphanRemoval deletes all stored rows here, including duplicates left by that behavior.
+        business.getBusinessHours().clear();
+        businessRepo.saveAndFlush(business);
 
         List<BusinessHours> newHours = buildHours(business, request.isOpen24_7(), request.getBusinessHours());
-        hoursRepo.saveAll(newHours);
-
+        business.getBusinessHours().addAll(newHours);
         business.setOpen24_7(request.isOpen24_7());
         businessRepo.save(business);
 
@@ -111,10 +109,7 @@ public class BusinessServiceImpl implements BusinessService {
     public BusinessResponse updateBusiness(String businessId, BusinessUpdateRequest request) {
         log.info("Updating business businessId: {}", businessId);
 
-        String currentBusinessId = currentUser.businessId();
-        if (!businessId.equals(currentBusinessId)) {
-            throw new BadRequestException("Not allowed");
-        }
+        currentUser.requireOwnBusiness(businessId);
 
         Business business = businessRepo.findById(businessId)
                 .orElseThrow(() -> new NotFoundException("Business not found"));
@@ -125,7 +120,7 @@ public class BusinessServiceImpl implements BusinessService {
         if (request.getCity() != null)           business.setCity(request.getCity().trim());
         if (request.getState() != null)          business.setState(request.getState().trim());
         if (request.getZipcode() != null)        business.setZipcode(request.getZipcode().trim());
-        if (request.getCurrency() != null)       business.setCurrency(request.getCurrency().trim());
+        if (request.getCurrency() != null)       business.setCurrency(CurrencyPolicy.requireSupported(request.getCurrency())); // AGF-S2-02
 
         if (request.getCustomSubdomain() != null) {
             String label = request.getCustomSubdomain().trim().toLowerCase();

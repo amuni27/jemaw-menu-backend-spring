@@ -37,7 +37,6 @@ public class MenuController {
      */
     @PostMapping
     public ResponseEntity<MenuResponse> create(@Valid @RequestBody MenuCreateRequest request) {
-        log.info("Create menu: {}", request);
         MenuResponse created = menuService.createMenu(request);
         return ResponseEntity.status(201).body(created);
     }
@@ -58,7 +57,7 @@ public class MenuController {
      */
     @PatchMapping("/{menuId}")
     public ResponseEntity<MenuResponse> patch(@PathVariable String menuId,
-                                              @RequestBody MenuUpdateRequest request) {
+                                              @Valid @RequestBody MenuUpdateRequest request) {
         return ResponseEntity.ok(menuService.patchMenu(menuId, request));
     }
 

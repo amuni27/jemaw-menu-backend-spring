@@ -2,7 +2,9 @@ package com.agafari.com.dto.request;
 
 import com.agafari.com.enums.MenuItemStatus;
 import com.agafari.com.enums.SpiceLevel;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -10,7 +12,9 @@ import java.util.List;
 
 @Data
 public class MenuItemUpdateRequest {
+    @Size(min = 1, max = 255)
     private String name;
+    @DecimalMin("0.00")
     private BigDecimal price;
     private String imageUrl;
     private String categoryId;

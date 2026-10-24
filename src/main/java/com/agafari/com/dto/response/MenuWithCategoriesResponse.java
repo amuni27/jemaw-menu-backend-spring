@@ -16,5 +16,7 @@ public class MenuWithCategoriesResponse {
     private MenuVisibility visibility;
 
     private MenuTypeResponse menuType;
+    /** The restaurant's currency (AGF-S2-02) */
+    private String currency;
     private List<CategoryWithItemsResponse> categories;
 }

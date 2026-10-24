@@ -10,4 +10,7 @@ public interface BusinessLogoService {
     PresignLogoResponse presignLogo(String businessId, PresignLogoRequest req);
 
     BusinessResponse confirmLogo(String businessId, ConfirmImageUploadRequest req);
+
+    /** AGF-S2-01: clears the logo; the stored object is deleted best-effort. */
+    BusinessResponse removeLogo(String businessId);
 }

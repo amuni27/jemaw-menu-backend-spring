@@ -25,6 +25,8 @@ import java.util.stream.Collectors;
 public class PublicMenuServiceImpl implements PublicMenuService {
 
     private static final Logger log = LoggerFactory.getLogger(PublicMenuServiceImpl.class);
+    /** PO decision D3: one fixed time zone for opening hours until per-business time zones exist (S2-26). */
+    static final String BUSINESS_TIME_ZONE = "Africa/Addis_Ababa";
     private final BusinessRepository businessRepo;
     private final MenuRepository menuRepo;
     private final CategoryRepository categoryRepo;
@@ -201,6 +203,11 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .open24_7(b.isOpen24_7())
                 .currency(CurrencyPolicy.displayCurrency(b.getCurrency()))
                 .logoUrl(LogoUrls.publicUrl(publicBaseUrl, b.getLogoKey()))
+                .hours(b.getBusinessHours().stream()
+                        .sorted(Comparator.comparing(BusinessHours::getDayOfWeek))
+                        .map(PublicBusinessHoursResponse::from)
+                        .toList())
+                .timeZone(BUSINESS_TIME_ZONE)
                 .build();
     }
 

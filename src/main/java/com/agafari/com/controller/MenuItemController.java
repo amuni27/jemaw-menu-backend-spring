@@ -1,6 +1,7 @@
 package com.agafari.com.controller;
 
 import com.agafari.com.dto.request.ConfirmImageUploadRequest;
+import com.agafari.com.dto.request.ItemReorderRequest;
 import com.agafari.com.dto.request.MenuItemCreateRequest;
 import com.agafari.com.dto.request.MenuItemStatusUpdateRequest;
 import com.agafari.com.dto.request.MenuItemUpdateRequest;
@@ -15,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api")
@@ -58,9 +60,10 @@ public class MenuItemController {
      */
     @GetMapping("/items/{itemId}/image/presign")
     public ResponseEntity<CreateMenuItemWithUploadResponse> presignImageUpload(
-            @PathVariable String itemId
+            @PathVariable String itemId,
+            @RequestParam String contentType // AGF-S1-17: JPEG, PNG or WebP; signed into the upload URL
     ) {
-        return ResponseEntity.ok(menuItemService.presignImageUpload(itemId));
+        return ResponseEntity.ok(menuItemService.presignImageUpload(itemId, contentType));
     }
 
     @GetMapping("/items/{itemId}")
@@ -71,7 +74,7 @@ public class MenuItemController {
     @PatchMapping("/items/{itemId}")
     public ResponseEntity<MenuItemResponse> update(
             @PathVariable String itemId,
-            @RequestBody MenuItemUpdateRequest request
+            @Valid @RequestBody MenuItemUpdateRequest request
     ) {
         return ResponseEntity.ok(menuItemService.update(itemId, request));
     }
@@ -88,5 +91,15 @@ public class MenuItemController {
     public ResponseEntity<Void> delete(@PathVariable String itemId) {
         menuItemService.delete(itemId);
         return ResponseEntity.noContent().build();
+    }
+
+    // AGF-S2-08: mirrors POST /menus/{menuId}/categories/reorder
+    @PostMapping("/categories/{categoryId}/items/reorder")
+    public Map<String, Boolean> reorder(
+            @PathVariable String categoryId,
+            @Valid @RequestBody ItemReorderRequest request
+    ) {
+        menuItemService.reorder(categoryId, request);
+        return Map.of("success", true);
     }
 }

@@ -10,6 +10,10 @@ import com.agafari.com.dto.response.BusinessHoursResponse;
 import com.agafari.com.enums.DayOfWeekEnum;
 import com.agafari.com.enums.UserRole;
 import com.agafari.com.enums.UserStatus;
+import com.agafari.com.exception.AccountInactiveException;
+import com.agafari.com.service.CurrencyPolicy;
+import com.agafari.com.service.LogoUrls;
+import com.agafari.com.validation.StrongPasswordValidator;
 import com.agafari.com.exception.BadRequestException;
 import com.agafari.com.exception.ConflictException;
 import com.agafari.com.exception.ForbiddenException;
@@ -41,6 +45,9 @@ public class AuthService {
 
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+
+    @Value("${cloudflare.publicBaseUrl}")
+    private String publicBaseUrl;
 
     @Value("${app.baseDomain:agafarimenu.com}")
     private String baseDomain;
@@ -85,18 +92,18 @@ public class AuthService {
 
         // Start log (no secrets)
         log.info("event=auth.register.start email={} subdomain={} open24_7={} hasPhone={} city={} state={}",
-                email, subdomain, req.isOpen24_7(), phone != null, safe(req.getCity()), safe(req.getState()));
+                LogMasking.maskEmail(email), subdomain, req.isOpen24_7(), phone != null, safe(req.getCity()), safe(req.getState()));
 
         // Validation log (before validation helps identify bad payloads)
         log.debug("event=auth.register.validate email={} open24_7={} hoursCount={}",
-                email, req.isOpen24_7(), (req.getBusinessHours() == null ? 0 : req.getBusinessHours().size()));
+                LogMasking.maskEmail(email), req.isOpen24_7(), (req.getBusinessHours() == null ? 0 : req.getBusinessHours().size()));
 
         // Node-style validation for businessHours
         validateBusinessHours(req.isOpen24_7(), req.getBusinessHours());
 
         // Check if email already exists
         if (userRepo.findByEmail(email).isPresent()) {
-            log.warn("event=auth.register.email_exists email={}", email);
+            log.warn("event=auth.register.email_exists email={}", LogMasking.maskEmail(email));
             throw new BadRequestException("This email is already registered.");
         }
 
@@ -118,7 +125,7 @@ public class AuthService {
 
             userRepo.save(user);
             log.info("event=auth.register.user_saved email={} userId={} role={} status={}",
-                    email, user.getId(), user.getRole(), user.getStatus());
+                    LogMasking.maskEmail(email), user.getId(), user.getRole(), user.getStatus());
 
             Business biz = new Business();
             biz.setId(UUID.randomUUID().toString());
@@ -134,34 +141,34 @@ public class AuthService {
 
             businessRepo.save(biz);
             log.info("event=auth.register.business_saved email={} userId={} businessId={} subdomain={}",
-                    email, user.getId(), biz.getId(), subdomain);
+                    LogMasking.maskEmail(email), user.getId(), biz.getId(), subdomain);
 
             // create 7 business hours rows
             List<BusinessHours> hours = buildHours(biz, req.isOpen24_7(), req.getBusinessHours());
             hoursRepo.saveAll(hours);
 
             log.info("event=auth.register.hours_saved email={} businessId={} hoursRows={}",
-                    email, biz.getId(), hours.size());
+                    LogMasking.maskEmail(email), biz.getId(), hours.size());
 
             // JWT (DO NOT LOG token)
             String token = jwtService.signToken(user.getEmail(), user.getId(), biz.getId(), user.getRole().name());
 
             long ms = System.currentTimeMillis() - start;
             log.info("event=auth.register.success email={} userId={} businessId={} duration_ms={}",
-                    email, user.getId(), biz.getId(), ms);
+                    LogMasking.maskEmail(email), user.getId(), biz.getId(), ms);
 
             return new AuthRegisterResponse("Account created", token);
 
         } catch (DataIntegrityViolationException ex) {
             long ms = System.currentTimeMillis() - start;
             // Keep message stable so Splunk can alert on it
-            log.warn("event=auth.register.conflict email={} subdomain={} duration_ms={} errorClass={} error={}",
-                    email, subdomain, ms, ex.getClass().getSimpleName(), rootMsg(ex));
+            log.warn("event=auth.register.conflict email={} subdomain={} duration_ms={} errorClass={}",
+                    LogMasking.maskEmail(email), subdomain, ms, ex.getClass().getSimpleName());
             throw new ConflictException("This email, phone number, or business link is already registered.");
         } catch (Exception ex) {
             long ms = System.currentTimeMillis() - start;
-            log.error("event=auth.register.error email={} subdomain={} duration_ms={} errorClass={} error={}",
-                    email, subdomain, ms, ex.getClass().getSimpleName(), rootMsg(ex), ex);
+            log.error("event=auth.register.error email={} subdomain={} duration_ms={} errorClass={}",
+                    LogMasking.maskEmail(email), subdomain, ms, ex.getClass().getSimpleName(), ex);
             throw ex;
         }
     }
@@ -170,22 +177,29 @@ public class AuthService {
         long start = System.currentTimeMillis();
 
         String email = normalizeEmail(req.getEmail());
-        log.info("event=auth.login.start email={}", email);
+        log.info("event=auth.login.start email={}", LogMasking.maskEmail(email));
 
         User user = userRepo.findByEmail(email)
                 .orElseThrow(() -> {
-                    log.error("event=auth.login.invalid_email email={}", email);
+                    log.warn("event=auth.login.invalid_email email={}", LogMasking.maskEmail(email));
                     return new BadRequestException("Invalid credentials");
                 });
 
-        if (!passwordEncoder.matches(req.getPassword(), user.getPasswordHash())) {
-            log.warn("event=auth.login.invalid_password email={} userId={}", email, user.getId());
+        if (StrongPasswordValidator.exceedsBcryptLimit(req.getPassword())
+                || !passwordEncoder.matches(req.getPassword(), user.getPasswordHash())) {
+            log.warn("event=auth.login.invalid_password email={} userId={}", LogMasking.maskEmail(email), user.getId());
             throw new BadRequestException("Invalid credentials");
+        }
+
+        // Checked after the password, so the account status is only revealed to someone who knows it
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            log.warn("event=auth.login.account_inactive userId={} status={}", user.getId(), user.getStatus());
+            throw new AccountInactiveException();
         }
 
         Business biz = businessRepo.findByOwnerId(user.getId())
                 .orElseThrow(() -> {
-                    log.warn("event=auth.login.business_missing email={} userId={}", email, user.getId());
+                    log.warn("event=auth.login.business_missing email={} userId={}", LogMasking.maskEmail(email), user.getId());
                     return new ForbiddenException("business not found");
                 });
 
@@ -193,7 +207,7 @@ public class AuthService {
 
         long ms = System.currentTimeMillis() - start;
         log.info("event=auth.login.success email={} userId={} businessId={} role={} duration_ms={}",
-                email, user.getId(), biz.getId(), user.getRole(), ms);
+                LogMasking.maskEmail(email), user.getId(), biz.getId(), user.getRole(), ms);
 
         return new AuthTokenResponse(
                 token,
@@ -216,7 +230,9 @@ public class AuthService {
                         biz.isOpen24_7(),
                         biz.getBusinessHours().stream()
                                 .map(BusinessHoursResponse::from)
-                                .toList()
+                                .toList(),
+                        CurrencyPolicy.displayCurrency(biz.getCurrency()),
+                        LogoUrls.publicUrl(publicBaseUrl, biz.getLogoKey())
                 )
         );
     }
@@ -225,17 +241,17 @@ public class AuthService {
         long start = System.currentTimeMillis();
         String email = normalizeEmail(emailFromJwt);
 
-        log.debug("event=auth.me.start email={}", email);
+        log.debug("event=auth.me.start email={}", LogMasking.maskEmail(email));
 
         User user = userRepo.findByEmail(email)
                 .orElseThrow(() -> {
-                    log.warn("event=auth.me.user_not_found email={}", email);
+                    log.warn("event=auth.me.user_not_found email={}", LogMasking.maskEmail(email));
                     return new NotFoundException("User not found");
                 });
 
         Business biz = businessRepo.findByOwnerId(user.getId())
                 .orElseThrow(() -> {
-                    log.warn("event=auth.me.business_missing email={} userId={}", email, user.getId());
+                    log.warn("event=auth.me.business_missing email={} userId={}", LogMasking.maskEmail(email), user.getId());
                     return new ForbiddenException("business not found");
                 });
 
@@ -243,7 +259,7 @@ public class AuthService {
 
         long ms = System.currentTimeMillis() - start;
         log.debug("event=auth.me.success email={} userId={} businessId={} duration_ms={}",
-                email, user.getId(), biz.getId(), ms);
+                LogMasking.maskEmail(email), user.getId(), biz.getId(), ms);
 
         return new AuthTokenResponse(
                 token,
@@ -266,7 +282,9 @@ public class AuthService {
                         biz.isOpen24_7(),
                         biz.getBusinessHours().stream()
                                 .map(BusinessHoursResponse::from)
-                                .toList()
+                                .toList(),
+                        CurrencyPolicy.displayCurrency(biz.getCurrency()),
+                        LogoUrls.publicUrl(publicBaseUrl, biz.getLogoKey())
                 )
         );
     }
@@ -274,20 +292,21 @@ public class AuthService {
     @Transactional
     public void changePassword(String emailFromJwt, ChangePasswordRequest req) {
         String email = normalizeEmail(emailFromJwt);
-        log.info("event=auth.change_password.start email={}", email);
+        log.info("event=auth.change_password.start email={}", LogMasking.maskEmail(email));
 
         User user = userRepo.findByEmail(email)
                 .orElseThrow(() -> new NotFoundException("User not found"));
 
-        if (!passwordEncoder.matches(req.getCurrentPassword(), user.getPasswordHash())) {
-            log.warn("event=auth.change_password.wrong_current email={} userId={}", email, user.getId());
+        if (StrongPasswordValidator.exceedsBcryptLimit(req.getCurrentPassword())
+                || !passwordEncoder.matches(req.getCurrentPassword(), user.getPasswordHash())) {
+            log.warn("event=auth.change_password.wrong_current email={} userId={}", LogMasking.maskEmail(email), user.getId());
             throw new BadRequestException("Current password is incorrect");
         }
 
         user.setPasswordHash(passwordEncoder.encode(req.getNewPassword()));
         userRepo.save(user);
 
-        log.info("event=auth.change_password.success email={} userId={}", email, user.getId());
+        log.info("event=auth.change_password.success email={} userId={}", LogMasking.maskEmail(email), user.getId());
     }
 
     private void validateBusinessHours(boolean open24_7, List<BusinessHourDto> hours) {
@@ -373,12 +392,6 @@ public class AuthService {
     }
 
     // --- helpers ---
-    private static String rootMsg(Throwable t) {
-        Throwable cur = t;
-        while (cur.getCause() != null) cur = cur.getCause();
-        String msg = cur.getMessage();
-        return msg == null ? "" : msg.replaceAll("[\\r\\n\\t]", " ");
-    }
 
     private static String safe(String s) {
         return s == null ? "" : s.replaceAll("[\\r\\n\\t]", " ").trim();

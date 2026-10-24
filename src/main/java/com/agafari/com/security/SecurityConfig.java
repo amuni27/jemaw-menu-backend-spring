@@ -19,9 +19,11 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+    private final SecurityErrorResponses errorResponses;
 
-    public SecurityConfig(JwtAuthFilter jwtAuthFilter) {
+    public SecurityConfig(JwtAuthFilter jwtAuthFilter, SecurityErrorResponses errorResponses) {
         this.jwtAuthFilter = jwtAuthFilter;
+        this.errorResponses = errorResponses;
     }
 
     @Bean
@@ -38,16 +40,30 @@ public class SecurityConfig {
                                 "/v3/api-docs/**",
                                 "/api/auth/register",
                                 "/api/auth/login",
+                                "/api/auth/forgot-password", // AGF-S2-13A
+                                "/api/auth/reset-password",
+                                "/api/demo/**", // only exists in -Pdemo builds (local demo outbox)
                                 "/actuator/**",
                                 "/venue/**",
-                                "/venue/items/**",
-                                "/api/business/**"
+                                "/venue/items/**"
                         ).permitAll()
 
-                        // public endpoints
+                        // owner APIs: restaurant owners only (AGF-S1-06); tenant ownership is checked in the services
+                        .requestMatchers(
+                                "/api/menus/**",
+                                "/api/categories/**",
+                                "/api/items/**",
+                                "/api/business/**",
+                                "/api/user/**"
+                        ).hasRole("VENUE")
+
                         .anyRequest().authenticated()
                 )
                 // IMPORTANT: add JWT filter into Spring Security chain
+                // JSON 401 for missing/invalid tokens and 403 for forbidden roles (AGF-S1-07)
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint(errorResponses.authenticationEntryPoint())
+                        .accessDeniedHandler(errorResponses.accessDeniedHandler()))
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

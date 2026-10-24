@@ -1,12 +1,15 @@
 spring:
   application:
     name: agafari-menu-backend
+  config:
+    # Optional, untracked local overrides (see application-local.example.yml)
+    import: "optional:file:./application-local.yml"
 
 
   datasource:
     url: jdbc:postgresql://localhost:5432/agafari_menu
     username: postgres
-    password: 0911021148
+    password: ${DB_PASSWORD}
   jpa:
     hibernate:
       ddl-auto: update
@@ -28,15 +31,48 @@ server:
 
 app:
   jwt:
-    # generate your own long secret for production
-    secret: "CHANGE_ME_TO_A_LONG_RANDOM_SECRET_CHANGE_ME_TO_A_LONG_RANDOM_SECRET"
+    # Supplied at runtime via APP_JWT_SECRET; must be at least 32 characters (HS256)
+    secret: ${APP_JWT_SECRET}
     expiresMinutes: 120
   baseDomain: ${APP_BASE_DOMAIN:agafarimenu.com}
+  # AGF-S1-19: authentication rate limits (in memory, per application instance)
+  # AGF-S2-13A password reset. The secret is dedicated (not the JWT secret) and at least 32 characters; without a
+  # valid one, reset is off: requests get the usual answer and nothing is sent. Links point at the frontend reset page
+  # and carry the token in the URL fragment. No email is sent until a provider is chosen (D5).
+  password-reset:
+    secret: ${APP_PASSWORD_RESET_SECRET:}
+    link-base-url: ${APP_PASSWORD_RESET_LINK_BASE_URL:}
+    token-ttl: 30m
+  rate-limit:
+    enabled: ${APP_RATE_LIMIT_ENABLED:true}
+    login-per-email:            # failed logins for one email
+      limit: 5
+      window: 15m
+    login-per-ip:               # failed logins from one client IP (any email)
+      limit: 20
+      window: 15m
+    register-per-ip:            # registration attempts from one client IP
+      limit: 10
+      window: 1h
+    change-password-per-ip:     # change-password attempts from one client IP
+      limit: 10
+      window: 15m
+    forgot-password-per-email:  # reset-link requests for one email (AGF-S2-13A)
+      limit: 3
+      window: 1h
+    forgot-password-per-ip:     # reset-link requests from one client IP
+      limit: 10
+      window: 1h
+    reset-password-per-ip:      # reset submissions from one client IP
+      limit: 10
+      window: 15m
+    max-tracked-keys: 100000    # memory bound for the counters
 
 
+# All Cloudflare R2 values are supplied at runtime. No defaults: startup fails if any is missing.
 cloudflare:
-  accessKey: 69fad8fb63b5427a617146d2e343985d
-  secretKey: 0792bc0056c8662b6f3de1c2cdb64c226f46e7cc7783aa9d8e3b4a51d4a95dc6
-  bucket: agafari-assets-x9q4zt
-  endpoint: https://6a2ab21173cfe83a6268873c44e13379.r2.cloudflarestorage.com
-  publicBaseUrl: https://pub-e0b4117a2d05469283e0d47d6a92ceb7.r2.dev
+  accessKey: ${CLOUDFLARE_R2_ACCESS_KEY}
+  secretKey: ${CLOUDFLARE_R2_SECRET_KEY}
+  bucket: ${CLOUDFLARE_R2_BUCKET}
+  endpoint: ${CLOUDFLARE_R2_ENDPOINT}
+  publicBaseUrl: ${CLOUDFLARE_R2_PUBLIC_BASE_URL}

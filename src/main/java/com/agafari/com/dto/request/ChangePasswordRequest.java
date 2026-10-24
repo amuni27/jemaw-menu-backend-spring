@@ -1,7 +1,7 @@
 package com.agafari.com.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
+import com.agafari.com.validation.StrongPassword;
 import lombok.Data;
 
 @Data
@@ -11,6 +11,6 @@ public class ChangePasswordRequest {
     private String currentPassword;
 
     @NotBlank
-    @Size(min = 6)
+    @StrongPassword // AGF-S1-17
     private String newPassword;
 }

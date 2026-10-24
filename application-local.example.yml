@@ -1,0 +1,26 @@
+# Local development overrides — TEMPLATE ONLY. Contains no real values.
+#
+# 1. Copy this file to `application-local.yml` in the project root (same folder as pom.xml).
+#    `application-local.yml` is git-ignored and is loaded automatically by application.yml
+#    via `spring.config.import: optional:file:./application-local.yml`.
+# 2. Replace every placeholder below with your own development values.
+# 3. Never commit `application-local.yml`.
+#
+# Alternatively, export the same values as environment variables
+# (DB_PASSWORD, APP_JWT_SECRET, CLOUDFLARE_R2_*). See CONFIGURATION.md.
+
+spring:
+  datasource:
+    password: change-me-local-db-password
+
+app:
+  jwt:
+    # At least 32 characters. Generate one with: openssl rand -base64 48
+    secret: change-me-to-a-random-string-of-at-least-32-characters
+
+cloudflare:
+  accessKey: change-me-dev-r2-access-key
+  secretKey: change-me-dev-r2-secret-key
+  bucket: change-me-dev-bucket-name
+  endpoint: https://<account-id>.r2.cloudflarestorage.com
+  publicBaseUrl: https://<public-bucket-host>

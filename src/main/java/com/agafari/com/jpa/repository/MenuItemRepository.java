@@ -1,12 +1,14 @@
 package com.agafari.com.jpa.repository;
 
 import com.agafari.com.enums.MenuItemStatus;
+import com.agafari.com.enums.MenuVisibility;
 import com.agafari.com.jpa.entity.MenuItem;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -32,7 +34,7 @@ public interface MenuItemRepository extends JpaRepository<MenuItem, String> {
                or i.name ilike concat('%', :search, '%')
                or coalesce(i.description, '') ilike concat('%', :search, '%')
           )
-        order by i.sortOrder asc, i.createdAt desc
+        order by i.sortOrder asc, i.createdAt asc
     """)
     List<MenuItem> searchMenuItems(
             @Param("menuId") String menuId,
@@ -42,6 +44,9 @@ public interface MenuItemRepository extends JpaRepository<MenuItem, String> {
             @Param("search") String search
     );
 
+    /** AGF-S2-08: all items of a category (any status), in their saved order */
+    List<MenuItem> findByCategory_IdOrderBySortOrderAscCreatedAtAsc(String categoryId);
+
     // max sortOrder per (menu, category)
     @Query("""
         select coalesce(max(i.sortOrder), -1) from MenuItem i
@@ -49,16 +54,30 @@ public interface MenuItemRepository extends JpaRepository<MenuItem, String> {
     """)
     int maxSortOrder(@Param("menuId") String menuId, @Param("categoryId") String categoryId);
 
-    @EntityGraph(attributePaths = {"menu", "category"})
-    List<MenuItem> findByMenu_IdInAndCategory_IdInAndStatusOrderBySortOrderAscCreatedAtAsc(
-            List<String> menuIds,
-            List<String> categoryIds,
-            MenuItemStatus status
+    // public item detail: one query applying the full guest visibility rule (businessId null = any business)
+    @Query("""
+        select i from MenuItem i
+        join fetch i.menu m
+        join fetch i.category c
+        where i.id = :itemId
+          and (:businessId is null or m.business.id = :businessId)
+          and m.isActive = true
+          and m.visibility = :visibility
+          and c.isActive = true
+          and i.status in :statuses
+    """)
+    Optional<MenuItem> findPubliclyVisibleItem(
+            @Param("itemId") String itemId,
+            @Param("businessId") String businessId,
+            @Param("visibility") MenuVisibility visibility,
+            @Param("statuses") Collection<MenuItemStatus> statuses
     );
 
-    default List<MenuItem> findAvailableByMenuIdsAndCategoryIds(List<String> menuIds, List<String> categoryIds) {
-        return findByMenu_IdInAndCategory_IdInAndStatusOrderBySortOrderAscCreatedAtAsc(
-                menuIds, categoryIds, MenuItemStatus.AVAILABLE
-        );
-    }
+    // public menu: items in the given menus/categories whose status is guest-visible
+    @EntityGraph(attributePaths = {"menu", "category"})
+    List<MenuItem> findByMenu_IdInAndCategory_IdInAndStatusInOrderBySortOrderAscCreatedAtAsc(
+            List<String> menuIds,
+            List<String> categoryIds,
+            Collection<MenuItemStatus> statuses
+    );
 }

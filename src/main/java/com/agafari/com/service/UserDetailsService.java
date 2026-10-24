@@ -1,6 +1,7 @@
 package com.agafari.com.service;
 
 import com.agafari.com.exception.NotFoundException;
+import com.agafari.com.enums.UserStatus;
 import com.agafari.com.jpa.repository.UserRepository;
 import com.agafari.com.security.AppUserDetails;
 import lombok.RequiredArgsConstructor;
@@ -32,7 +33,8 @@ public class UserDetailsService implements org.springframework.security.core.use
                 user.getEmail(),
                 user.getPasswordHash(),
                 user.getBusiness() != null ? user.getBusiness().getId() : null,
-                authorities
+                authorities,
+                user.getStatus() == UserStatus.ACTIVE
         );
     }
 }

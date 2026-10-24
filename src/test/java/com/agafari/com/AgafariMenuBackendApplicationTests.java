@@ -1,10 +1,9 @@
 package com.agafari.com;
 
+import com.agafari.com.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
 
-@SpringBootTest
-class AgafariMenuBackendApplicationTests {
+class AgafariMenuBackendApplicationTests extends AbstractIntegrationTest {
 
     @Test
     void contextLoads() {

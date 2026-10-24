@@ -17,9 +17,9 @@ public class OpenApiConfig {
 
         return new OpenAPI()
                 .info(new Info()
-                        .title("AfroDebab Content System API")
+                        .title("Agafari Menu API")
                         .version("1.0.0")
-                        .description("Blogs, Events, Jobs, Job Applications. Public + Admin (JWT)."))
+                        .description("Agafari QR digital menus: public guest menu endpoints and restaurant-owner endpoints (JWT bearer token)."))
                 .components(new Components()
                         .addSecuritySchemes(schemeName,
                                 new SecurityScheme()

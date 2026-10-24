@@ -1,0 +1,35 @@
+# Local Product Owner demo profile (docs/AGAFARI_LOCAL_DEMO_GUIDE.md).
+# Only on the classpath when built with -Pdemo. In-memory H2: data is recreated on every start.
+# Contains no secrets: APP_JWT_SECRET and DEMO_OWNER_PASSWORD come from the untracked .env.demo file.
+
+spring:
+  datasource:
+    # The JSONB domain lets the entities' columnDefinition = "jsonb" columns map to H2's JSON type.
+    url: jdbc:h2:mem:agafari_demo;DB_CLOSE_DELAY=-1;INIT=CREATE DOMAIN IF NOT EXISTS JSONB AS JSON
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+
+# Image storage is not available in the demo. Placeholder values point at a closed local port,
+# so nothing can reach Cloudflare R2; image uploads fail by design.
+cloudflare:
+  accessKey: local-demo-placeholder
+  secretKey: local-demo-placeholder
+  bucket: agafari-demo
+  endpoint: http://127.0.0.1:9
+  publicBaseUrl: http://127.0.0.1:9/agafari-demo
+
+app:
+  baseDomain: demo.agafari.test
+  # AGF-S2-13A: links open the local frontend; APP_PASSWORD_RESET_SECRET comes from the untracked .env.demo
+  password-reset:
+    link-base-url: http://localhost:5175/auth/reset-password
+
+demo:
+  owner:
+    email: owner@demo.agafari.test
+    password: ${DEMO_OWNER_PASSWORD}

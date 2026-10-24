@@ -147,6 +147,8 @@ class TenantIsolationTest extends AbstractIntegrationTest {
                 x -> json(post("/api/menus/{id}/categories", x.bMenu().getId()), "{\"name\":\"Hijacked\"}"));
         TENANT_RESOURCE_ENDPOINTS.put("POST /api/menus/{menuId}/categories/reorder",
                 x -> json(post("/api/menus/{id}/categories/reorder", x.bMenu().getId()), "{\"orderedIds\":[\"" + x.bCat().getId() + "\"]}"));
+        TENANT_RESOURCE_ENDPOINTS.put("POST /api/categories/{categoryId}/items/reorder", // AGF-S2-08
+                x -> json(post("/api/categories/{id}/items/reorder", x.bCat().getId()), "{\"orderedIds\":[\"" + x.bItem().getId() + "\"]}"));
         TENANT_RESOURCE_ENDPOINTS.put("PATCH /api/categories/{categoryId}",
                 x -> json(patch("/api/categories/{id}", x.bCat().getId()), "{\"name\":\"Hijacked\",\"isActive\":false}"));
         TENANT_RESOURCE_ENDPOINTS.put("DELETE /api/categories/{categoryId}",

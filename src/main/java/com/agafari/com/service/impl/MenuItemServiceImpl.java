@@ -19,6 +19,7 @@ import com.agafari.com.jpa.repository.MenuRepository;
 import com.agafari.com.security.CurrentUser;
 import com.agafari.com.service.ImagePolicy;
 import com.agafari.com.service.MenuItemService;
+import com.agafari.com.dto.request.ItemReorderRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -36,6 +37,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -230,6 +232,10 @@ public class MenuItemServiceImpl implements MenuItemService {
             String menuId = item.getMenu().getId();
             Category newCategory = categoryRepo.findByIdAndMenu_Id(req.getCategoryId(), menuId)
                     .orElseThrow(() -> new BadRequestException("categoryId must belong to the same menu"));
+            // AGF-S2-08: an item moved to another category goes last there (the form always sends categoryId)
+            if (!newCategory.getId().equals(item.getCategory().getId())) {
+                item.setSortOrder(itemRepo.maxSortOrder(menuId, newCategory.getId()) + 1);
+            }
             item.setCategory(newCategory);
         }
 
@@ -279,6 +285,31 @@ public class MenuItemServiceImpl implements MenuItemService {
                 .orElseThrow(() -> new NotFoundException("Item not found"));
 
         itemRepo.delete(item);
+    }
+
+    @Override
+    @Transactional
+    public void reorder(String categoryId, ItemReorderRequest req) {
+        String businessId = currentUser.businessId();
+
+        Category category = categoryRepo.findByIdAndMenu_Business_Id(categoryId, businessId)
+                .orElseThrow(() -> new NotFoundException("Category not found"));
+
+        List<String> orderedIds = req.getOrderedIds();
+        List<MenuItem> current = itemRepo.findByCategory_IdOrderBySortOrderAscCreatedAtAsc(category.getId());
+        Map<String, MenuItem> byId = current.stream().collect(Collectors.toMap(MenuItem::getId, i -> i));
+
+        // Every item of this category exactly once: no items from other categories or tenants, no gaps
+        if (new HashSet<>(orderedIds).size() != orderedIds.size()
+                || orderedIds.size() != current.size()
+                || !byId.keySet().containsAll(orderedIds)) {
+            throw new BadRequestException("orderedIds must list every item of this category exactly once");
+        }
+
+        for (int i = 0; i < orderedIds.size(); i++) {
+            byId.get(orderedIds.get(i)).setSortOrder(i);
+        }
+        log.info("event=items.reordered categoryId={} count={}", categoryId, orderedIds.size());
     }
 
     // ---------------- PRESIGN HELPERS ----------------

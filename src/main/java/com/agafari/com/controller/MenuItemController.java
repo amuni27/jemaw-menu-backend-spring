@@ -1,6 +1,7 @@
 package com.agafari.com.controller;
 
 import com.agafari.com.dto.request.ConfirmImageUploadRequest;
+import com.agafari.com.dto.request.ItemReorderRequest;
 import com.agafari.com.dto.request.MenuItemCreateRequest;
 import com.agafari.com.dto.request.MenuItemStatusUpdateRequest;
 import com.agafari.com.dto.request.MenuItemUpdateRequest;
@@ -15,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api")
@@ -89,5 +91,15 @@ public class MenuItemController {
     public ResponseEntity<Void> delete(@PathVariable String itemId) {
         menuItemService.delete(itemId);
         return ResponseEntity.noContent().build();
+    }
+
+    // AGF-S2-08: mirrors POST /menus/{menuId}/categories/reorder
+    @PostMapping("/categories/{categoryId}/items/reorder")
+    public Map<String, Boolean> reorder(
+            @PathVariable String categoryId,
+            @Valid @RequestBody ItemReorderRequest request
+    ) {
+        menuItemService.reorder(categoryId, request);
+        return Map.of("success", true);
     }
 }

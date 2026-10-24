@@ -1,6 +1,7 @@
 package com.agafari.com.service;
 
 import com.agafari.com.dto.request.ConfirmImageUploadRequest;
+import com.agafari.com.dto.request.ItemReorderRequest;
 import com.agafari.com.dto.request.MenuItemCreateRequest;
 import com.agafari.com.dto.request.MenuItemStatusUpdateRequest;
 import com.agafari.com.dto.request.MenuItemUpdateRequest;
@@ -18,6 +19,9 @@ public interface MenuItemService {
 //    MenuItemResponse create(String menuId, MenuItemCreateRequest req);
     MenuItemResponse get(String itemId);
     MenuItemResponse update(String itemId, MenuItemUpdateRequest req);
+
+    /** AGF-S2-08: saves the order of every item in a category */
+    void reorder(String categoryId, ItemReorderRequest req);
     MenuItemResponse updateStatus(String itemId, MenuItemStatusUpdateRequest req);
     void delete(String itemId);
 }

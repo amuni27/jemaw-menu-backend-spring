@@ -34,7 +34,7 @@ public interface MenuItemRepository extends JpaRepository<MenuItem, String> {
                or i.name ilike concat('%', :search, '%')
                or coalesce(i.description, '') ilike concat('%', :search, '%')
           )
-        order by i.sortOrder asc, i.createdAt desc
+        order by i.sortOrder asc, i.createdAt asc
     """)
     List<MenuItem> searchMenuItems(
             @Param("menuId") String menuId,
@@ -43,6 +43,9 @@ public interface MenuItemRepository extends JpaRepository<MenuItem, String> {
             @Param("status") MenuItemStatus status,
             @Param("search") String search
     );
+
+    /** AGF-S2-08: all items of a category (any status), in their saved order */
+    List<MenuItem> findByCategory_IdOrderBySortOrderAscCreatedAtAsc(String categoryId);
 
     // max sortOrder per (menu, category)
     @Query("""

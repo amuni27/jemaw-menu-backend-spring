@@ -37,5 +37,7 @@ public class AuthTokenResponse {
         private List<BusinessHoursResponse> businessHours;
         /** AGF-S2-02 */
         private String currency;
+        /** AGF-S2-01 */
+        private String logoUrl;
     }
 }

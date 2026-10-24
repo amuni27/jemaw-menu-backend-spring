@@ -106,6 +106,8 @@ class TenantIsolationTest extends AbstractIntegrationTest {
                 x -> json(post("/api/business/{id}/logo/presign", x.b().businessId()), "{\"fileName\":\"logo.png\",\"contentType\":\"image/png\"}"));
         BUSINESS_ENDPOINTS.put("POST /api/business/{id}/logo/confirm",
                 x -> json(post("/api/business/{id}/logo/confirm", x.b().businessId()), "{\"objectKey\":\"business-logo-asset/x/main.png\"}"));
+        BUSINESS_ENDPOINTS.put("DELETE /api/business/{id}/logo", // AGF-S2-01
+                x -> delete("/api/business/{id}/logo", x.b().businessId()));
     }
 
     static Stream<String> businessEndpoints() {

@@ -12,6 +12,7 @@ import com.agafari.com.enums.UserRole;
 import com.agafari.com.enums.UserStatus;
 import com.agafari.com.exception.AccountInactiveException;
 import com.agafari.com.service.CurrencyPolicy;
+import com.agafari.com.service.LogoUrls;
 import com.agafari.com.validation.StrongPasswordValidator;
 import com.agafari.com.exception.BadRequestException;
 import com.agafari.com.exception.ConflictException;
@@ -44,6 +45,9 @@ public class AuthService {
 
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+
+    @Value("${cloudflare.publicBaseUrl}")
+    private String publicBaseUrl;
 
     @Value("${app.baseDomain:agafarimenu.com}")
     private String baseDomain;
@@ -227,7 +231,8 @@ public class AuthService {
                         biz.getBusinessHours().stream()
                                 .map(BusinessHoursResponse::from)
                                 .toList(),
-                        CurrencyPolicy.displayCurrency(biz.getCurrency())
+                        CurrencyPolicy.displayCurrency(biz.getCurrency()),
+                        LogoUrls.publicUrl(publicBaseUrl, biz.getLogoKey())
                 )
         );
     }
@@ -278,7 +283,8 @@ public class AuthService {
                         biz.getBusinessHours().stream()
                                 .map(BusinessHoursResponse::from)
                                 .toList(),
-                        CurrencyPolicy.displayCurrency(biz.getCurrency())
+                        CurrencyPolicy.displayCurrency(biz.getCurrency()),
+                        LogoUrls.publicUrl(publicBaseUrl, biz.getLogoKey())
                 )
         );
     }

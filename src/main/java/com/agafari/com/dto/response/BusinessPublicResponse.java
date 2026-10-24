@@ -17,4 +17,6 @@ public class BusinessPublicResponse {
     private boolean open24_7;
     /** AGF-S2-02 */
     private String currency;
+    /** AGF-S2-01: public logo URL, or null (the guest menu then shows the initials) */
+    private String logoUrl;
 }

@@ -10,7 +10,9 @@ import com.agafari.com.jpa.repository.BusinessRepository;
 import com.agafari.com.security.CurrentUser;
 import com.agafari.com.service.BusinessLogoService;
 import com.agafari.com.service.ImagePolicy;
+import com.agafari.com.service.LogoUrls;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +26,7 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 
 import java.time.Duration;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class BusinessLogoServiceImpl implements BusinessLogoService {
@@ -93,12 +96,42 @@ public class BusinessLogoServiceImpl implements BusinessLogoService {
             throw new BadRequestException(problem);
         }
 
+        String previousKey = business.getLogoKey();
         business.setLogoKey(key);
         businessRepo.save(business);
 
-        // return business with public URL
-        String publicUrl = publicBaseUrl.replaceAll("/$", "") + "/" + key.replaceAll("^/", "");
-        return BusinessResponse.from(business, publicUrl);
+        // AGF-S2-01: a logo of another type has another key; the old object would be orphaned
+        if (previousKey != null && !previousKey.equals(key)) deleteOwnLogoQuietly(businessId, previousKey);
+
+        return BusinessResponse.from(business, LogoUrls.publicUrl(publicBaseUrl, key));
+    }
+
+    @Override
+    @Transactional
+    public BusinessResponse removeLogo(String businessId) {
+        currentUser.requireOwnBusiness(businessId);
+
+        var business = businessRepo.findById(businessId)
+                .orElseThrow(() -> new NotFoundException("Business not found"));
+
+        String key = business.getLogoKey();
+        if (key != null) {
+            business.setLogoKey(null);
+            businessRepo.save(business);
+            deleteOwnLogoQuietly(businessId, key);
+            log.info("event=business.logo.removed businessId={}", businessId);
+        }
+        return BusinessResponse.from(business, null);
+    }
+
+    /** Deletes a logo object, but only one under this business's own logo prefix; failures are logged, not thrown. */
+    private void deleteOwnLogoQuietly(String businessId, String key) {
+        if (!key.startsWith(logoPrefix(businessId) + "/")) return;
+        try {
+            s3Client.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key).build());
+        } catch (Exception e) {
+            log.warn("event=upload.delete_failed key={} errorClass={}", key, e.getClass().getSimpleName());
+        }
     }
 
     private String presignPut(String objectKey, String contentType) {

@@ -7,6 +7,7 @@ import com.agafari.com.jpa.entity.*;
 import com.agafari.com.jpa.repository.*;
 import com.agafari.com.service.PublicMenuService;
 import com.agafari.com.service.CurrencyPolicy;
+import com.agafari.com.service.LogoUrls;
 import com.agafari.com.service.PublicVisibilityPolicy;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -199,6 +200,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .customSubdomain(b.getCustomSubdomain())
                 .open24_7(b.isOpen24_7())
                 .currency(CurrencyPolicy.displayCurrency(b.getCurrency()))
+                .logoUrl(LogoUrls.publicUrl(publicBaseUrl, b.getLogoKey()))
                 .build();
     }
 

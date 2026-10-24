@@ -11,7 +11,6 @@ import com.agafari.com.exception.ConflictException;
 import com.agafari.com.exception.NotFoundException;
 import com.agafari.com.jpa.entity.Business;
 import com.agafari.com.jpa.entity.BusinessHours;
-import com.agafari.com.jpa.repository.BusinessHoursRepository;
 import com.agafari.com.jpa.repository.BusinessRepository;
 import com.agafari.com.security.CurrentUser;
 import com.agafari.com.service.BusinessService;
@@ -32,7 +31,6 @@ public class BusinessServiceImpl implements BusinessService {
 
     private final CurrentUser currentUser;
     private final BusinessRepository businessRepo;
-    private final BusinessHoursRepository hoursRepo;
 
     @Value("${cloudflare.publicBaseUrl}")
     private String publicBaseUrl;
@@ -90,12 +88,14 @@ public class BusinessServiceImpl implements BusinessService {
 
         validateHours(request.isOpen24_7(), request.getBusinessHours());
 
-        hoursRepo.deleteAll(business.getBusinessHours());
-        hoursRepo.flush();
+        // AGF-S2-03: replace the week through the owning collection. Deleting the rows directly while the
+        // business still referenced them (cascade ALL) left them in place, so every edit added 7 more rows.
+        // orphanRemoval deletes all stored rows here, including duplicates left by that behavior.
+        business.getBusinessHours().clear();
+        businessRepo.saveAndFlush(business);
 
         List<BusinessHours> newHours = buildHours(business, request.isOpen24_7(), request.getBusinessHours());
-        hoursRepo.saveAll(newHours);
-
+        business.getBusinessHours().addAll(newHours);
         business.setOpen24_7(request.isOpen24_7());
         businessRepo.save(business);
 

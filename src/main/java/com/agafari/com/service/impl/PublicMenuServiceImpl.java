@@ -1,6 +1,7 @@
 package com.agafari.com.service.impl;
 
 import com.agafari.com.dto.response.*;
+import com.agafari.com.enums.DayOfWeekEnum;
 import com.agafari.com.enums.MenuItemStatus;
 import com.agafari.com.exception.NotFoundException;
 import com.agafari.com.jpa.entity.*;
@@ -203,12 +204,21 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .open24_7(b.isOpen24_7())
                 .currency(CurrencyPolicy.displayCurrency(b.getCurrency()))
                 .logoUrl(LogoUrls.publicUrl(publicBaseUrl, b.getLogoKey()))
-                .hours(b.getBusinessHours().stream()
-                        .sorted(Comparator.comparing(BusinessHours::getDayOfWeek))
-                        .map(PublicBusinessHoursResponse::from)
-                        .toList())
+                .hours(currentHours(b.getBusinessHours()))
                 .timeZone(BUSINESS_TIME_ZONE)
                 .build();
+    }
+
+    /**
+     * One row per day, Monday first (AGF-S2-03). Older hour edits could leave several rows for a day;
+     * the most recently created one is the current one.
+     */
+    private static List<PublicBusinessHoursResponse> currentHours(List<BusinessHours> rows) {
+        Comparator<BusinessHours> newestFirst = Comparator.comparing(BusinessHours::getCreatedAt,
+                Comparator.nullsLast(Comparator.reverseOrder()));
+        Map<DayOfWeekEnum, BusinessHours> byDay = new EnumMap<>(DayOfWeekEnum.class);
+        rows.stream().sorted(newestFirst).forEach(row -> byDay.putIfAbsent(row.getDayOfWeek(), row));
+        return byDay.values().stream().map(PublicBusinessHoursResponse::from).toList();
     }
 
     private MenuTypeResponse toMenuTypeDto(MenuType t) {

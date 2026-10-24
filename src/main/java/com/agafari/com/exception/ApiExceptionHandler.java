@@ -64,6 +64,19 @@ public class ApiExceptionHandler {
                 .body(ApiError.of(HttpStatus.TOO_MANY_REQUESTS, RateLimitedException.CODE, e.getMessage()));
     }
 
+    // AGF-S2-13A
+    @ExceptionHandler(PasswordResetLinkException.class)
+    public ResponseEntity<ApiError> resetLink(PasswordResetLinkException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiError.of(HttpStatus.BAD_REQUEST, PasswordResetLinkException.CODE, e.getMessage()));
+    }
+
+    @ExceptionHandler(PasswordResetUnavailableException.class)
+    public ResponseEntity<ApiError> resetUnavailable(PasswordResetUnavailableException e) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiError.of(HttpStatus.SERVICE_UNAVAILABLE, PasswordResetUnavailableException.CODE, e.getMessage()));
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> conf(ConflictException e) {
         return domain(HttpStatus.CONFLICT, e);

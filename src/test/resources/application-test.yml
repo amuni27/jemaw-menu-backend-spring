@@ -13,6 +13,9 @@ spring:
 app:
   jwt:
     secret: test-only-jwt-secret-not-used-anywhere-else-0123456789
+  password-reset:
+    secret: test-only-password-reset-secret-not-the-jwt-one-42
+    link-base-url: http://frontend.test.invalid/auth/reset-password
 
 cloudflare:
   accessKey: test-access-key

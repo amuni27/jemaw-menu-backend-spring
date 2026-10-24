@@ -33,7 +33,9 @@ class ConfigurationSecretsTest {
                 .containsEntry("cloudflare.secretKey", "${CLOUDFLARE_R2_SECRET_KEY}")
                 .containsEntry("cloudflare.endpoint", "${CLOUDFLARE_R2_ENDPOINT}")
                 .containsEntry("cloudflare.bucket", "${CLOUDFLARE_R2_BUCKET}")
-                .containsEntry("cloudflare.publicBaseUrl", "${CLOUDFLARE_R2_PUBLIC_BASE_URL}");
+                .containsEntry("cloudflare.publicBaseUrl", "${CLOUDFLARE_R2_PUBLIC_BASE_URL}")
+                // AGF-S2-13A: optional; empty means password reset stays off (fails safe)
+                .containsEntry("app.password-reset.secret", "${APP_PASSWORD_RESET_SECRET:}");
     }
 
     @Test

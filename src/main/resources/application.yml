@@ -36,6 +36,13 @@ app:
     expiresMinutes: 120
   baseDomain: ${APP_BASE_DOMAIN:agafarimenu.com}
   # AGF-S1-19: authentication rate limits (in memory, per application instance)
+  # AGF-S2-13A password reset. The secret is dedicated (not the JWT secret) and at least 32 characters; without a
+  # valid one, reset is off: requests get the usual answer and nothing is sent. Links point at the frontend reset page
+  # and carry the token in the URL fragment. No email is sent until a provider is chosen (D5).
+  password-reset:
+    secret: ${APP_PASSWORD_RESET_SECRET:}
+    link-base-url: ${APP_PASSWORD_RESET_LINK_BASE_URL:}
+    token-ttl: 30m
   rate-limit:
     enabled: ${APP_RATE_LIMIT_ENABLED:true}
     login-per-email:            # failed logins for one email
@@ -48,6 +55,15 @@ app:
       limit: 10
       window: 1h
     change-password-per-ip:     # change-password attempts from one client IP
+      limit: 10
+      window: 15m
+    forgot-password-per-email:  # reset-link requests for one email (AGF-S2-13A)
+      limit: 3
+      window: 1h
+    forgot-password-per-ip:     # reset-link requests from one client IP
+      limit: 10
+      window: 1h
+    reset-password-per-ip:      # reset submissions from one client IP
       limit: 10
       window: 15m
     max-tracked-keys: 100000    # memory bound for the counters

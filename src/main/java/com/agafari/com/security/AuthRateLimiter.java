@@ -64,6 +64,17 @@ public class AuthRateLimiter {
         checkAndCount("change_password_ip", "change-password-ip:" + ip, props.changePasswordPerIp(), maskIp(ip));
     }
 
+    /** AGF-S2-13A: reset-link requests per email (registered or not, so limits reveal nothing) and per IP. */
+    public void countForgotPassword(String email, String ip) {
+        checkAndCount("forgot_password_email", "forgot-email:" + normalize(email), props.forgotPasswordPerEmail(), LogMasking.maskEmail(email));
+        checkAndCount("forgot_password_ip", "forgot-ip:" + ip, props.forgotPasswordPerIp(), maskIp(ip));
+    }
+
+    /** AGF-S2-13A: reset submissions per IP (limits guessing at links). */
+    public void countResetPassword(String ip) {
+        checkAndCount("reset_password_ip", "reset-ip:" + ip, props.resetPasswordPerIp(), maskIp(ip));
+    }
+
     // ------------------------------------------------------------------ test support
 
     /** Clears all counters (tests). */
@@ -117,7 +128,8 @@ public class AuthRateLimiter {
 
     private Duration longestWindow() {
         Duration max = props.loginPerEmail().window();
-        for (RateLimitProperties.Rule r : new RateLimitProperties.Rule[]{props.loginPerIp(), props.registerPerIp(), props.changePasswordPerIp()}) {
+        for (RateLimitProperties.Rule r : new RateLimitProperties.Rule[]{props.loginPerIp(), props.registerPerIp(), props.changePasswordPerIp(),
+                props.forgotPasswordPerEmail(), props.forgotPasswordPerIp(), props.resetPasswordPerIp()}) {
             if (r.window().compareTo(max) > 0) max = r.window();
         }
         return max;

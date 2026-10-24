@@ -25,6 +25,9 @@ cloudflare:
 
 app:
   baseDomain: demo.agafari.test
+  # AGF-S2-13A: links open the local frontend; APP_PASSWORD_RESET_SECRET comes from the untracked .env.demo
+  password-reset:
+    link-base-url: http://localhost:5175/auth/reset-password
 
 demo:
   owner:

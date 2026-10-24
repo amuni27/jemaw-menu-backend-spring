@@ -15,6 +15,9 @@ public record RateLimitProperties(
         Rule loginPerIp,
         Rule registerPerIp,
         Rule changePasswordPerIp,
+        Rule forgotPasswordPerEmail, // AGF-S2-13A
+        Rule forgotPasswordPerIp,
+        Rule resetPasswordPerIp,
         int maxTrackedKeys
 ) {
     /** At most {@code limit} events per {@code window}. */

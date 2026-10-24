@@ -40,6 +40,9 @@ public class SecurityConfig {
                                 "/v3/api-docs/**",
                                 "/api/auth/register",
                                 "/api/auth/login",
+                                "/api/auth/forgot-password", // AGF-S2-13A
+                                "/api/auth/reset-password",
+                                "/api/demo/**", // only exists in -Pdemo builds (local demo outbox)
                                 "/actuator/**",
                                 "/venue/**",
                                 "/venue/items/**"

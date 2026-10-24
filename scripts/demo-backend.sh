@@ -14,12 +14,20 @@ if [ ! -f "$ENV_FILE" ]; then
   {
     echo "# Local demo only. Test credentials, never used outside this machine."
     echo "APP_JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')"
+    echo "APP_PASSWORD_RESET_SECRET=$(openssl rand -base64 48 | tr -d '\n')"
     echo "DEMO_OWNER_PASSWORD=Demo-$(openssl rand -hex 6)"
   } > "$ENV_FILE"
   echo "Created $ENV_FILE with new test-only credentials."
 fi
 
+# AGF-S2-13A: older .env.demo files get the password-reset secret added once (separate from the JWT secret)
+if ! grep -q '^APP_PASSWORD_RESET_SECRET=' "$ENV_FILE"; then
+  umask 077
+  echo "APP_PASSWORD_RESET_SECRET=$(openssl rand -base64 48 | tr -d '\n')" >> "$ENV_FILE"
+fi
+
 APP_JWT_SECRET=$(sed -n 's/^APP_JWT_SECRET=//p' "$ENV_FILE")
+APP_PASSWORD_RESET_SECRET=$(sed -n 's/^APP_PASSWORD_RESET_SECRET=//p' "$ENV_FILE")
 DEMO_OWNER_PASSWORD=$(sed -n 's/^DEMO_OWNER_PASSWORD=//p' "$ENV_FILE")
 
 # Run from an empty working directory so the developer's ./application-local.yml is not imported,
@@ -32,6 +40,7 @@ exec env -i \
   PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
   ${JAVA_HOME:+JAVA_HOME="$JAVA_HOME"} \
   APP_JWT_SECRET="$APP_JWT_SECRET" \
+  APP_PASSWORD_RESET_SECRET="$APP_PASSWORD_RESET_SECRET" \
   DEMO_OWNER_PASSWORD="$DEMO_OWNER_PASSWORD" \
   sh ./mvnw -q -Pdemo spring-boot:run \
     -Dspring-boot.run.profiles=demo \

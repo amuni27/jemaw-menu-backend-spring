@@ -27,4 +27,7 @@ public interface MenuItemService {
     /** AGF-S2-19: every OUT_OF_STOCK item of the owner's menu becomes AVAILABLE; returns how many changed. */
     int markAllAvailable(String menuId);
     void delete(String itemId);
+
+    /** AGF-S2-16: removes the item's photo; the storage object is deleted best-effort. */
+    MenuItemResponse removeImage(String itemId);
 }

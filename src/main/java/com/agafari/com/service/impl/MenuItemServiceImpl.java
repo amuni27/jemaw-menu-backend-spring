@@ -201,8 +201,52 @@ public class MenuItemServiceImpl implements MenuItemService {
             throw new BadRequestException(problem);
         }
 
+        String previousKey = item.getImageUrl();
         item.setImageUrl(reqKey);
-        return toResponsePublicUrl(itemRepo.save(item));
+        MenuItem saved = itemRepo.save(item);
+
+        // AGF-S2-16 (D-S2-16-4): a photo of another type has another key; the old object would be orphaned
+        if (previousKey != null && !previousKey.equals(reqKey)) deleteOwnImageQuietly(item.getId(), previousKey);
+
+        return toResponsePublicUrl(saved);
+    }
+
+    // ---------------- REMOVE (AGF-S2-16) ----------------
+
+    /**
+     * Clears the item's photo, then deletes the object best-effort (D-S2-16-2, -3): only under the item's own prefix,
+     * and a storage failure never fails the removal (the object stays orphaned until the delete right exists, M1).
+     */
+    @Override
+    @Transactional
+    public MenuItemResponse removeImage(String itemId) {
+        String businessId = currentUser.businessId();
+
+        MenuItem item = itemRepo.findByIdAndMenu_Business_Id(itemId, businessId)
+                .orElseThrow(() -> new NotFoundException("Item not found"));
+
+        String previous = item.getImageUrl();
+        if (previous != null) {
+            item.setImageUrl(null);
+            item = itemRepo.save(item);
+            deleteOwnImageQuietly(item.getId(), previous);
+            log.info("event=item.image.removed itemId={}", item.getId());
+        }
+        return toResponsePublicUrl(item);
+    }
+
+    /** Deletes an image object only if it lies under this item's own prefix; logs failures without the key (S1-16). */
+    private void deleteOwnImageQuietly(String itemId, String imageUrlOrKey) {
+        String key = imageUrlOrKey.trim();
+        String base = publicBaseUrl.replaceAll("/$", "") + "/";
+        if (key.startsWith(base)) key = key.substring(base.length());
+        key = key.replaceAll("^/+", "");
+        if (!key.startsWith(imagePrefix(itemId) + "/")) return;
+        try {
+            s3Client.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key).build());
+        } catch (Exception e) {
+            log.warn("event=item.image.delete_failed itemId={} errorClass={}", itemId, e.getClass().getSimpleName());
+        }
     }
 
     // ---------------- GET ----------------

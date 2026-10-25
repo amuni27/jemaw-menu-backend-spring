@@ -5,6 +5,7 @@ import com.agafari.com.enums.MenuVisibility;
 import com.agafari.com.jpa.entity.MenuItem;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -43,6 +44,17 @@ public interface MenuItemRepository extends JpaRepository<MenuItem, String> {
             @Param("status") MenuItemStatus status,
             @Param("search") String search
     );
+
+    /**
+     * AGF-S2-19: one bulk update; only this menu's OUT_OF_STOCK items become AVAILABLE. Returns the rows actually
+     * changed, so concurrent edits can't inflate the count, and a second run changes 0.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+        update MenuItem i set i.status = com.agafari.com.enums.MenuItemStatus.AVAILABLE, i.updatedAt = :now
+        where i.menu.id = :menuId and i.status = com.agafari.com.enums.MenuItemStatus.OUT_OF_STOCK
+    """)
+    int markSoldOutAvailable(@Param("menuId") String menuId, @Param("now") java.time.Instant now);
 
     /** AGF-S2-08: all items of a category (any status), in their saved order */
     List<MenuItem> findByCategory_IdOrderBySortOrderAscCreatedAtAsc(String categoryId);

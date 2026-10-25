@@ -87,6 +87,12 @@ public class MenuItemController {
         return ResponseEntity.ok(menuItemService.updateStatus(itemId, request));
     }
 
+    // AGF-S2-19: one transactional bulk update for the menu; returns {"updated": n}
+    @PostMapping("/menus/{menuId}/items/mark-all-available")
+    public Map<String, Integer> markAllAvailable(@PathVariable String menuId) {
+        return Map.of("updated", menuItemService.markAllAvailable(menuId));
+    }
+
     @DeleteMapping("/items/{itemId}")
     public ResponseEntity<Void> delete(@PathVariable String itemId) {
         menuItemService.delete(itemId);

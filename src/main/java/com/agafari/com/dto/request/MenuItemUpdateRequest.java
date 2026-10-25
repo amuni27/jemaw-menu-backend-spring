@@ -26,6 +26,10 @@ public class MenuItemUpdateRequest {
     private Boolean isFeatured;
     @Min(0) private Integer prepTimeMinutes;
     private SpiceLevel spiceLevel;
+    /** AGF-S2-30: true removes a saved prep time. A missing or null prepTimeMinutes still means "unchanged". */
+    private Boolean clearPrepTime;
+    /** AGF-S2-30: true removes a saved spice level. A missing or null spiceLevel still means "unchanged". */
+    private Boolean clearSpiceLevel;
     private MenuItemStatus status;
 }
 

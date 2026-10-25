@@ -228,6 +228,14 @@ public class MenuItemServiceImpl implements MenuItemService {
         MenuItem item = itemRepo.findByIdAndMenu_Business_Id(itemId, businessId)
                 .orElseThrow(() -> new NotFoundException("Item not found"));
 
+        // AGF-S2-30: a value and its clear flag together are contradictory; reject before changing anything
+        if (Boolean.TRUE.equals(req.getClearPrepTime()) && req.getPrepTimeMinutes() != null) {
+            throw new BadRequestException("Send either prepTimeMinutes or clearPrepTime, not both");
+        }
+        if (Boolean.TRUE.equals(req.getClearSpiceLevel()) && req.getSpiceLevel() != null) {
+            throw new BadRequestException("Send either spiceLevel or clearSpiceLevel, not both");
+        }
+
         if (req.getCategoryId() != null) {
             String menuId = item.getMenu().getId();
             Category newCategory = categoryRepo.findByIdAndMenu_Id(req.getCategoryId(), menuId)
@@ -256,6 +264,9 @@ public class MenuItemServiceImpl implements MenuItemService {
         if (req.getIsFeatured() != null) item.setFeatured(req.getIsFeatured());
         if (req.getPrepTimeMinutes() != null) item.setPrepTimeMinutes(req.getPrepTimeMinutes());
         if (req.getSpiceLevel() != null) item.setSpiceLevel(req.getSpiceLevel());
+        // AGF-S2-30: explicit clearing (checked for conflicts before any change above)
+        if (Boolean.TRUE.equals(req.getClearPrepTime())) item.setPrepTimeMinutes(null);
+        if (Boolean.TRUE.equals(req.getClearSpiceLevel())) item.setSpiceLevel(null);
         if (req.getStatus() != null) item.setStatus(req.getStatus());
 
         item = itemRepo.save(item);

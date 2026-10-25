@@ -12,11 +12,18 @@ spring:
     password: ${DB_PASSWORD}
   jpa:
     hibernate:
-      ddl-auto: update
+      # Decision A: Flyway builds the schema (db/migration); Hibernate only checks it matches the entities
+      ddl-auto: validate
     properties:
       hibernate:
         format_sql: true
     open-in-view: false
+  flyway:
+    # Decision A. Fresh databases run V1. An existing development database (built earlier by ddl-auto) is recorded at
+    # version 1 without running V1, so its data stays; FlywayBaselineGuard refuses non-Agafari databases.
+    baseline-on-migrate: true
+    baseline-version: 1
+    baseline-description: "Existing database recorded at the provisional baseline"
 
 springdoc:
   api-docs:

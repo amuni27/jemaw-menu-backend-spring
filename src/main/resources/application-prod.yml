@@ -19,6 +19,10 @@ spring:
     properties:
       hibernate:
         format_sql: false
+  # Decision A covers development and test databases only. Production behaviour is unchanged (no production deployment
+  # exists yet); switching production to Flyway + validate is part of S1-08B's production scope.
+  flyway:
+    enabled: false
 
 
 

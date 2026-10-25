@@ -13,6 +13,9 @@ spring:
     hibernate:
       ddl-auto: create-drop
     show-sql: false
+  # The in-memory H2 demo builds its schema from the entities; the PostgreSQL migrations are not used here (Decision A)
+  flyway:
+    enabled: false
 
 # Image storage is not available in the demo. Placeholder values point at a closed local port,
 # so nothing can reach Cloudflare R2; image uploads fail by design.

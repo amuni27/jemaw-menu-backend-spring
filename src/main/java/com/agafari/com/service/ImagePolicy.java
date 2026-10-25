@@ -46,6 +46,11 @@ public final class ImagePolicy {
         return ext;
     }
 
+    /** Storage prefix that holds one item's images. */
+    public static String itemPrefix(String itemId) {
+        return "agafari/menu-items/" + itemId;
+    }
+
     /** {@code <prefix>/main.<ext>} for an allowed content type. */
     public static String objectKey(String prefix, String contentType) {
         return prefix + "/main." + extensionFor(contentType);

@@ -338,7 +338,7 @@ public class MenuItemServiceImpl implements MenuItemService {
     // ---------------- PRESIGN HELPERS ----------------
 
     private static String imagePrefix(String itemId) {
-        return "agafari/menu-items/" + itemId;
+        return ImagePolicy.itemPrefix(itemId);
     }
 
     private void deleteQuietly(String key) {

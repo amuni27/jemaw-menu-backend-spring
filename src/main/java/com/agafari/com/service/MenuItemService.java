@@ -23,5 +23,8 @@ public interface MenuItemService {
     /** AGF-S2-08: saves the order of every item in a category */
     void reorder(String categoryId, ItemReorderRequest req);
     MenuItemResponse updateStatus(String itemId, MenuItemStatusUpdateRequest req);
+
+    /** AGF-S2-19: every OUT_OF_STOCK item of the owner's menu becomes AVAILABLE; returns how many changed. */
+    int markAllAvailable(String menuId);
     void delete(String itemId);
 }

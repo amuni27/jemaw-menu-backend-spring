@@ -275,6 +275,18 @@ public class MenuItemServiceImpl implements MenuItemService {
 
     @Override
     @Transactional
+    public int markAllAvailable(String menuId) {
+        String businessId = currentUser.businessId();
+        menuRepo.findByIdAndBusiness_Id(menuId, businessId)
+                .orElseThrow(() -> new NotFoundException("Menu not found"));
+
+        int updated = itemRepo.markSoldOutAvailable(menuId, java.time.Instant.now());
+        log.info("event=items.mark_all_available menuId={} updated={}", menuId, updated);
+        return updated;
+    }
+
+    @Override
+    @Transactional
     public MenuItemResponse updateStatus(String itemId, MenuItemStatusUpdateRequest req) {
         String businessId = currentUser.businessId();
 

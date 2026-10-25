@@ -43,6 +43,9 @@ app:
     secret: ${APP_PASSWORD_RESET_SECRET:}
     link-base-url: ${APP_PASSWORD_RESET_LINK_BASE_URL:}
     token-ttl: 30m
+  # AGF-S2-21: guest menu base URL for share-page redirects (same value as the frontend VITE_PUBLIC_MENU_BASE_URL).
+  # Empty = the existing production frontend (PublicMenuBaseUrl.FALLBACK). Never hard-code a brand domain (D2).
+  public-menu-base-url: ${APP_PUBLIC_MENU_BASE_URL:}
   rate-limit:
     enabled: ${APP_RATE_LIMIT_ENABLED:true}
     login-per-email:            # failed logins for one email

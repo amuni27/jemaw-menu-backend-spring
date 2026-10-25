@@ -16,6 +16,8 @@ app:
   password-reset:
     secret: test-only-password-reset-secret-not-the-jwt-one-42
     link-base-url: http://frontend.test.invalid/auth/reset-password
+  # AGF-S2-21: share page redirect target
+  public-menu-base-url: https://frontend.test.invalid
 
 cloudflare:
   accessKey: test-access-key

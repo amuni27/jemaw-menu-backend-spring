@@ -28,6 +28,7 @@ app:
   # AGF-S2-13A: links open the local frontend; APP_PASSWORD_RESET_SECRET comes from the untracked .env.demo
   password-reset:
     link-base-url: http://localhost:5175/auth/reset-password
+  public-menu-base-url: ${APP_PUBLIC_MENU_BASE_URL:http://localhost:5175} # AGF-S2-21
 
 demo:
   owner:

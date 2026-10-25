@@ -57,19 +57,43 @@ public class PublicMenuServiceImpl implements PublicMenuService {
         // sort menus by closest menuType.updatedAt time-of-day to now
         List<Menu> menusSorted = sortMenusByClosestMenuTypeTimeOfDay(menusRaw);
 
-        List<String> menuIds = menusSorted.stream().map(Menu::getId).toList();
+        return new PublicBusinessMenuResponse(businessDto, nestGuestVisible(businessDto, menusSorted, false));
+    }
 
-        // 3) categories active
+    /**
+     * AGF-S2-17: one of the owner's menus as guests would see it once published. The same category and item rules as
+     * the guest menu apply; only the menu's own publish state and visibility are not required. The caller has
+     * already resolved the owner's business; another business's menu is reported as not found.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public PublicBusinessMenuResponse getOwnerPreview(String businessId, String menuId) {
+        Menu menu = menuRepo.findByIdAndBusiness_Id(menuId, businessId)
+                .orElseThrow(() -> new NotFoundException("Menu not found"));
+        Business business = businessRepo.findPublicById(businessId)
+                .orElseThrow(() -> new NotFoundException("Business not found"));
+
+        BusinessPublicResponse businessDto = toBusinessDto(business);
+        return new PublicBusinessMenuResponse(businessDto, nestGuestVisible(businessDto, List.of(menu), true));
+    }
+
+    /**
+     * Active categories and guest-visible items (AVAILABLE, OUT_OF_STOCK) of the given menus, nested in the given
+     * menu order. Shared by the guest menu and the owner preview so the two can't drift apart. Menus and categories
+     * without guest-visible items are dropped, except that {@code keepEmptyMenus} keeps each menu (with no categories).
+     */
+    private List<MenuWithCategoriesResponse> nestGuestVisible(BusinessPublicResponse businessDto, List<Menu> menus,
+                                                              boolean keepEmptyMenus) {
+        List<String> menuIds = menus.stream().map(Menu::getId).toList();
+
+        // categories active
         List<Category> categories = categoryRepo.findActiveByMenuIds(menuIds);
-        if (categories.isEmpty()) {
-            return new PublicBusinessMenuResponse(businessDto, List.of());
-        }
-
         List<String> categoryIds = categories.stream().map(Category::getId).toList();
 
-        // 4) items with a guest-visible status (AVAILABLE, OUT_OF_STOCK)
-        List<MenuItem> items = menuItemRepo.findByMenu_IdInAndCategory_IdInAndStatusInOrderBySortOrderAscCreatedAtAsc(
-                menuIds, categoryIds, PublicVisibilityPolicy.PUBLIC_ITEM_STATUSES);
+        // items with a guest-visible status (AVAILABLE, OUT_OF_STOCK)
+        List<MenuItem> items = categoryIds.isEmpty() ? List.of()
+                : menuItemRepo.findByMenu_IdInAndCategory_IdInAndStatusInOrderBySortOrderAscCreatedAtAsc(
+                        menuIds, categoryIds, PublicVisibilityPolicy.PUBLIC_ITEM_STATUSES);
 
         // itemsByCategoryId
         Map<String, List<MenuItem>> itemsByCategoryId =
@@ -92,19 +116,15 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .filter(Objects::nonNull)
                 .toList();
 
-        if (categoriesWithItems.isEmpty()) {
-            return new PublicBusinessMenuResponse(businessDto, List.of());
-        }
-
         // categoriesByMenuId
         Map<String, List<CategoryWithItemsResponse>> categoriesByMenuId =
                 categoriesWithItems.stream().collect(Collectors.groupingBy(CategoryWithItemsResponse::getMenuId));
 
-        // 5) menus with nested categories; keep sorted order; only menus with categories
-        List<MenuWithCategoriesResponse> menusNested = menusSorted.stream()
+        // menus with nested categories; keep the given order; only menus with categories unless keepEmptyMenus
+        return menus.stream()
                 .map(menu -> {
                     List<CategoryWithItemsResponse> cats = categoriesByMenuId.getOrDefault(menu.getId(), List.of());
-                    if (cats.isEmpty()) return null;
+                    if (cats.isEmpty() && !keepEmptyMenus) return null;
 
                     return MenuWithCategoriesResponse.builder()
                             .id(menu.getId())
@@ -119,8 +139,6 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 })
                 .filter(Objects::nonNull)
                 .toList();
-
-        return new PublicBusinessMenuResponse(businessDto, menusNested);
     }
 
     // ---------------- public item detail ----------------

@@ -223,6 +223,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .currency(CurrencyPolicy.displayCurrency(b.getCurrency()))
                 .logoUrl(LogoUrls.publicUrl(publicBaseUrl, b.getLogoKey()))
                 .locationUrl(b.getLocationUrl())
+                .country(b.getCountry())
                 .hours(currentHours(b.getBusinessHours()))
                 .timeZone(BUSINESS_TIME_ZONE)
                 .build();

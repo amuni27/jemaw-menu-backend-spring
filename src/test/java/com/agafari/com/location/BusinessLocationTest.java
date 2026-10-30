@@ -30,12 +30,13 @@ class BusinessLocationTest extends AbstractIntegrationTest {
     @Autowired private BusinessRepository businesses;
     @Autowired private UserRepository users;
 
+    // CR1: a US restaurant, where the link is optional (Ethiopian rules: CountryLocationRulesTest)
     private ResultActions register(String email, String locationJson) throws Exception {
         String extra = locationJson == null ? "" : "," + locationJson;
         return mockMvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON).content("""
                 {"fullName":"Loc Owner","email":"%s","password":"Str0ng!Pass","businessName":"Loc Cafe",
-                 "businessPhone":"+251911000555","streetAddress":"Bole Road 1","city":"Addis Ababa","state":"Addis Ababa",
-                 "zipcode":"","customSubdomain":"%s","open24_7":true%s}""".formatted(email, email.split("@")[0], extra)));
+                 "country":"US","businessPhone":"+12125550155","streetAddress":"350 5th Ave","city":"New York","state":"NY",
+                 "zipcode":"10118","customSubdomain":"%s","open24_7":true%s}""".formatted(email, email.split("@")[0], extra)));
     }
 
     private String loginBearer(String email) throws Exception {
@@ -63,7 +64,7 @@ class BusinessLocationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.business.locationUrl").value("https://www.google.com/maps/place/Loc+Cafe"));
     }
 
-    // AC3
+    // AC3 (CR1: United States; an Ethiopian registration needs the link)
     @Test
     void registrationWithoutALinkSucceeds() throws Exception {
         register("nolink@test.agafari.local", null).andExpect(status().isCreated());
@@ -94,6 +95,9 @@ class BusinessLocationTest extends AbstractIntegrationTest {
     void theOwnerSetsReplacesKeepsAndRemovesTheLink() throws Exception {
         Tenant owner = data.tenant("alpha");
         String id = owner.businessId();
+        var business = businesses.findById(id).orElseThrow(); // CR1: removal is a US option (Ethiopia must keep a link)
+        business.setCountry("US");
+        businesses.save(business);
 
         update(owner, id, "{\"locationUrl\":\"" + LINK + "\"}").andExpect(status().isOk()).andExpect(jsonPath("$.locationUrl").value(LINK));
         assertThat(storedLink(id)).isEqualTo(LINK);

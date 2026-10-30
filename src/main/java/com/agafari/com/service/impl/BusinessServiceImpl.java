@@ -1,5 +1,9 @@
 package com.agafari.com.service.impl;
 
+import java.util.Map;
+import java.util.LinkedHashMap;
+import com.agafari.com.exception.FieldValidationException;
+import com.agafari.com.service.CountryRules;
 import com.agafari.com.service.GoogleMapsUrls;
 import com.agafari.com.dto.request.BusinessHourDto;
 import com.agafari.com.dto.request.BusinessUpdateRequest;
@@ -115,12 +119,19 @@ public class BusinessServiceImpl implements BusinessService {
         Business business = businessRepo.findById(businessId)
                 .orElseThrow(() -> new NotFoundException("Business not found"));
 
+        // AGF-S2-12 CR1: the stored country's rules (the country itself can't change, D-CR1-4)
+        String country = CountryRules.country(business.getCountry());
+        boolean us = CountryRules.isUnitedStates(country);
+        checkCountryRules(country, business, request);
+
         if (request.getName() != null)          business.setName(request.getName().trim());
         if (request.getBusinessPhone() != null)  business.setBusinessPhone(request.getBusinessPhone().trim());
-        if (request.getStreetAddress() != null)  business.setStreetAddress(request.getStreetAddress().trim());
-        if (request.getCity() != null)           business.setCity(request.getCity().trim());
-        if (request.getState() != null)          business.setState(request.getState().trim());
-        if (request.getZipcode() != null)        business.setZipcode(request.getZipcode().trim());
+        if (us) { // Ethiopia doesn't collect these; anything sent is ignored and stored values stay untouched
+            if (request.getStreetAddress() != null)  business.setStreetAddress(request.getStreetAddress().trim());
+            if (request.getCity() != null)           business.setCity(request.getCity().trim());
+            if (request.getState() != null)          business.setState(CountryRules.usState(request.getState()));
+            if (request.getZipcode() != null)        business.setZipcode(request.getZipcode().trim());
+        }
         if (request.getCurrency() != null)       business.setCurrency(CurrencyPolicy.requireSupported(request.getCurrency())); // AGF-S2-02
         // AGF-S2-12 (D-S2-12-P1): omitted = unchanged; blank removes; otherwise already validated (@GoogleMapsUrl)
         if (request.getLocationUrl() != null)    business.setLocationUrl(GoogleMapsUrls.normalize(request.getLocationUrl()).orElse(null));
@@ -219,5 +230,22 @@ public class BusinessServiceImpl implements BusinessService {
 
     private static int timeToMinutes(String t) {
         return Integer.parseInt(t.substring(0, 2)) * 60 + Integer.parseInt(t.substring(3, 5));
+    }
+
+    /** AGF-S2-12 CR1: only fields present in the request are checked (omitted = unchanged). */
+    private static void checkCountryRules(String country, Business business, BusinessUpdateRequest request) {
+        Map<String, String> errors = new LinkedHashMap<>();
+        if (request.getBusinessPhone() != null && !CountryRules.phoneMatches(country, request.getBusinessPhone())) {
+            errors.put("businessPhone", CountryRules.phoneMessage(country));
+        }
+        if (CountryRules.isUnitedStates(country)) {
+            if (request.getStreetAddress() != null && request.getStreetAddress().isBlank()) errors.put("streetAddress", CountryRules.STREET_MESSAGE);
+            if (request.getCity() != null && request.getCity().isBlank()) errors.put("city", CountryRules.CITY_MESSAGE);
+            if (request.getState() != null && !CountryRules.isUsState(request.getState())) errors.put("state", CountryRules.STATE_MESSAGE);
+            if (request.getZipcode() != null && !CountryRules.isZip(request.getZipcode())) errors.put("zipcode", CountryRules.ZIP_MESSAGE);
+        } else if (request.getLocationUrl() != null && request.getLocationUrl().isBlank() && business.getLocationUrl() != null) {
+            errors.put("locationUrl", CountryRules.LINK_KEEP_MESSAGE); // D-CR1-5: replace, don't remove
+        }
+        if (!errors.isEmpty()) throw new FieldValidationException(errors);
     }
 }

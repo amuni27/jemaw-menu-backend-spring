@@ -1,5 +1,6 @@
 package com.agafari.com.dto.request;
 
+import com.agafari.com.validation.CountryLocationRules;
 import com.agafari.com.validation.GoogleMapsUrl;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
@@ -9,6 +10,7 @@ import lombok.Data;
 import java.util.List;
 
 @Data
+@CountryLocationRules // AGF-S2-12 CR1: the location fields depend on the country
 public class AuthRegisterRequest {
 
     // user
@@ -31,16 +33,16 @@ public class AuthRegisterRequest {
     @NotBlank @Size(min = 6)
     private String businessPhone;
 
-    @NotBlank
+    /** AGF-S2-12 CR1: ET or US (D-CR1-1); missing = ET */
+    private String country;
+
+    // AGF-S2-12 CR1: required for the United States, not collected for Ethiopia (CountryRules)
     private String streetAddress;
 
-    @NotBlank
     private String city;
 
-    @NotBlank @Size(min = 2, max = 60)
     private String state;
 
-    // optional in Ethiopia (Node stores "" when not provided)
     private String zipcode;
 
     @NotBlank
@@ -50,7 +52,7 @@ public class AuthRegisterRequest {
 
     private boolean open24_7;
 
-    /** AGF-S2-12: optional Google Maps share link; blank = none */
+    /** AGF-S2-12: Google Maps share link; required for Ethiopia, optional for the United States (CR1) */
     @GoogleMapsUrl
     private String locationUrl;
 

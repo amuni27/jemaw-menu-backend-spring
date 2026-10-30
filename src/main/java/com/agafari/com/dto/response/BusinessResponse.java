@@ -31,6 +31,8 @@ public class BusinessResponse {
 
     /** AGF-S2-12 */
     private String locationUrl;
+    /** AGF-S2-12 CR1: ET or US */
+    private String country;
 
     private Instant createdAt;
     private Instant updatedAt;
@@ -49,6 +51,7 @@ public class BusinessResponse {
                 .currency(b.getCurrency())
                 .logoUrl(publicLogoUrl)
                 .locationUrl(b.getLocationUrl())
+                .country(b.getCountry())
                 .createdAt(b.getCreatedAt())
                 .updatedAt(b.getUpdatedAt())
                 .build();

@@ -24,6 +24,8 @@ public class BusinessPublicResponse {
 
     /** AGF-S2-12: the stored, validated Google Maps link ("Get Directions"); null = none */
     private String locationUrl;
+    /** AGF-S2-12 CR1: ET or US */
+    private String country;
     /** AGF-S2-03: weekly opening hours, Monday first; empty when none are stored */
     private List<PublicBusinessHoursResponse> hours;
     /** AGF-S2-03: time zone of the hours (D3: Africa/Addis_Ababa for every business for now) */

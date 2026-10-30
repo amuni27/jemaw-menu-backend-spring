@@ -135,7 +135,8 @@ class AuthRateLimitTest extends AbstractIntegrationTest {
         String body = """
                 {"fullName":"Owner %1$d","email":"owner%1$d@test.agafari.local","password":"Str0ng!Pass","businessName":"Cafe %1$d",
                  "businessPhone":"+251911000%1$03d","streetAddress":"1 Test St","city":"Addis Ababa","state":"Addis Ababa",
-                 "zipcode":"","customSubdomain":"cafe-%1$d","open24_7":true}""".formatted(n);
+                 "zipcode":"","customSubdomain":"cafe-%1$d","open24_7":true,
+                 "locationUrl":"https://maps.app.goo.gl/TestCafe1"}""".formatted(n);
         return mockMvc.perform(from(post("/api/auth/register"), ip).contentType(MediaType.APPLICATION_JSON).content(body));
     }
 

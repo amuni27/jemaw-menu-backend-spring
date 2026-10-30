@@ -62,7 +62,8 @@ class MenuTypeSeedTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON).content("""
                         {"fullName":"New Owner","email":"new.owner@test.agafari.local","password":"Str0ng!Pass","businessName":"New Cafe",
                          "businessPhone":"+251911000777","streetAddress":"1 Test St","city":"Addis Ababa","state":"Addis Ababa",
-                         "zipcode":"","customSubdomain":"new-cafe","open24_7":true}"""))
+                         "zipcode":"","customSubdomain":"new-cafe","open24_7":true,
+                 "locationUrl":"https://maps.app.goo.gl/TestCafe1"}"""))
                 .andExpect(status().isCreated());
         String login = mockMvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"new.owner@test.agafari.local\",\"password\":\"Str0ng!Pass\"}"))

@@ -64,5 +64,9 @@ public class Business extends AuditableEntity {
 
     @Column(nullable = false)
     private String currency = "ETB";
+
+    // AGF-S2-12 CR1: ISO 3166-1 alpha-2, ET or US (D-CR1-1); fixed after registration (D-CR1-4)
+    @Column(name = "country", length = 2, nullable = false)
+    private String country = "ET";
 }
 

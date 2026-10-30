@@ -1,5 +1,6 @@
 package com.agafari.com.security;
 
+import com.agafari.com.service.CountryRules;
 import com.agafari.com.service.GoogleMapsUrls;
 import com.agafari.com.dto.request.AuthLoginRequest;
 import com.agafari.com.dto.request.AuthRegisterRequest;
@@ -89,7 +90,9 @@ public class AuthService {
         String subdomain = subdomainLabel + "." + baseDomain;
         String phone = (req.getPhoneNumber() == null || req.getPhoneNumber().trim().isEmpty())
                 ? null : req.getPhoneNumber().trim();
-        String zipcode = (req.getZipcode() == null) ? "" : req.getZipcode().trim();
+        // AGF-S2-12 CR1: validated by @CountryLocationRules; Ethiopia stores no address (empty, D-CR1-2)
+        String country = CountryRules.country(req.getCountry());
+        boolean us = CountryRules.isUnitedStates(country);
 
         // Start log (no secrets)
         log.info("event=auth.register.start email={} subdomain={} open24_7={} hasPhone={} city={} state={}",
@@ -133,10 +136,12 @@ public class AuthService {
             biz.setOwner(user);
             biz.setName(req.getBusinessName().trim());
             biz.setBusinessPhone(req.getBusinessPhone().trim());
-            biz.setStreetAddress(req.getStreetAddress().trim());
-            biz.setCity(req.getCity().trim());
-            biz.setState(req.getState().trim());
-            biz.setZipcode(zipcode);
+            biz.setCountry(country);
+            biz.setStreetAddress(us ? req.getStreetAddress().trim() : "");
+            biz.setCity(us ? req.getCity().trim() : "");
+            biz.setState(us ? CountryRules.usState(req.getState()) : "");
+            biz.setZipcode(us ? req.getZipcode().trim() : "");
+            if (us) biz.setCurrency("USD"); // D-CR1-8
             biz.setCustomSubdomain(subdomain);
             biz.setOpen24_7(req.isOpen24_7());
             biz.setLocationUrl(GoogleMapsUrls.normalize(req.getLocationUrl()).orElse(null)); // AGF-S2-12; blank = none
@@ -235,7 +240,8 @@ public class AuthService {
                                 .toList(),
                         CurrencyPolicy.displayCurrency(biz.getCurrency()),
                         LogoUrls.publicUrl(publicBaseUrl, biz.getLogoKey()),
-                        biz.getLocationUrl()
+                        biz.getLocationUrl(),
+                        biz.getCountry()
                 )
         );
     }
@@ -288,7 +294,8 @@ public class AuthService {
                                 .toList(),
                         CurrencyPolicy.displayCurrency(biz.getCurrency()),
                         LogoUrls.publicUrl(publicBaseUrl, biz.getLogoKey()),
-                        biz.getLocationUrl()
+                        biz.getLocationUrl(),
+                        biz.getCountry()
                 )
         );
     }

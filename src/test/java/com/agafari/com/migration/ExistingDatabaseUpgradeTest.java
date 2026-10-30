@@ -68,7 +68,7 @@ class ExistingDatabaseUpgradeTest extends AbstractIntegrationTest {
 
         List<Map<String, Object>> history = jdbc.queryForList(
                 "select version, type, success from " + LEGACY + ".flyway_schema_history order by installed_rank");
-        assertThat(history).hasSize(3); // V2 (S1-09 seed) and V3 (S2-12 column) then run on the baselined database
+        assertThat(history).hasSize(4); // V2 (S1-09 seed), V3 (S2-12 column) and V4 (CR1 country) then run on the baselined database
         assertThat(history.get(0)).containsEntry("version", "1").containsEntry("type", "BASELINE").containsEntry("success", true);
         assertThat(history.get(1)).containsEntry("version", "2").containsEntry("type", "SQL").containsEntry("success", true);
 
@@ -80,7 +80,7 @@ class ExistingDatabaseUpgradeTest extends AbstractIntegrationTest {
     void runningFlywayAgainChangesNothing() {
         appLikeFlyway().migrate();
         appLikeFlyway().migrate();
-        assertThat(jdbc.queryForObject("select count(*) from " + LEGACY + ".flyway_schema_history", Integer.class)).isEqualTo(3);
+        assertThat(jdbc.queryForObject("select count(*) from " + LEGACY + ".flyway_schema_history", Integer.class)).isEqualTo(4); // baseline + V2..V4
         assertThat(jdbc.queryForObject("select count(*) from " + LEGACY + ".users", Integer.class)).isEqualTo(1);
     }
 

@@ -27,7 +27,8 @@ class PasswordPolicyTest extends AbstractIntegrationTest {
         return """
                 {"fullName":"Policy Owner","email":"policy.owner@test.agafari.local","password":"%s","businessName":"Policy Cafe",
                  "businessPhone":"+251911000222","streetAddress":"1 Test St","city":"Addis Ababa","state":"Addis Ababa",
-                 "zipcode":"","customSubdomain":"policy-cafe","open24_7":true}""".formatted(password);
+                 "zipcode":"","customSubdomain":"policy-cafe","open24_7":true,
+                 "locationUrl":"https://maps.app.goo.gl/TestCafe1"}""".formatted(password);
     }
 
     @ParameterizedTest

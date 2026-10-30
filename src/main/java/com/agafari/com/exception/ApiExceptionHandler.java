@@ -84,6 +84,16 @@ public class ApiExceptionHandler {
 
     // ---------- request errors (framework messages are replaced with fixed, safe text) ----------
 
+    // AGF-S2-12 CR1: service-level field rules
+    @ExceptionHandler(FieldValidationException.class)
+    public ResponseEntity<ApiError> fieldRules(FieldValidationException e) {
+        List<ApiError.FieldErrorDetail> fields = e.fieldErrors().entrySet().stream()
+                .map(f -> new ApiError.FieldErrorDetail(f.getKey(), f.getValue()))
+                .toList();
+        log.info("event=api.validation_failed fields={}", fields.stream().map(ApiError.FieldErrorDetail::field).toList());
+        return ResponseEntity.badRequest().body(ApiError.validation(fields));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiError> validation(MethodArgumentNotValidException e) {
         List<ApiError.FieldErrorDetail> fields = e.getBindingResult().getFieldErrors().stream()

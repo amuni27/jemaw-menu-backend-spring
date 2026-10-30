@@ -41,5 +41,7 @@ public class AuthTokenResponse {
         private String logoUrl;
         /** AGF-S2-12 */
         private String locationUrl;
+        /** AGF-S2-12 CR1 */
+        private String country;
     }
 }

@@ -11,6 +11,8 @@ public class BusinessUpdateRequest {
     private String city;
     private String state;
     private String zipcode;
+    /** AGF-S2-26: United States only; omitted = unchanged */
+    private String timeZone;
     private String currency;
     private String customSubdomain;
 

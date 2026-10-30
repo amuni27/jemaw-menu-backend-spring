@@ -68,5 +68,9 @@ public class Business extends AuditableEntity {
     // AGF-S2-12 CR1: ISO 3166-1 alpha-2, ET or US (D-CR1-1); fixed after registration (D-CR1-4)
     @Column(name = "country", length = 2, nullable = false)
     private String country = "ET";
+
+    // AGF-S2-26: IANA zone for "open now", today's hours and menu ordering; Ethiopia is always Addis Ababa
+    @Column(name = "time_zone", length = 64, nullable = false)
+    private String timeZone = "Africa/Addis_Ababa";
 }
 

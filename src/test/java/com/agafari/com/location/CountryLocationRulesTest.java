@@ -29,7 +29,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class CountryLocationRulesTest extends AbstractIntegrationTest {
 
     private static final String LINK = "https://maps.app.goo.gl/AbC123xyz";
-    private static final String US_ADDRESS = "\"streetAddress\":\"350 5th Ave\",\"city\":\"New York\",\"state\":\"ny\",\"zipcode\":\"10118\"";
+    private static final String US_ADDRESS = "\"streetAddress\":\"350 5th Ave\",\"city\":\"New York\",\"state\":\"ny\",\"zipcode\":\"10118\",\"timeZone\":\"America/New_York\""; // S2-26: US zone required
 
     @Autowired private BusinessRepository businesses;
     @Autowired private UserRepository users;
@@ -152,7 +152,7 @@ class CountryLocationRulesTest extends AbstractIntegrationTest {
         };
         int n = 0;
         for (String[] c : cases) {
-            fieldError(american("usmiss" + (n++) + "@test.agafari.local", "\"country\":\"US\"," + c[1]), c[0]);
+            fieldError(american("usmiss" + (n++) + "@test.agafari.local", "\"country\":\"US\",\"timeZone\":\"America/New_York\"," + c[1]), c[0]);
         }
         assertThat(users.count()).isEqualTo(before);
     }

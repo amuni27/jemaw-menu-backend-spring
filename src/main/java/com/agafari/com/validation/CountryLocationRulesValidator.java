@@ -14,7 +14,7 @@ public class CountryLocationRulesValidator implements ConstraintValidator<Countr
     public boolean isValid(AuthRegisterRequest req, ConstraintValidatorContext context) {
         if (req == null) return true;
         Map<String, String> errors = CountryRules.registrationErrors(req.getCountry(), req.getBusinessPhone(),
-                req.getStreetAddress(), req.getCity(), req.getState(), req.getZipcode(), req.getLocationUrl());
+                req.getStreetAddress(), req.getCity(), req.getState(), req.getZipcode(), req.getLocationUrl(), req.getTimeZone());
         if (errors.isEmpty()) return true;
         context.disableDefaultConstraintViolation();
         errors.forEach((field, message) ->

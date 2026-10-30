@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.LinkedHashMap;
 import com.agafari.com.exception.FieldValidationException;
 import com.agafari.com.service.CountryRules;
+import com.agafari.com.service.TimeZoneRules;
 import com.agafari.com.service.GoogleMapsUrls;
 import com.agafari.com.dto.request.BusinessHourDto;
 import com.agafari.com.dto.request.BusinessUpdateRequest;
@@ -131,6 +132,7 @@ public class BusinessServiceImpl implements BusinessService {
             if (request.getCity() != null)           business.setCity(request.getCity().trim());
             if (request.getState() != null)          business.setState(CountryRules.usState(request.getState()));
             if (request.getZipcode() != null)        business.setZipcode(request.getZipcode().trim());
+            if (request.getTimeZone() != null)       business.setTimeZone(request.getTimeZone().strip()); // AGF-S2-26
         }
         if (request.getCurrency() != null)       business.setCurrency(CurrencyPolicy.requireSupported(request.getCurrency())); // AGF-S2-02
         // AGF-S2-12 (D-S2-12-P1): omitted = unchanged; blank removes; otherwise already validated (@GoogleMapsUrl)
@@ -243,6 +245,7 @@ public class BusinessServiceImpl implements BusinessService {
             if (request.getCity() != null && request.getCity().isBlank()) errors.put("city", CountryRules.CITY_MESSAGE);
             if (request.getState() != null && !CountryRules.isUsState(request.getState())) errors.put("state", CountryRules.STATE_MESSAGE);
             if (request.getZipcode() != null && !CountryRules.isZip(request.getZipcode())) errors.put("zipcode", CountryRules.ZIP_MESSAGE);
+            if (request.getTimeZone() != null && !TimeZoneRules.isUsZone(request.getTimeZone())) errors.put("timeZone", TimeZoneRules.US_ZONE_MESSAGE);
         } else if (request.getLocationUrl() != null && request.getLocationUrl().isBlank() && business.getLocationUrl() != null) {
             errors.put("locationUrl", CountryRules.LINK_KEEP_MESSAGE); // D-CR1-5: replace, don't remove
         }

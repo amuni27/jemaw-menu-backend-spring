@@ -43,5 +43,7 @@ public class AuthTokenResponse {
         private String locationUrl;
         /** AGF-S2-12 CR1 */
         private String country;
+        /** AGF-S2-26 */
+        private String timeZone;
     }
 }

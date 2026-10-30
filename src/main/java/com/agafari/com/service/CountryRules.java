@@ -78,7 +78,8 @@ public final class CountryRules {
 
     /** Field errors for a registration (field name → message), in form order; empty when valid. */
     public static Map<String, String> registrationErrors(String rawCountry, String businessPhone, String streetAddress,
-                                                         String city, String state, String zipcode, String locationUrl) {
+                                                         String city, String state, String zipcode, String locationUrl,
+                                                         String timeZone) {
         Map<String, String> errors = new LinkedHashMap<>();
         String country = country(rawCountry);
         if (country == null) {
@@ -91,6 +92,7 @@ public final class CountryRules {
             if (isBlank(city)) errors.put("city", CITY_MESSAGE);
             if (!isUsState(state)) errors.put("state", STATE_MESSAGE);
             if (!isZip(zipcode)) errors.put("zipcode", ZIP_MESSAGE);
+            if (!TimeZoneRules.isUsZone(timeZone)) errors.put("timeZone", TimeZoneRules.US_ZONE_MESSAGE); // AGF-S2-26
         } else if (isBlank(locationUrl)) {
             errors.put("locationUrl", LINK_REQUIRED_MESSAGE);
         }

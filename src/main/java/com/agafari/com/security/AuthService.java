@@ -1,6 +1,7 @@
 package com.agafari.com.security;
 
 import com.agafari.com.service.CountryRules;
+import com.agafari.com.service.TimeZoneRules;
 import com.agafari.com.service.GoogleMapsUrls;
 import com.agafari.com.dto.request.AuthLoginRequest;
 import com.agafari.com.dto.request.AuthRegisterRequest;
@@ -142,6 +143,7 @@ public class AuthService {
             biz.setState(us ? CountryRules.usState(req.getState()) : "");
             biz.setZipcode(us ? req.getZipcode().trim() : "");
             if (us) biz.setCurrency("USD"); // D-CR1-8
+            biz.setTimeZone(TimeZoneRules.zoneFor(country, req.getTimeZone())); // AGF-S2-26
             biz.setCustomSubdomain(subdomain);
             biz.setOpen24_7(req.isOpen24_7());
             biz.setLocationUrl(GoogleMapsUrls.normalize(req.getLocationUrl()).orElse(null)); // AGF-S2-12; blank = none
@@ -241,7 +243,8 @@ public class AuthService {
                         CurrencyPolicy.displayCurrency(biz.getCurrency()),
                         LogoUrls.publicUrl(publicBaseUrl, biz.getLogoKey()),
                         biz.getLocationUrl(),
-                        biz.getCountry()
+                        biz.getCountry(),
+                        biz.getTimeZone()
                 )
         );
     }
@@ -295,7 +298,8 @@ public class AuthService {
                         CurrencyPolicy.displayCurrency(biz.getCurrency()),
                         LogoUrls.publicUrl(publicBaseUrl, biz.getLogoKey()),
                         biz.getLocationUrl(),
-                        biz.getCountry()
+                        biz.getCountry(),
+                        biz.getTimeZone()
                 )
         );
     }

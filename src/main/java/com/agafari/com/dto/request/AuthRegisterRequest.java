@@ -45,6 +45,9 @@ public class AuthRegisterRequest {
 
     private String zipcode;
 
+    /** AGF-S2-26: required for the United States (one of the US zones); Ethiopia is always Africa/Addis_Ababa */
+    private String timeZone;
+
     @NotBlank
     @Pattern(regexp = "^[a-z0-9]+(?:-[a-z0-9]+)*$", message = "Invalid subdomain")
     @Size(min = 3, max = 30)

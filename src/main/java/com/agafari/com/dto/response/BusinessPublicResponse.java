@@ -28,6 +28,6 @@ public class BusinessPublicResponse {
     private String country;
     /** AGF-S2-03: weekly opening hours, Monday first; empty when none are stored */
     private List<PublicBusinessHoursResponse> hours;
-    /** AGF-S2-03: time zone of the hours (D3: Africa/Addis_Ababa for every business for now) */
+    /** AGF-S2-03 / S2-26: the restaurant's IANA time zone for its hours (Ethiopia: Africa/Addis_Ababa) */
     private String timeZone;
 }

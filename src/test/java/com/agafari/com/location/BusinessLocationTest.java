@@ -36,7 +36,7 @@ class BusinessLocationTest extends AbstractIntegrationTest {
         return mockMvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON).content("""
                 {"fullName":"Loc Owner","email":"%s","password":"Str0ng!Pass","businessName":"Loc Cafe",
                  "country":"US","businessPhone":"+12125550155","streetAddress":"350 5th Ave","city":"New York","state":"NY",
-                 "zipcode":"10118","customSubdomain":"%s","open24_7":true%s}""".formatted(email, email.split("@")[0], extra)));
+                 "zipcode":"10118","timeZone":"America/New_York","customSubdomain":"%s","open24_7":true%s}""".formatted(email, email.split("@")[0], extra)));
     }
 
     private String loginBearer(String email) throws Exception {

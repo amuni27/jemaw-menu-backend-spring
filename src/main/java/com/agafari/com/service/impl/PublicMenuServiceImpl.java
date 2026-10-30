@@ -1,5 +1,6 @@
 package com.agafari.com.service.impl;
 
+import com.agafari.com.service.TimeZoneRules;
 import com.agafari.com.dto.response.*;
 import com.agafari.com.enums.DayOfWeekEnum;
 import com.agafari.com.enums.MenuItemStatus;
@@ -26,8 +27,8 @@ import java.util.stream.Collectors;
 public class PublicMenuServiceImpl implements PublicMenuService {
 
     private static final Logger log = LoggerFactory.getLogger(PublicMenuServiceImpl.class);
-    /** PO decision D3: one fixed time zone for opening hours until per-business time zones exist (S2-26). */
-    static final String BUSINESS_TIME_ZONE = "Africa/Addis_Ababa";
+    /** AGF-S2-26 (D-S2-26-6): menu-type meal times are wall-clock times defined in Addis Ababa (D-S1-09-2). */
+    private static final ZoneId MEAL_TIME_ZONE = ZoneId.of(TimeZoneRules.ADDIS_ABABA);
     private final BusinessRepository businessRepo;
     private final MenuRepository menuRepo;
     private final CategoryRepository categoryRepo;
@@ -35,6 +36,12 @@ public class PublicMenuServiceImpl implements PublicMenuService {
 
     @Value("${cloudflare.publicBaseUrl}")
     private String publicBaseUrl;
+
+    private volatile Clock clock = Clock.systemUTC(); // AGF-S2-26: replaceable in tests
+
+    public void setClock(Clock clock) {
+        this.clock = clock;
+    }
 
     @Override
     @Transactional(readOnly = true)
@@ -55,7 +62,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
         }
 
         // sort menus by closest menuType.updatedAt time-of-day to now
-        List<Menu> menusSorted = sortMenusByClosestMenuTypeTimeOfDay(menusRaw);
+        List<Menu> menusSorted = sortMenusByClosestMenuTypeTimeOfDay(menusRaw, TimeZoneRules.zoneId(business.getTimeZone()));
 
         return new PublicBusinessMenuResponse(businessDto, nestGuestVisible(businessDto, menusSorted, false));
     }
@@ -167,8 +174,9 @@ public class PublicMenuServiceImpl implements PublicMenuService {
 
     // ---------------- sorting logic (same as Node) ----------------
 
-    private List<Menu> sortMenusByClosestMenuTypeTimeOfDay(List<Menu> menusRaw) {
-        LocalTime now = LocalTime.now();
+    /** AGF-S2-26: "now" is the restaurant's local time; meal times are read in Addis Ababa, independent of the server zone. */
+    private List<Menu> sortMenusByClosestMenuTypeTimeOfDay(List<Menu> menusRaw, ZoneId restaurantZone) {
+        LocalTime now = LocalTime.now(clock.withZone(restaurantZone));
         int nowMin = now.getHour() * 60 + now.getMinute();
 
         return menusRaw.stream()
@@ -197,8 +205,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
     }
 
     private int minutesSinceMidnight(Instant instant) {
-        // if updatedAt is Instant in UTC. Convert to system default like Node's Date.
-        LocalDateTime dt = LocalDateTime.ofInstant(instant, ZoneId.systemDefault());
+        LocalDateTime dt = LocalDateTime.ofInstant(instant, MEAL_TIME_ZONE);
         return dt.getHour() * 60 + dt.getMinute();
     }
 
@@ -225,7 +232,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .locationUrl(b.getLocationUrl())
                 .country(b.getCountry())
                 .hours(currentHours(b.getBusinessHours()))
-                .timeZone(BUSINESS_TIME_ZONE)
+                .timeZone(TimeZoneRules.zoneId(b.getTimeZone()).getId())
                 .build();
     }
 

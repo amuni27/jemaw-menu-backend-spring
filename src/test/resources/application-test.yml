@@ -10,6 +10,9 @@ spring:
       # Decision A: the schema comes from Flyway (db/migration); Hibernate only validates it
       ddl-auto: validate
   flyway:
+    # Always on in tests, also for contexts that add the prod profile (ProductionProfileTest: "prod", "test"), whose
+    # own fresh Testcontainers database must still be built from the migrations. Production itself keeps Flyway off.
+    enabled: true
     # test databases start empty (Testcontainers); never baseline an unknown non-empty schema here
     baseline-on-migrate: false
 

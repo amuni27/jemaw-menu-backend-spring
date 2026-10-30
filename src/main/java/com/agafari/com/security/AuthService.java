@@ -1,5 +1,6 @@
 package com.agafari.com.security;
 
+import com.agafari.com.service.GoogleMapsUrls;
 import com.agafari.com.dto.request.AuthLoginRequest;
 import com.agafari.com.dto.request.AuthRegisterRequest;
 import com.agafari.com.dto.request.BusinessHourDto;
@@ -138,6 +139,7 @@ public class AuthService {
             biz.setZipcode(zipcode);
             biz.setCustomSubdomain(subdomain);
             biz.setOpen24_7(req.isOpen24_7());
+            biz.setLocationUrl(GoogleMapsUrls.normalize(req.getLocationUrl()).orElse(null)); // AGF-S2-12; blank = none
 
             businessRepo.save(biz);
             log.info("event=auth.register.business_saved email={} userId={} businessId={} subdomain={}",
@@ -232,7 +234,8 @@ public class AuthService {
                                 .map(BusinessHoursResponse::from)
                                 .toList(),
                         CurrencyPolicy.displayCurrency(biz.getCurrency()),
-                        LogoUrls.publicUrl(publicBaseUrl, biz.getLogoKey())
+                        LogoUrls.publicUrl(publicBaseUrl, biz.getLogoKey()),
+                        biz.getLocationUrl()
                 )
         );
     }
@@ -284,7 +287,8 @@ public class AuthService {
                                 .map(BusinessHoursResponse::from)
                                 .toList(),
                         CurrencyPolicy.displayCurrency(biz.getCurrency()),
-                        LogoUrls.publicUrl(publicBaseUrl, biz.getLogoKey())
+                        LogoUrls.publicUrl(publicBaseUrl, biz.getLogoKey()),
+                        biz.getLocationUrl()
                 )
         );
     }

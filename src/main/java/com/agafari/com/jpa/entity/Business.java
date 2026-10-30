@@ -46,6 +46,10 @@ public class Business extends AuditableEntity {
     @Column(name = "logoKey")
     private String logoKey;
 
+    /** AGF-S2-12: validated Google Maps share link (V3, at most 2,048 characters); null = none */
+    @Column(name = "locationUrl", length = 2048)
+    private String locationUrl;
+
     @Column(name = "customSubdomain", nullable = false, unique = true)
     private String customSubdomain;
 

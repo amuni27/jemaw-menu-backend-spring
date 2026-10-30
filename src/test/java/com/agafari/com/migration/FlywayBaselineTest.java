@@ -39,7 +39,7 @@ class FlywayBaselineTest extends AbstractIntegrationTest {
     void version2SeedFollowsTheBaseline() {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "select version, description, success from flyway_schema_history where version is not null order by installed_rank");
-        assertThat(history).extracting(r -> r.get("version")).containsExactly("1", "2");
+        assertThat(history).extracting(r -> r.get("version")).containsExactly("1", "2", "3"); // V3: AGF-S2-12
         assertThat(history.get(1).get("description")).isEqualTo("seed menu types");
         assertThat(history.get(1).get("success")).isEqualTo(true);
     }

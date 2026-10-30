@@ -1,5 +1,6 @@
 package com.agafari.com.dto.request;
 
+import com.agafari.com.validation.GoogleMapsUrl;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import com.agafari.com.validation.StrongPassword;
@@ -48,6 +49,10 @@ public class AuthRegisterRequest {
     private String customSubdomain;
 
     private boolean open24_7;
+
+    /** AGF-S2-12: optional Google Maps share link; blank = none */
+    @GoogleMapsUrl
+    private String locationUrl;
 
     @Valid
     private List<BusinessHourDto> businessHours; // optional, validated in service if open24_7=false

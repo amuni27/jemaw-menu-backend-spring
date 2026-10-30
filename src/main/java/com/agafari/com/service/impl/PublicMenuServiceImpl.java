@@ -222,6 +222,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .open24_7(b.isOpen24_7())
                 .currency(CurrencyPolicy.displayCurrency(b.getCurrency()))
                 .logoUrl(LogoUrls.publicUrl(publicBaseUrl, b.getLogoKey()))
+                .locationUrl(b.getLocationUrl())
                 .hours(currentHours(b.getBusinessHours()))
                 .timeZone(BUSINESS_TIME_ZONE)
                 .build();

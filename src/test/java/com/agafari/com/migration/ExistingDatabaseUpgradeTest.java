@@ -68,7 +68,7 @@ class ExistingDatabaseUpgradeTest extends AbstractIntegrationTest {
 
         List<Map<String, Object>> history = jdbc.queryForList(
                 "select version, type, success from " + LEGACY + ".flyway_schema_history order by installed_rank");
-        assertThat(history).hasSize(2); // AGF-S1-09: V2 (menu-type seed) then runs on the baselined database
+        assertThat(history).hasSize(3); // V2 (S1-09 seed) and V3 (S2-12 column) then run on the baselined database
         assertThat(history.get(0)).containsEntry("version", "1").containsEntry("type", "BASELINE").containsEntry("success", true);
         assertThat(history.get(1)).containsEntry("version", "2").containsEntry("type", "SQL").containsEntry("success", true);
 
@@ -80,12 +80,13 @@ class ExistingDatabaseUpgradeTest extends AbstractIntegrationTest {
     void runningFlywayAgainChangesNothing() {
         appLikeFlyway().migrate();
         appLikeFlyway().migrate();
-        assertThat(jdbc.queryForObject("select count(*) from " + LEGACY + ".flyway_schema_history", Integer.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("select count(*) from " + LEGACY + ".flyway_schema_history", Integer.class)).isEqualTo(3);
         assertThat(jdbc.queryForObject("select count(*) from " + LEGACY + ".users", Integer.class)).isEqualTo(1);
     }
 
     @Test
-    void version1BuildsExactlyTheColumnsAnExistingDatabaseHas() {
+    void anUpgradedExistingDatabaseHasExactlyTheColumnsOfAFreshOne() {
+        appLikeFlyway().migrate(); // baseline at V1, then V2.. (AGF-S2-12 adds a column in V3)
         String columns = "select table_name, column_name, data_type, is_nullable, character_maximum_length, numeric_precision, "
                 + "numeric_scale, datetime_precision from information_schema.columns where table_schema = ? "
                 + "and table_name <> 'flyway_schema_history' order by table_name, column_name";
@@ -95,7 +96,8 @@ class ExistingDatabaseUpgradeTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void version1HasTheSameKeysUniqueRulesAndChecks() {
+    void anUpgradedExistingDatabaseHasTheSameKeysUniqueRulesAndChecks() {
+        appLikeFlyway().migrate();
         String constraints = "select tc.table_name, tc.constraint_type, string_agg(kcu.column_name, ',' order by kcu.ordinal_position) cols "
                 + "from information_schema.table_constraints tc left join information_schema.key_column_usage kcu "
                 + "on tc.constraint_name = kcu.constraint_name and tc.table_schema = kcu.table_schema "

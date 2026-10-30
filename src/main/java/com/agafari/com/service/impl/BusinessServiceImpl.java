@@ -1,5 +1,6 @@
 package com.agafari.com.service.impl;
 
+import com.agafari.com.service.GoogleMapsUrls;
 import com.agafari.com.dto.request.BusinessHourDto;
 import com.agafari.com.dto.request.BusinessUpdateRequest;
 import com.agafari.com.dto.request.UpdateBusinessHoursRequest;
@@ -121,6 +122,8 @@ public class BusinessServiceImpl implements BusinessService {
         if (request.getState() != null)          business.setState(request.getState().trim());
         if (request.getZipcode() != null)        business.setZipcode(request.getZipcode().trim());
         if (request.getCurrency() != null)       business.setCurrency(CurrencyPolicy.requireSupported(request.getCurrency())); // AGF-S2-02
+        // AGF-S2-12 (D-S2-12-P1): omitted = unchanged; blank removes; otherwise already validated (@GoogleMapsUrl)
+        if (request.getLocationUrl() != null)    business.setLocationUrl(GoogleMapsUrls.normalize(request.getLocationUrl()).orElse(null));
 
         if (request.getCustomSubdomain() != null) {
             String label = request.getCustomSubdomain().trim().toLowerCase();

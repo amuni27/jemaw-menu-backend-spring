@@ -1,0 +1,6 @@
+# Keep local secrets and build output out of the Docker build context (AGF-S1-01)
+application-local.yml
+.env
+.env.*
+target/
+.idea/

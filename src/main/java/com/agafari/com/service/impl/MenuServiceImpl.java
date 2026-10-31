@@ -17,6 +17,7 @@ import com.agafari.com.jpa.repository.MenuRepository;
 import com.agafari.com.jpa.repository.MenuTypeRepository;
 import com.agafari.com.security.CurrentUser;
 import com.agafari.com.service.MenuService;
+import com.agafari.com.service.CurrencyPolicy;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -55,8 +56,8 @@ public class MenuServiceImpl implements MenuService {
     @Transactional
     @Override
     public MenuResponse createMenu(MenuCreateRequest request) {
-        log.info("Menu create starting for {}", request);
         String businessId = currentUser.businessId();
+        log.info("event=menu.create.start businessId={} menuTypeId={}", businessId, request.getMenuTypeId());
 
         Business business = businessRepo.findById(businessId)
                 .orElseThrow(() -> new NotFoundException("Business not found. Cannot create menu."));
@@ -71,10 +72,12 @@ public class MenuServiceImpl implements MenuService {
         menu.setMenuType(menuType);
 
         menu.setName(request.getName());
-        menu.setDescription(request.getDescription());
+        menu.setDescription(blankToNull(request.getDescription()));
 
         menu.setVisibility(request.getVisibility() == null ? MenuVisibility.PUBLIC : request.getVisibility());
-        // isActive default true in entity
+        // AGF-S1-15 / PO-2: new menus start unpublished unless the client explicitly publishes them.
+        // Existing rows are not touched.
+        menu.setActive(Boolean.TRUE.equals(request.getIsActive()));
 
         return toResponse(menuRepo.save(menu));
     }
@@ -100,11 +103,16 @@ public class MenuServiceImpl implements MenuService {
 
         if (request.getName() != null) menu.setName(request.getName());
 
-        // If you want "nullable" behavior like Node (zod nullable), this is OK:
-        // - send description: null => clears description
-        // - omit description => unchanged
-        if (request.getDescription() != null || (request.getDescription() == null && requestWasProvidedDescription(request))) {
-            menu.setDescription(request.getDescription());
+        // AGF-S1-14: omitted (or null) description = unchanged; "" (or blank) clears it
+        if (request.getDescription() != null) {
+            menu.setDescription(blankToNull(request.getDescription()));
+        }
+
+        // AGF-S1-14: the menu type can be changed; it must exist (types are global, not tenant-owned)
+        if (request.getMenuTypeId() != null) {
+            MenuType menuType = menuTypeRepo.findById(request.getMenuTypeId())
+                    .orElseThrow(() -> new BadRequestException("Invalid menu type"));
+            menu.setMenuType(menuType);
         }
 
         if (request.getIsActive() != null) menu.setActive(request.getIsActive());
@@ -144,9 +152,8 @@ public class MenuServiceImpl implements MenuService {
     }
 
     private MenuResponse toResponse(Menu m) {
-        String currency = (m.getBusiness() != null && m.getBusiness().getCurrency() != null)
-                ? m.getBusiness().getCurrency()
-                : "USD";
+        // AGF-S2-02: the restaurant's currency; ETB (the entity default) when missing, never USD
+        String currency = CurrencyPolicy.displayCurrency(m.getBusiness() != null ? m.getBusiness().getCurrency() : null);
 
         return MenuResponse.builder()
                 .id(m.getId())
@@ -171,8 +178,7 @@ public class MenuServiceImpl implements MenuService {
      * If you don't need "clear description" feature, delete this logic and only:
      * if (request.getDescription() != null) menu.setDescription(request.getDescription());
      */
-    private boolean requestWasProvidedDescription(MenuUpdateRequest request) {
-        // simplest default: return false => we only update description when non-null
-        return false;
+    private static String blankToNull(String value) {
+        return (value == null || value.isBlank()) ? null : value;
     }
 }

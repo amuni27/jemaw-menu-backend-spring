@@ -2,6 +2,7 @@ package com.agafari.com.dto.request;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
+import com.agafari.com.validation.StrongPassword;
 import lombok.Data;
 
 import java.util.List;
@@ -19,7 +20,7 @@ public class AuthRegisterRequest {
     // optional (Node: "" => undefined)
     private String phoneNumber;
 
-    @NotBlank @Size(min = 6)
+    @NotBlank @StrongPassword // AGF-S1-17
     private String password;
 
     // business

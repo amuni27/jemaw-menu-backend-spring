@@ -39,7 +39,7 @@ public class CategoryController {
     @PatchMapping("/categories/{categoryId}")
     public CategoryResponse patch(
             @PathVariable String categoryId,
-            @RequestBody CategoryUpdateRequest request) {
+            @Valid @RequestBody CategoryUpdateRequest request) {
 
         return categoryService.patch(categoryId, request);
     }
@@ -53,7 +53,7 @@ public class CategoryController {
     @PostMapping("/menus/{menuId}/categories/reorder")
     public Map<String, Boolean> reorder(
             @PathVariable String menuId,
-            @RequestBody CategoryReorderRequest request) {
+            @Valid @RequestBody CategoryReorderRequest request) {
 
         categoryService.reorder(menuId, request);
         return Map.of("success", true);

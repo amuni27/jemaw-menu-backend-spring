@@ -3,6 +3,7 @@ package com.agafari.com.controller;
 import com.agafari.com.dto.request.UserUpdateRequest;
 import com.agafari.com.dto.response.UserResponse;
 import com.agafari.com.service.UserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -15,7 +16,7 @@ public class UserController {
     private final UserService userService;
 
     @PatchMapping
-    public ResponseEntity<UserResponse> updateUser(@RequestBody UserUpdateRequest request) {
+    public ResponseEntity<UserResponse> updateUser(@Valid @RequestBody UserUpdateRequest request) {
         return ResponseEntity.ok(userService.updateUser(request));
     }
 }

@@ -33,4 +33,9 @@ public class BusinessLogoController {
     ) {
         return ResponseEntity.ok(businessLogoService.confirmLogo(businessId, req));
     }
+
+    @DeleteMapping("/{businessId}/logo")
+    public ResponseEntity<BusinessResponse> removeLogo(@PathVariable String businessId) {
+        return ResponseEntity.ok(businessLogoService.removeLogo(businessId));
+    }
 }

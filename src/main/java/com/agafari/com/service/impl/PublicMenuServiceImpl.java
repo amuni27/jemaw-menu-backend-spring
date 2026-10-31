@@ -1,11 +1,15 @@
 package com.agafari.com.service.impl;
 
 import com.agafari.com.dto.response.*;
+import com.agafari.com.enums.DayOfWeekEnum;
 import com.agafari.com.enums.MenuItemStatus;
 import com.agafari.com.exception.NotFoundException;
 import com.agafari.com.jpa.entity.*;
 import com.agafari.com.jpa.repository.*;
 import com.agafari.com.service.PublicMenuService;
+import com.agafari.com.service.CurrencyPolicy;
+import com.agafari.com.service.LogoUrls;
+import com.agafari.com.service.PublicVisibilityPolicy;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +26,8 @@ import java.util.stream.Collectors;
 public class PublicMenuServiceImpl implements PublicMenuService {
 
     private static final Logger log = LoggerFactory.getLogger(PublicMenuServiceImpl.class);
+    /** PO decision D3: one fixed time zone for opening hours until per-business time zones exist (S2-26). */
+    static final String BUSINESS_TIME_ZONE = "Africa/Addis_Ababa";
     private final BusinessRepository businessRepo;
     private final MenuRepository menuRepo;
     private final CategoryRepository categoryRepo;
@@ -41,8 +47,9 @@ public class PublicMenuServiceImpl implements PublicMenuService {
 
         BusinessPublicResponse businessDto = toBusinessDto(business);
 
-        // 2) menus (active) + menuType
-        List<Menu> menusRaw = menuRepo.findActiveMenusWithMenuType(businessId);
+        // 2) menus (active + PUBLIC) + menuType
+        List<Menu> menusRaw = menuRepo.findByBusiness_IdAndIsActiveTrueAndVisibility(
+                businessId, PublicVisibilityPolicy.PUBLIC_MENU_VISIBILITY);
         if (menusRaw.isEmpty()) {
             return new PublicBusinessMenuResponse(businessDto, List.of());
         }
@@ -60,8 +67,9 @@ public class PublicMenuServiceImpl implements PublicMenuService {
 
         List<String> categoryIds = categories.stream().map(Category::getId).toList();
 
-        // 4) items AVAILABLE only
-        List<MenuItem> items = menuItemRepo.findAvailableByMenuIdsAndCategoryIds(menuIds, categoryIds);
+        // 4) items with a guest-visible status (AVAILABLE, OUT_OF_STOCK)
+        List<MenuItem> items = menuItemRepo.findByMenu_IdInAndCategory_IdInAndStatusInOrderBySortOrderAscCreatedAtAsc(
+                menuIds, categoryIds, PublicVisibilityPolicy.PUBLIC_ITEM_STATUSES);
 
         // itemsByCategoryId
         Map<String, List<MenuItem>> itemsByCategoryId =
@@ -105,6 +113,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                             .isActive(menu.isActive())
                             .visibility(menu.getVisibility())
                             .menuType(toMenuTypeDto(menu.getMenuType()))
+                            .currency(businessDto.getCurrency())
                             .categories(cats)
                             .build();
                 })
@@ -112,6 +121,30 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .toList();
 
         return new PublicBusinessMenuResponse(businessDto, menusNested);
+    }
+
+    // ---------------- public item detail ----------------
+
+    @Override
+    @Transactional(readOnly = true)
+    public MenuItemPublicResponse getPublicItem(String businessId, String itemId) {
+        return findPublicItem(businessId, itemId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public MenuItemPublicResponse getPublicItem(String itemId) {
+        return findPublicItem(null, itemId);
+    }
+
+    // Same rule as the public menu. Hidden and non-existent items share one 404 so existence is not revealed.
+    private MenuItemPublicResponse findPublicItem(String businessId, String itemId) {
+        return menuItemRepo.findPubliclyVisibleItem(
+                        itemId, businessId,
+                        PublicVisibilityPolicy.PUBLIC_MENU_VISIBILITY,
+                        PublicVisibilityPolicy.PUBLIC_ITEM_STATUSES)
+                .map(this::toItemDto)
+                .orElseThrow(() -> new NotFoundException("Item not found"));
     }
 
     // ---------------- sorting logic (same as Node) ----------------
@@ -169,7 +202,23 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .zipcode(b.getZipcode())
                 .customSubdomain(b.getCustomSubdomain())
                 .open24_7(b.isOpen24_7())
+                .currency(CurrencyPolicy.displayCurrency(b.getCurrency()))
+                .logoUrl(LogoUrls.publicUrl(publicBaseUrl, b.getLogoKey()))
+                .hours(currentHours(b.getBusinessHours()))
+                .timeZone(BUSINESS_TIME_ZONE)
                 .build();
+    }
+
+    /**
+     * One row per day, Monday first (AGF-S2-03). Older hour edits could leave several rows for a day;
+     * the most recently created one is the current one.
+     */
+    private static List<PublicBusinessHoursResponse> currentHours(List<BusinessHours> rows) {
+        Comparator<BusinessHours> newestFirst = Comparator.comparing(BusinessHours::getCreatedAt,
+                Comparator.nullsLast(Comparator.reverseOrder()));
+        Map<DayOfWeekEnum, BusinessHours> byDay = new EnumMap<>(DayOfWeekEnum.class);
+        rows.stream().sorted(newestFirst).forEach(row -> byDay.putIfAbsent(row.getDayOfWeek(), row));
+        return byDay.values().stream().map(PublicBusinessHoursResponse::from).toList();
     }
 
     private MenuTypeResponse toMenuTypeDto(MenuType t) {
@@ -203,6 +252,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .ingredients(i.getIngredients())
                 .allergens(i.getAllergens())
                 .tags(i.getTags())
+                .currency(CurrencyPolicy.displayCurrency(i.getMenu().getBusiness().getCurrency()))
                 .build();
     }
 }

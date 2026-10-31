@@ -29,4 +29,6 @@ public class MenuItemPublicResponse {
     private List<String> ingredients;
     private List<String> allergens;
     private List<String> tags;
+    /** The restaurant's currency (AGF-S2-02) */
+    private String currency;
 }

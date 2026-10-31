@@ -1,0 +1,15 @@
+# Secret scanning rules (AGF-S1-02). Uses the gitleaks default rule set.
+title = "Agafari gitleaks configuration"
+
+[extend]
+useDefault = true
+
+# Narrow allowlist: only explicit placeholders and test-only dummy values.
+# Never add real paths or real values here; fix or rotate the secret instead.
+[[allowlists]]
+description = "Explicit placeholders and test-only dummy values"
+regexes = [
+  '''^change-me-''',
+  '''^test-only-''',
+  '''^\$\{[A-Z0-9_]+\}$''',
+]

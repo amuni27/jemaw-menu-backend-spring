@@ -1,5 +1,6 @@
 package com.agafari.com.jpa.repository;
 
+import com.agafari.com.enums.MenuVisibility;
 import com.agafari.com.jpa.entity.Menu;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -18,10 +19,7 @@ public interface MenuRepository extends JpaRepository<Menu, String> {
     boolean existsByIdAndBusiness_Id(String id, String businessId);
 
 
+    // public menu: active menus with the given visibility, with menuType loaded
     @EntityGraph(attributePaths = {"menuType"})
-    List<Menu> findByBusiness_IdAndIsActiveTrue(String businessId);
-
-    default List<Menu> findActiveMenusWithMenuType(String businessId) {
-        return findByBusiness_IdAndIsActiveTrue(businessId);
-    }
+    List<Menu> findByBusiness_IdAndIsActiveTrueAndVisibility(String businessId, MenuVisibility visibility);
 }

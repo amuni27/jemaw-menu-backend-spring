@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -44,7 +45,7 @@ public class CategoryServiceImpl implements CategoryService {
         }
 
         return categoryRepo
-                .findByMenu_IdAndMenu_Business_IdOrderBySortOrderAsc(menuId, businessId)
+                .findByMenu_IdAndMenu_Business_IdOrderBySortOrderAscCreatedAtAsc(menuId, businessId)
                 .stream()
                 .map(this::toResponse)
                 .toList();
@@ -65,8 +66,8 @@ public class CategoryServiceImpl implements CategoryService {
         c.setMenu(menu);
         c.setName(request.getName());
 
-        if (request.getSortOrder() != null)
-            c.setSortOrder(request.getSortOrder());
+        // AGF-S2-07: a new category goes after the existing ones unless a position is given
+        c.setSortOrder(request.getSortOrder() != null ? request.getSortOrder() : categoryRepo.maxSortOrder(menuId) + 1);
 
         if (request.getIsActive() != null)
             c.setActive(request.getIsActive());
@@ -143,6 +144,14 @@ public class CategoryServiceImpl implements CategoryService {
 
         if (categories.size() != request.getOrderedIds().size()) {
             throw new BadRequestException("One or more categories invalid");
+        }
+
+        // AGF-S2-07: the list must name every category of the menu exactly once; a partial list
+        // would leave two categories on the same position
+        long menuCategories = categoryRepo.findByMenu_IdAndMenu_Business_IdOrderBySortOrderAscCreatedAtAsc(menuId, businessId).size();
+        if (new HashSet<>(request.getOrderedIds()).size() != request.getOrderedIds().size()
+                || categories.size() != menuCategories) {
+            throw new BadRequestException("orderedIds must list every category of this menu exactly once");
         }
 
         // 🔥 Senior optimization — O(n) instead of O(n²)

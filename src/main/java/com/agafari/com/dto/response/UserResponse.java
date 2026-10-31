@@ -1,6 +1,7 @@
 package com.agafari.com.dto.response;
 
 import com.agafari.com.jpa.entity.User;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Builder;
 import lombok.Data;
 
@@ -12,6 +13,9 @@ public class UserResponse {
     private String email;
     private String phoneNumber;
     private String role;
+    /** New JWT, only present when the email (the token subject) changed (AGF-S1-07). */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String token;
 
     public static UserResponse from(User user) {
         return UserResponse.builder()

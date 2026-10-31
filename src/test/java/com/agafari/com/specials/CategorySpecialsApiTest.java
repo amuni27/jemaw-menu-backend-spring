@@ -185,13 +185,15 @@ class CategorySpecialsApiTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void checkpointASendsNoCategorySpecialDataToGuests() throws Exception {
-        createdId("\"discountPercent\":20,\"note\":\"Sweet hour\"");
+    void guestsGetTheDiscountButNeverTheOwnerRecord() throws Exception {
+        // AGF-S2-36 checkpoint B replaced checkpoint A's "nothing reaches guests": guests get the guest fields only
+        String id = createdId("\"discountPercent\":20,\"note\":\"Sweet hour\"");
         for (String body : new String[]{
                 mockMvc.perform(get("/venue/{id}/menu", owner.businessId())).andReturn().getResponse().getContentAsString(),
                 mockMvc.perform(get("/venue/{id}/items/{item}", owner.businessId(), baklava.getId())).andReturn().getResponse().getContentAsString(),
                 mockMvc.perform(get("/api/menus/{id}/preview", menu.getId()).header("Authorization", data.bearer(owner))).andReturn().getResponse().getContentAsString()}) {
-            assertThat(body).contains("Baklava").doesNotContain("specialPrice").doesNotContain("Sweet hour").doesNotContain("discountPercent");
+            assertThat(body).contains("Baklava").contains("specialPrice").contains("Sweet hour")
+                    .doesNotContain("discountPercent").doesNotContain("eligibleDishes").doesNotContain(id);
         }
     }
 }

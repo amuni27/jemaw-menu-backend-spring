@@ -13,4 +13,7 @@ public interface CategorySpecialRepository extends JpaRepository<CategorySpecial
     Optional<CategorySpecial> findByIdAndBusiness_Id(String id, String businessId);
 
     Optional<CategorySpecial> findByCategory_Id(String categoryId);
+
+    /** Guest path (AGF-S2-36 checkpoint B): one query per guest menu, whatever the number of category specials. */
+    List<CategorySpecial> findByBusiness_Id(String businessId);
 }

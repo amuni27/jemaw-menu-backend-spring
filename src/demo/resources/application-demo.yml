@@ -13,6 +13,9 @@ spring:
     hibernate:
       ddl-auto: create-drop
     show-sql: false
+  # The in-memory H2 demo builds its schema from the entities; the PostgreSQL migrations are not used here (Decision A)
+  flyway:
+    enabled: false
 
 # Image storage is not available in the demo. Placeholder values point at a closed local port,
 # so nothing can reach Cloudflare R2; image uploads fail by design.
@@ -28,6 +31,7 @@ app:
   # AGF-S2-13A: links open the local frontend; APP_PASSWORD_RESET_SECRET comes from the untracked .env.demo
   password-reset:
     link-base-url: http://localhost:5175/auth/reset-password
+  public-menu-base-url: ${APP_PUBLIC_MENU_BASE_URL:http://localhost:5175} # AGF-S2-21
 
 demo:
   owner:

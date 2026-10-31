@@ -58,6 +58,14 @@ public class MenuItemController {
     /**
      * ✅ optional: regenerate upload URL (useful for retry)
      */
+    /**
+     * AGF-S2-16: remove the item's photo (idempotent); the storage object is deleted best-effort
+     */
+    @DeleteMapping("/items/{itemId}/image")
+    public ResponseEntity<MenuItemResponse> removeImage(@PathVariable String itemId) {
+        return ResponseEntity.ok(menuItemService.removeImage(itemId));
+    }
+
     @GetMapping("/items/{itemId}/image/presign")
     public ResponseEntity<CreateMenuItemWithUploadResponse> presignImageUpload(
             @PathVariable String itemId,

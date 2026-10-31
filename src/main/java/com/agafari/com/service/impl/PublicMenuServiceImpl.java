@@ -1,5 +1,11 @@
 package com.agafari.com.service.impl;
 
+import com.agafari.com.jpa.entity.Business;
+import com.agafari.com.service.SpecialSchedule;
+import com.agafari.com.jpa.repository.SpecialRepository;
+import com.agafari.com.service.SpecialPricing;
+import com.agafari.com.jpa.entity.Special;
+import com.agafari.com.service.TimeZoneRules;
 import com.agafari.com.dto.response.*;
 import com.agafari.com.enums.DayOfWeekEnum;
 import com.agafari.com.enums.MenuItemStatus;
@@ -17,6 +23,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -26,15 +33,23 @@ import java.util.stream.Collectors;
 public class PublicMenuServiceImpl implements PublicMenuService {
 
     private static final Logger log = LoggerFactory.getLogger(PublicMenuServiceImpl.class);
-    /** PO decision D3: one fixed time zone for opening hours until per-business time zones exist (S2-26). */
-    static final String BUSINESS_TIME_ZONE = "Africa/Addis_Ababa";
+    /** AGF-S2-26 (D-S2-26-6): menu-type meal times are wall-clock times defined in Addis Ababa (D-S1-09-2). */
+    private static final ZoneId MEAL_TIME_ZONE = ZoneId.of(TimeZoneRules.ADDIS_ABABA);
     private final BusinessRepository businessRepo;
     private final MenuRepository menuRepo;
     private final CategoryRepository categoryRepo;
     private final MenuItemRepository menuItemRepo;
+    private final SpecialRepository specialRepo; // AGF-S2-25
+    private final CategorySpecialRepository categorySpecialRepo; // AGF-S2-36
 
     @Value("${cloudflare.publicBaseUrl}")
     private String publicBaseUrl;
+
+    private volatile Clock clock = Clock.systemUTC(); // AGF-S2-26: replaceable in tests
+
+    public void setClock(Clock clock) {
+        this.clock = clock;
+    }
 
     @Override
     @Transactional(readOnly = true)
@@ -55,9 +70,9 @@ public class PublicMenuServiceImpl implements PublicMenuService {
         }
 
         // sort menus by closest menuType.updatedAt time-of-day to now
-        List<Menu> menusSorted = sortMenusByClosestMenuTypeTimeOfDay(menusRaw);
+        List<Menu> menusSorted = sortMenusByClosestMenuTypeTimeOfDay(menusRaw, TimeZoneRules.zoneId(business.getTimeZone()));
 
-        return new PublicBusinessMenuResponse(businessDto, nestGuestVisible(businessDto, menusSorted, false));
+        return new PublicBusinessMenuResponse(businessDto, nestGuestVisible(businessDto, menusSorted, false, offers(business)));
     }
 
     /**
@@ -74,7 +89,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .orElseThrow(() -> new NotFoundException("Business not found"));
 
         BusinessPublicResponse businessDto = toBusinessDto(business);
-        return new PublicBusinessMenuResponse(businessDto, nestGuestVisible(businessDto, List.of(menu), true));
+        return new PublicBusinessMenuResponse(businessDto, nestGuestVisible(businessDto, List.of(menu), true, offers(business)));
     }
 
     /**
@@ -83,7 +98,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
      * without guest-visible items are dropped, except that {@code keepEmptyMenus} keeps each menu (with no categories).
      */
     private List<MenuWithCategoriesResponse> nestGuestVisible(BusinessPublicResponse businessDto, List<Menu> menus,
-                                                              boolean keepEmptyMenus) {
+                                                              boolean keepEmptyMenus, Offers offers) {
         List<String> menuIds = menus.stream().map(Menu::getId).toList();
 
         // categories active
@@ -104,13 +119,16 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .map(cat -> {
                     List<MenuItem> catItems = itemsByCategoryId.getOrDefault(cat.getId(), List.of());
                     if (catItems.isEmpty()) return null;
+                    List<MenuItemPublicResponse> itemDtos = catItems.stream().map(i -> toItemDto(i, offers)).toList();
                     return CategoryWithItemsResponse.builder()
                             .id(cat.getId())
                             .menuId(cat.getMenu().getId())
                             .name(cat.getName())
+                            .nameAm(cat.getNameAm()) // AGF-S2-23
                             .sortOrder(cat.getSortOrder())
                             .isActive(cat.isActive())
-                            .items(catItems.stream().map(this::toItemDto).toList())
+                            .items(itemDtos)
+                            .special(categoryBadge(cat, itemDtos, offers)) // AGF-S2-36
                             .build();
                 })
                 .filter(Objects::nonNull)
@@ -130,6 +148,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                             .id(menu.getId())
                             .name(menu.getName())
                             .description(menu.getDescription())
+                            .nameAm(menu.getNameAm()) // AGF-S2-23
                             .isActive(menu.isActive())
                             .visibility(menu.getVisibility())
                             .menuType(toMenuTypeDto(menu.getMenuType()))
@@ -161,14 +180,15 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                         itemId, businessId,
                         PublicVisibilityPolicy.PUBLIC_MENU_VISIBILITY,
                         PublicVisibilityPolicy.PUBLIC_ITEM_STATUSES)
-                .map(this::toItemDto)
+                .map(i -> toItemDto(i, offers(i.getMenu().getBusiness())))
                 .orElseThrow(() -> new NotFoundException("Item not found"));
     }
 
     // ---------------- sorting logic (same as Node) ----------------
 
-    private List<Menu> sortMenusByClosestMenuTypeTimeOfDay(List<Menu> menusRaw) {
-        LocalTime now = LocalTime.now();
+    /** AGF-S2-26: "now" is the restaurant's local time; meal times are read in Addis Ababa, independent of the server zone. */
+    private List<Menu> sortMenusByClosestMenuTypeTimeOfDay(List<Menu> menusRaw, ZoneId restaurantZone) {
+        LocalTime now = LocalTime.now(clock.withZone(restaurantZone));
         int nowMin = now.getHour() * 60 + now.getMinute();
 
         return menusRaw.stream()
@@ -197,8 +217,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
     }
 
     private int minutesSinceMidnight(Instant instant) {
-        // if updatedAt is Instant in UTC. Convert to system default like Node's Date.
-        LocalDateTime dt = LocalDateTime.ofInstant(instant, ZoneId.systemDefault());
+        LocalDateTime dt = LocalDateTime.ofInstant(instant, MEAL_TIME_ZONE);
         return dt.getHour() * 60 + dt.getMinute();
     }
 
@@ -222,8 +241,10 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .open24_7(b.isOpen24_7())
                 .currency(CurrencyPolicy.displayCurrency(b.getCurrency()))
                 .logoUrl(LogoUrls.publicUrl(publicBaseUrl, b.getLogoKey()))
+                .locationUrl(b.getLocationUrl())
+                .country(b.getCountry())
                 .hours(currentHours(b.getBusinessHours()))
-                .timeZone(BUSINESS_TIME_ZONE)
+                .timeZone(TimeZoneRules.zoneId(b.getTimeZone()).getId())
                 .build();
     }
 
@@ -248,17 +269,50 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .build();
     }
 
-    private MenuItemPublicResponse toItemDto(MenuItem i) {
+    /**
+     * The restaurant's offers that apply now, read once per request: dish specials active in its time zone and below
+     * the regular price, by dish id (AGF-S2-25, D-S2-25-6 read-time price guard), and active category specials, by
+     * category id (AGF-S2-36). Only these ever reach guests.
+     */
+    private record Offers(Map<String, Special> dish, Map<String, CategorySpecial> category, Instant now, ZoneId zone) {
+    }
+
+    private Offers offers(Business business) {
+        Instant now = clock.instant();
+        ZoneId zone = TimeZoneRules.zoneId(business.getTimeZone());
+        Map<String, Special> dish = specialRepo.findWithDishByBusinessId(business.getId()).stream()
+                .filter(s -> SpecialSchedule.applies(s, now, zone))
+                .collect(Collectors.toMap(s -> s.getMenuItem().getId(), s -> s, (a, b) -> a));
+        Map<String, CategorySpecial> category = categorySpecialRepo.findByBusiness_Id(business.getId()).stream()
+                .filter(s -> SpecialSchedule.isActive(s, now, zone))
+                .collect(Collectors.toMap(s -> s.getCategory().getId(), s -> s, (a, b) -> a));
+        return new Offers(dish, category, now, zone);
+    }
+
+    /** AGF-S2-36: the heading badge, only while the category special discounts at least one dish shown here. */
+    private static CategorySpecialPublicResponse categoryBadge(Category cat, List<MenuItemPublicResponse> itemDtos, Offers offers) {
+        CategorySpecial cs = offers.category().get(cat.getId());
+        if (cs == null || itemDtos.stream().noneMatch(d -> CATEGORY.equals(d.getSpecialType()))) return null;
+        return new CategorySpecialPublicResponse(cs.getDiscountPercent(), cs.getNote(), cs.getNoteAm(),
+                SpecialSchedule.endsTodayAt(cs, offers.now(), offers.zone()), SpecialSchedule.endsAt(cs, offers.now(), offers.zone()));
+    }
+
+    private static final String DISH = "DISH";
+    private static final String CATEGORY = "CATEGORY";
+
+    private MenuItemPublicResponse toItemDto(MenuItem i, Offers offers) {
         String imageUrl = i.getImageUrl();
 
         if (imageUrl != null && !imageUrl.startsWith("http")) {
             imageUrl = publicBaseUrl.replaceAll("/$", "") + "/" +
                     imageUrl.replaceAll("^/", "");
         }
-        return MenuItemPublicResponse.builder()
+        MenuItemPublicResponse dto = MenuItemPublicResponse.builder()
                 .id(i.getId())
                 .name(i.getName())
                 .description(i.getDescription())
+                .nameAm(i.getNameAm()) // AGF-S2-23
+                .descriptionAm(i.getDescriptionAm())
                 .price(i.getPrice())
                 .imageUrl(imageUrl)
                 .calories(i.getCalories())
@@ -272,6 +326,31 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .tags(i.getTags())
                 .currency(CurrencyPolicy.displayCurrency(i.getMenu().getBusiness().getCurrency()))
                 .build();
+        Instant now = offers.now();
+        ZoneId zone = offers.zone();
+        // D-CS-4: an applicable dish special wins; otherwise the category discount; never both
+        Special special = offers.dish().get(i.getId());
+        if (special != null) {
+            dto.setSpecialPrice(special.getSpecialPrice());
+            dto.setSpecialNote(special.getNote());
+            dto.setSpecialNoteAm(special.getNoteAm());
+            dto.setSpecialEndsAt(SpecialSchedule.endsAt(special, now, zone));
+            dto.setSpecialUntil(SpecialSchedule.endsTodayAt(special, now, zone));
+            dto.setSpecialType(DISH);
+            return dto;
+        }
+        CategorySpecial cs = i.getCategory() == null ? null : offers.category().get(i.getCategory().getId());
+        BigDecimal discounted = cs == null ? null : SpecialPricing.categoryPrice(i.getPrice(), cs.getDiscountPercent());
+        if (discounted != null) {
+            dto.setSpecialPrice(discounted);
+            dto.setSpecialNote(cs.getNote());
+            dto.setSpecialNoteAm(cs.getNoteAm());
+            dto.setSpecialEndsAt(SpecialSchedule.endsAt(cs, now, zone));
+            dto.setSpecialUntil(SpecialSchedule.endsTodayAt(cs, now, zone));
+            dto.setSpecialType(CATEGORY);
+            dto.setSpecialPercent(cs.getDiscountPercent());
+        }
+        return dto;
     }
 }
 

@@ -161,7 +161,26 @@ public class DemoDataSeeder implements ApplicationRunner {
         item(drinks, "Spris Juice", "Layered avocado, mango and papaya juice",
                 "130.00", MenuItemStatus.AVAILABLE, SpiceLevel.NONE, List.of("avocado", "mango", "papaya"), List.of(), 5, false);
 
+        // AGF-S2-23 (D-S2-23-9): some Amharic text, so the language switch can be tried; the rest stays English-only
+        mains.setNameAm("ዋና ምግቦች");
+        categories.save(mains);
+        drinks.setNameAm("መጠጦች");
+        categories.save(drinks);
+        amharic(menu, "Doro Wat", "ዶሮ ወጥ", "በበርበሬ የተሰራ የዶሮ ወጥ ከእንቁላል እና ከእንጀራ ጋር");
+        amharic(menu, "Shiro Wat", "ሽሮ ወጥ", "በነጭ ሽንኩርት እና በበርበሬ የተሰራ የሽምብራ ወጥ");
+        amharic(menu, "Ethiopian Coffee (Buna)", "ቡና", "በጀበና የተፈላ ባህላዊ ቡና");
+
         log.info("event=demo.seed.done businessId={} menuId={} categories=5 items=12", business.getId(), menu.getId());
+    }
+
+    private void amharic(Menu menu, String name, String nameAm, String descriptionAm) {
+        items.findAll().stream()
+                .filter(i -> i.getMenu().getId().equals(menu.getId()) && i.getName().equals(name))
+                .forEach(i -> {
+                    i.setNameAm(nameAm);
+                    i.setDescriptionAm(descriptionAm);
+                    items.save(i);
+                });
     }
 
     private MenuType menuType(String name) {

@@ -34,6 +34,26 @@ Pick one of these:
 
 Environment variables override values from the local file.
 
+## Database schema and migrations (Decision A)
+
+The schema comes from **Flyway** migrations in `src/main/resources/db/migration`; Hibernate only validates it (`ddl-auto: validate`).
+
+| Profile | Flyway | Schema |
+|---|---|---|
+| default (development, PostgreSQL) | on, `baseline-on-migrate: true`, baseline version 1 | Fresh database: runs `V1__baseline.sql`. Existing development database built earlier by `ddl-auto`: recorded at version 1 **without** running V1, so its data stays. `FlywayBaselineGuard` stops startup if a non-empty database is not an Agafari database. |
+| test | on, no baseline | Built from the migrations on an empty database (Testcontainers) |
+| demo (H2) | off | Built from the entities (`create-drop`); PostgreSQL migrations are not used |
+| prod | **off (unchanged)** | `ddl-auto: update` as before. There is no production deployment yet; switching production is part of S1-08B's production scope. |
+
+**Ordering and upgrades:**
+
+- Files are applied in version order: `V1__baseline.sql`, then `V2__…`, `V3__…`. Each runs once per database and is recorded in `flyway_schema_history`.
+- **Never edit or delete a migration that a shared database (CI excepted) has applied.** Every schema change is a new, forward-only `V{n+1}__description.sql`, written so it also works on a database that was baselined at version 1 (same columns, see `ExistingDatabaseUpgradeTest`).
+- Entity changes must ship with a migration in the same commit; otherwise startup fails validation (by design).
+- Current versions: **V1** baseline (Decision A), **V2** menu-type seed (AGF-S1-09: the nine PO-1 types, insert-only, case-insensitive). **V3** restaurant location link (AGF-S2-12: nullable `business.location_url VARCHAR(2048)`, existing rows get NULL); **V4** restaurant country (AGF-S2-12 CR1: `business.country VARCHAR(2) NOT NULL DEFAULT 'ET'`, existing rows become ET); **V5** restaurant time zone (AGF-S2-26: `business.time_zone VARCHAR(64) NOT NULL DEFAULT 'Africa/Addis_Ababa'`); **V6** Amharic translations (AGF-S2-23: nullable `name_am` on menu, category and menu_item, `description_am` on menu_item); **V7** specials (AGF-S2-25: `special` table, one per dish, deleted with the dish; a trigger refuses a special whose restaurant differs from its dish's).
+- V1 is **provisional**: it is the schema Hibernate builds from today's entities. Until a shared non-development database exists it may still be corrected; after that it is frozen.
+- To start over locally, drop and recreate the development database; Flyway rebuilds it from V1.
+
 ## Deployment order
 
 1. Set every required variable on the hosting provider **before** deploying a build that contains this change. Otherwise the service will not start.

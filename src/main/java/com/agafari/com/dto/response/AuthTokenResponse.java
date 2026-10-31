@@ -39,5 +39,11 @@ public class AuthTokenResponse {
         private String currency;
         /** AGF-S2-01 */
         private String logoUrl;
+        /** AGF-S2-12 */
+        private String locationUrl;
+        /** AGF-S2-12 CR1 */
+        private String country;
+        /** AGF-S2-26 */
+        private String timeZone;
     }
 }

@@ -7,8 +7,14 @@ spring:
     password: ${AGAFARI_TEST_DB_PASSWORD:postgres}
   jpa:
     hibernate:
-      # Until AGF-S1-08B: then the schema comes from Flyway migrations with ddl-auto=validate
-      ddl-auto: create-drop
+      # Decision A: the schema comes from Flyway (db/migration); Hibernate only validates it
+      ddl-auto: validate
+  flyway:
+    # Always on in tests, also for contexts that add the prod profile (ProductionProfileTest: "prod", "test"), whose
+    # own fresh Testcontainers database must still be built from the migrations. Production itself keeps Flyway off.
+    enabled: true
+    # test databases start empty (Testcontainers); never baseline an unknown non-empty schema here
+    baseline-on-migrate: false
 
 app:
   jwt:
@@ -16,6 +22,8 @@ app:
   password-reset:
     secret: test-only-password-reset-secret-not-the-jwt-one-42
     link-base-url: http://frontend.test.invalid/auth/reset-password
+  # AGF-S2-21: share page redirect target
+  public-menu-base-url: https://frontend.test.invalid
 
 cloudflare:
   accessKey: test-access-key

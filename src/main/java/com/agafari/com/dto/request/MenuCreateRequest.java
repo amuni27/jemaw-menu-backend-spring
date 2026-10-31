@@ -22,5 +22,8 @@ public class MenuCreateRequest {
 
     /** Optional published state; omitted = unpublished (AGF-S1-15, PO-2). */
     private Boolean isActive;
-}
 
+    /** AGF-S2-23: optional Amharic translation; blank clears (update), omitted keeps */
+    @Size(max = 255)
+    private String nameAm;
+}

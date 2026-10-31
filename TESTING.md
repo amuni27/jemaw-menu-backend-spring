@@ -14,7 +14,7 @@ No real credentials are needed. The `test` profile (`src/test/resources/applicat
 
 ### Without Docker: use an existing PostgreSQL
 
-Point the tests at a running PostgreSQL. **Use an empty, disposable database:** the tests recreate the schema and truncate every table.
+Point the tests at a running PostgreSQL. **Use an empty, disposable database:** the tests build the schema with Flyway and truncate every table.
 
 ```bash
 AGAFARI_TEST_EXTERNAL_DB=true \
@@ -58,7 +58,7 @@ class MyFeatureTest extends AbstractIntegrationTest {
 
 ## Schema source
 
-Until AGF-S1-08B, tests build the schema with Hibernate `ddl-auto=create-drop`. After AGF-S1-08B, they must build it from Flyway migrations and start with `ddl-auto=validate`.
+Since PO Decision A (2026-10-25), tests build the schema from the Flyway migrations in `src/main/resources/db/migration` and Hibernate starts with `ddl-auto=validate`, so every integration test also proves the migrations match the entities. The test profile never baselines (`spring.flyway.baseline-on-migrate=false`), so an external test database must be empty (or already migrated by an earlier run).
 
 ## CI
 

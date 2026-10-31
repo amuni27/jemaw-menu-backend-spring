@@ -35,7 +35,7 @@ public class BusinessController {
     @PatchMapping("/{businessId}")
     public ResponseEntity<BusinessResponse> updateBusiness(
             @PathVariable String businessId,
-            @RequestBody BusinessUpdateRequest request
+            @Valid @RequestBody BusinessUpdateRequest request
     ) {
         return ResponseEntity.ok(businessService.updateBusiness(businessId, request));
     }

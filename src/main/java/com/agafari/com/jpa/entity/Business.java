@@ -46,6 +46,10 @@ public class Business extends AuditableEntity {
     @Column(name = "logoKey")
     private String logoKey;
 
+    /** AGF-S2-12: validated Google Maps share link (V3, at most 2,048 characters); null = none */
+    @Column(name = "locationUrl", length = 2048)
+    private String locationUrl;
+
     @Column(name = "customSubdomain", nullable = false, unique = true)
     private String customSubdomain;
 
@@ -60,5 +64,13 @@ public class Business extends AuditableEntity {
 
     @Column(nullable = false)
     private String currency = "ETB";
+
+    // AGF-S2-12 CR1: ISO 3166-1 alpha-2, ET or US (D-CR1-1); fixed after registration (D-CR1-4)
+    @Column(name = "country", length = 2, nullable = false)
+    private String country = "ET";
+
+    // AGF-S2-26: IANA zone for "open now", today's hours and menu ordering; Ethiopia is always Addis Ababa
+    @Column(name = "time_zone", length = 64, nullable = false)
+    private String timeZone = "Africa/Addis_Ababa";
 }
 

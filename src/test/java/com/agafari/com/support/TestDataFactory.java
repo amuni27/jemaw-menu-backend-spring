@@ -183,8 +183,10 @@ public class TestDataFactory {
         return items.save(item);
     }
 
-    /** Removes all rows so every test starts from an empty database. */
+    /** Removes all rows so every test starts from an empty database, except the seeded menu types (reference data). */
     public void deleteAll() {
-        jdbc.execute("TRUNCATE TABLE menu_item, category, menu, menu_type, business_hours, business, users CASCADE");
+        jdbc.execute("TRUNCATE TABLE menu_item, category, menu, business_hours, business, users CASCADE");
+        // AGF-S1-09: the seeded menu types (Flyway V2, ids 'mt-…') are reference data; only test-created types go
+        jdbc.execute("DELETE FROM menu_type WHERE id NOT LIKE 'mt-%'");
     }
 }

@@ -24,7 +24,8 @@ class LogHygieneTest extends AbstractIntegrationTest {
     private static final String REGISTER = """
             {"fullName":"Privacy Owner","email":"%s","password":"%s","businessName":"Privacy Cafe",
              "businessPhone":"+251911000111","streetAddress":"1 Test St","city":"Addis Ababa","state":"Addis Ababa",
-             "zipcode":"","customSubdomain":"privacy-cafe","open24_7":true}""".formatted(EMAIL, PASSWORD);
+             "zipcode":"","customSubdomain":"privacy-cafe","open24_7":true,
+                 "locationUrl":"https://maps.app.goo.gl/TestCafe1"}""".formatted(EMAIL, PASSWORD);
 
     @Test
     void authFlowsNeverLogFullEmailsPasswordsOrTokens(CapturedOutput output) throws Exception {

@@ -14,5 +14,8 @@ public class CategoryCreateRequest {
     private Integer sortOrder;
 
     private Boolean isActive;
-}
 
+    /** AGF-S2-23: optional Amharic translation; blank clears (update), omitted keeps */
+    @Size(max = 255)
+    private String nameAm;
+}

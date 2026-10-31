@@ -29,6 +29,13 @@ public class BusinessResponse {
     // DB will store objectKey in a separate column (logoKey), and service maps it here.
     private String logoUrl;
 
+    /** AGF-S2-12 */
+    private String locationUrl;
+    /** AGF-S2-12 CR1: ET or US */
+    private String country;
+    /** AGF-S2-26: IANA time zone */
+    private String timeZone;
+
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -45,6 +52,9 @@ public class BusinessResponse {
                 .open24_7(b.isOpen24_7())
                 .currency(b.getCurrency())
                 .logoUrl(publicLogoUrl)
+                .locationUrl(b.getLocationUrl())
+                .country(b.getCountry())
+                .timeZone(b.getTimeZone())
                 .createdAt(b.getCreatedAt())
                 .updatedAt(b.getUpdatedAt())
                 .build();

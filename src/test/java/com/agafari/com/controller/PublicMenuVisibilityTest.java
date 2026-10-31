@@ -190,5 +190,5 @@ class PublicMenuVisibilityTest extends AbstractIntegrationTest {
     }
 
     // Measured on the pre-S1-04 code with the same data (see S1-04 report); must not grow with data size
-    private static final long PUBLIC_MENU_QUERY_BUDGET = 5;
+    private static final long PUBLIC_MENU_QUERY_BUDGET = 6; // +1 fixed query for the restaurant's specials (AGF-S2-25)
 }

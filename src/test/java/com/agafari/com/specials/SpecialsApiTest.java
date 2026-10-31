@@ -34,7 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * AGF-S2-25 (checkpoint A): owner specials API. Create, list with status (restaurant time), edit, pause/resume and
  * delete; validation with S1-10 field errors; one special per dish; tenant isolation (another owner's dish or special
  * → 404); deleted with the dish or menu; the database refuses a special whose restaurant differs from its dish's;
- * checkpoint A sends no special data to guests.
+ * guest data is covered by PublicSpecialsTest (checkpoint B).
  */
 class SpecialsApiTest extends AbstractIntegrationTest {
 
@@ -201,16 +201,15 @@ class SpecialsApiTest extends AbstractIntegrationTest {
         assertThat(specials.count()).isZero();
     }
 
-    // ---- guests: nothing in checkpoint A --------------------------------------------------------------------------
+    // ---- owner status with the price guard (checkpoint B) ---------------------------------------------------------
 
     @Test
-    void checkpointASendsNoSpecialDataToGuests() throws Exception {
-        createdId("\"specialPrice\":80,\"note\":\"Secret plan\"");
-        for (String body : new String[]{
-                mockMvc.perform(get("/venue/{id}/menu", owner.businessId())).andReturn().getResponse().getContentAsString(),
-                mockMvc.perform(get("/venue/{id}/items/{item}", owner.businessId(), doro.getId())).andReturn().getResponse().getContentAsString(),
-                mockMvc.perform(get("/api/menus/{id}/preview", menu.getId()).header("Authorization", data.bearer(owner))).andReturn().getResponse().getContentAsString()}) {
-            assertThat(body).contains("Doro Wat").doesNotContain("special").doesNotContain("Secret plan");
-        }
+    void theOwnerSeesNotADiscountWhenTheRegularPriceDropsToOrBelowTheSpecial() throws Exception {
+        String id = createdId("\"specialPrice\":80");
+        doro.setPrice(new java.math.BigDecimal("80.00"));
+        items.save(doro);
+        mockMvc.perform(get("/api/specials").header("Authorization", data.bearer(owner)))
+                .andExpect(jsonPath("$[0].status").value("NOT_A_DISCOUNT"));
+        send(patch("/api/specials/{id}", id), owner, "{\"paused\":true}").andExpect(status().isOk()); // not blocked
     }
 }

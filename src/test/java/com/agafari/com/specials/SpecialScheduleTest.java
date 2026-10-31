@@ -87,4 +87,45 @@ class SpecialScheduleTest {
         assertThat(SpecialSchedule.status(s, at("2026-11-06T15:30:00Z"), ADDIS)).isEqualTo(Status.ENDED); // 18:30 on the end date
         assertThat(SpecialSchedule.status(s, at("2026-11-06T10:00:00Z"), ADDIS)).isEqualTo(Status.SCHEDULED); // 13:00, later today
     }
+
+    // ---- checkpoint B: price guard (PO-approved read-time guard) and end of the current period ------------------
+
+    private static Special withDish(Special s, String regular, String special) {
+        com.agafari.com.jpa.entity.MenuItem item = new com.agafari.com.jpa.entity.MenuItem();
+        item.setPrice(new java.math.BigDecimal(regular));
+        s.setMenuItem(item);
+        s.setSpecialPrice(new java.math.BigDecimal(special));
+        return s;
+    }
+
+    @Test
+    void aSpecialOnlyAppliesWhileItIsBelowTheRegularPrice() {
+        Instant now = at("2026-11-04T09:00:00Z");
+        Special s = withDish(special(null, null, List.of(), null, null), "420", "350");
+        assertThat(SpecialSchedule.applies(s, now, ADDIS)).isTrue();
+        s.getMenuItem().setPrice(new java.math.BigDecimal("350")); // owner lowered the dish to the special price
+        assertThat(SpecialSchedule.applies(s, now, ADDIS)).isFalse();
+        assertThat(SpecialSchedule.status(s, now, ADDIS)).isEqualTo(Status.NOT_A_DISCOUNT);
+        s.getMenuItem().setPrice(new java.math.BigDecimal("340"));
+        assertThat(SpecialSchedule.status(s, now, ADDIS)).isEqualTo(Status.NOT_A_DISCOUNT);
+        s.getMenuItem().setPrice(new java.math.BigDecimal("400")); // raised again: applies again
+        assertThat(SpecialSchedule.applies(s, now, ADDIS)).isTrue();
+        assertThat(SpecialSchedule.status(s, now, ADDIS)).isEqualTo(Status.ACTIVE);
+        s.setPaused(true);
+        s.getMenuItem().setPrice(new java.math.BigDecimal("300"));
+        assertThat(SpecialSchedule.status(s, now, ADDIS)).isEqualTo(Status.PAUSED); // paused stays paused
+    }
+
+    @Test
+    void endsAtIsTheEndOfTheCurrentPeriod() {
+        Instant fri1630 = at("2026-11-06T13:30:00Z"); // Friday 16:30 in Addis Ababa
+        assertThat(SpecialSchedule.endsAt(withDish(special(null, null, List.of(), "16:00", "18:00"), "420", "350"), fri1630, ADDIS))
+                .isEqualTo(at("2026-11-06T15:00:00Z")); // 18:00 local
+        assertThat(SpecialSchedule.endsAt(withDish(special(null, "2026-11-06", List.of(), null, null), "420", "350"), fri1630, ADDIS))
+                .isEqualTo(at("2026-11-06T21:00:00Z")); // midnight after the last day
+        assertThat(SpecialSchedule.endsAt(withDish(special(null, null, List.of("FRIDAY"), null, null), "420", "350"), fri1630, ADDIS))
+                .isEqualTo(at("2026-11-06T21:00:00Z")); // Saturday isn't included
+        assertThat(SpecialSchedule.endsAt(withDish(special(null, null, List.of(), null, null), "420", "350"), fri1630, ADDIS)).isNull();
+        assertThat(SpecialSchedule.endsAt(withDish(special(null, null, List.of(), "09:00", "10:00"), "420", "350"), fri1630, ADDIS)).isNull(); // not active
+    }
 }

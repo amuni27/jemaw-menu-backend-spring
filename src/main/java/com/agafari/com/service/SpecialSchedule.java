@@ -14,7 +14,8 @@ import java.util.List;
  */
 public final class SpecialSchedule {
 
-    public enum Status { ACTIVE, SCHEDULED, ENDED, PAUSED }
+    /** NOT_A_DISCOUNT (checkpoint B): the dish's regular price is now at or below the special price */
+    public enum Status { ACTIVE, SCHEDULED, ENDED, PAUSED, NOT_A_DISCOUNT }
 
     public static final List<String> DAYS = List.of("MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY");
 
@@ -33,7 +34,39 @@ public final class SpecialSchedule {
         return minute >= minutes(s.getStartTime()) && minute < minutes(s.getEndTime());
     }
 
+    /**
+     * PO-approved read-time guard (checkpoint B): a special applies only while it is active and its price is lower than
+     * the dish's current regular price; otherwise guests see the regular price. Nothing is changed in the database.
+     */
+    public static boolean applies(Special s, Instant now, ZoneId zone) {
+        return isActive(s, now, zone) && isDiscount(s);
+    }
+
+    public static boolean isDiscount(Special s) {
+        return s.getMenuItem() == null || s.getMenuItem().getPrice() == null || s.getSpecialPrice() == null
+                || s.getSpecialPrice().compareTo(s.getMenuItem().getPrice()) < 0;
+    }
+
     public static Status status(Special s, Instant now, ZoneId zone) {
+        Status schedule = scheduleStatus(s, now, zone);
+        return (schedule == Status.ACTIVE || schedule == Status.SCHEDULED) && !isDiscount(s) ? Status.NOT_A_DISCOUNT : schedule;
+    }
+
+    /**
+     * When the current period ends: today's window end, or the next local midnight when the special doesn't continue
+     * tomorrow (last day, or tomorrow not an included weekday); null when it doesn't end today or doesn't apply.
+     */
+    public static Instant endsAt(Special s, Instant now, ZoneId zone) {
+        if (!applies(s, now, zone)) return null;
+        ZonedDateTime local = now.atZone(zone);
+        LocalDate today = local.toLocalDate();
+        if (hasWindow(s)) return today.atTime(minutes(s.getEndTime()) / 60, minutes(s.getEndTime()) % 60).atZone(zone).toInstant();
+        LocalDate tomorrow = today.plusDays(1);
+        boolean lastDay = today.equals(s.getEndsOn()) || !onDay(s, tomorrow);
+        return lastDay ? tomorrow.atStartOfDay(zone).toInstant() : null;
+    }
+
+    private static Status scheduleStatus(Special s, Instant now, ZoneId zone) {
         if (s.isPaused()) return Status.PAUSED;
         if (isActive(s, now, zone)) return Status.ACTIVE;
         ZonedDateTime local = now.atZone(zone);

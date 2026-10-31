@@ -1,5 +1,9 @@
 package com.agafari.com.service.impl;
 
+import com.agafari.com.jpa.entity.Business;
+import com.agafari.com.service.SpecialSchedule;
+import com.agafari.com.jpa.repository.SpecialRepository;
+import com.agafari.com.jpa.entity.Special;
 import com.agafari.com.service.TimeZoneRules;
 import com.agafari.com.dto.response.*;
 import com.agafari.com.enums.DayOfWeekEnum;
@@ -33,6 +37,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
     private final MenuRepository menuRepo;
     private final CategoryRepository categoryRepo;
     private final MenuItemRepository menuItemRepo;
+    private final SpecialRepository specialRepo; // AGF-S2-25
 
     @Value("${cloudflare.publicBaseUrl}")
     private String publicBaseUrl;
@@ -64,7 +69,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
         // sort menus by closest menuType.updatedAt time-of-day to now
         List<Menu> menusSorted = sortMenusByClosestMenuTypeTimeOfDay(menusRaw, TimeZoneRules.zoneId(business.getTimeZone()));
 
-        return new PublicBusinessMenuResponse(businessDto, nestGuestVisible(businessDto, menusSorted, false));
+        return new PublicBusinessMenuResponse(businessDto, nestGuestVisible(businessDto, menusSorted, false, applicableSpecials(business)));
     }
 
     /**
@@ -81,7 +86,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .orElseThrow(() -> new NotFoundException("Business not found"));
 
         BusinessPublicResponse businessDto = toBusinessDto(business);
-        return new PublicBusinessMenuResponse(businessDto, nestGuestVisible(businessDto, List.of(menu), true));
+        return new PublicBusinessMenuResponse(businessDto, nestGuestVisible(businessDto, List.of(menu), true, applicableSpecials(business)));
     }
 
     /**
@@ -90,7 +95,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
      * without guest-visible items are dropped, except that {@code keepEmptyMenus} keeps each menu (with no categories).
      */
     private List<MenuWithCategoriesResponse> nestGuestVisible(BusinessPublicResponse businessDto, List<Menu> menus,
-                                                              boolean keepEmptyMenus) {
+                                                              boolean keepEmptyMenus, Map<String, Special> specials) {
         List<String> menuIds = menus.stream().map(Menu::getId).toList();
 
         // categories active
@@ -118,7 +123,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                             .nameAm(cat.getNameAm()) // AGF-S2-23
                             .sortOrder(cat.getSortOrder())
                             .isActive(cat.isActive())
-                            .items(catItems.stream().map(this::toItemDto).toList())
+                            .items(catItems.stream().map(i -> toItemDto(i, specials)).toList())
                             .build();
                 })
                 .filter(Objects::nonNull)
@@ -170,7 +175,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                         itemId, businessId,
                         PublicVisibilityPolicy.PUBLIC_MENU_VISIBILITY,
                         PublicVisibilityPolicy.PUBLIC_ITEM_STATUSES)
-                .map(this::toItemDto)
+                .map(i -> toItemDto(i, applicableSpecials(i.getMenu().getBusiness())))
                 .orElseThrow(() -> new NotFoundException("Item not found"));
     }
 
@@ -259,14 +264,26 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .build();
     }
 
-    private MenuItemPublicResponse toItemDto(MenuItem i) {
+    /**
+     * AGF-S2-25: the restaurant's specials that apply now (active in its time zone and below the regular price), by
+     * dish id. Only these ever reach guests (D-S2-25-6, read-time price guard).
+     */
+    private Map<String, Special> applicableSpecials(Business business) {
+        Instant now = clock.instant();
+        ZoneId zone = TimeZoneRules.zoneId(business.getTimeZone());
+        return specialRepo.findWithDishByBusinessId(business.getId()).stream()
+                .filter(s -> SpecialSchedule.applies(s, now, zone))
+                .collect(Collectors.toMap(s -> s.getMenuItem().getId(), s -> s, (a, b) -> a));
+    }
+
+    private MenuItemPublicResponse toItemDto(MenuItem i, Map<String, Special> specials) {
         String imageUrl = i.getImageUrl();
 
         if (imageUrl != null && !imageUrl.startsWith("http")) {
             imageUrl = publicBaseUrl.replaceAll("/$", "") + "/" +
                     imageUrl.replaceAll("^/", "");
         }
-        return MenuItemPublicResponse.builder()
+        MenuItemPublicResponse dto = MenuItemPublicResponse.builder()
                 .id(i.getId())
                 .name(i.getName())
                 .description(i.getDescription())
@@ -285,6 +302,17 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .tags(i.getTags())
                 .currency(CurrencyPolicy.displayCurrency(i.getMenu().getBusiness().getCurrency()))
                 .build();
+        Special special = specials.get(i.getId());
+        if (special != null) {
+            Instant now = clock.instant();
+            ZoneId zone = TimeZoneRules.zoneId(i.getMenu().getBusiness().getTimeZone());
+            dto.setSpecialPrice(special.getSpecialPrice());
+            dto.setSpecialNote(special.getNote());
+            dto.setSpecialNoteAm(special.getNoteAm());
+            dto.setSpecialEndsAt(SpecialSchedule.endsAt(special, now, zone));
+            dto.setSpecialUntil(SpecialSchedule.endsTodayAt(special, now, zone));
+        }
+        return dto;
     }
 }
 

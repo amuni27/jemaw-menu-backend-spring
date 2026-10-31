@@ -1,5 +1,6 @@
 package com.agafari.com.service.impl;
 
+import com.agafari.com.service.AmharicText;
 import com.agafari.com.dto.request.MenuCreateRequest;
 import com.agafari.com.dto.request.MenuUpdateRequest;
 import com.agafari.com.dto.request.MenuDuplicateRequest;
@@ -93,6 +94,7 @@ public class MenuServiceImpl implements MenuService {
 
         menu.setName(request.getName());
         menu.setDescription(blankToNull(request.getDescription()));
+        menu.setNameAm(AmharicText.normalize(request.getNameAm())); // AGF-S2-23
 
         menu.setVisibility(request.getVisibility() == null ? MenuVisibility.PUBLIC : request.getVisibility());
         // AGF-S1-15 / PO-2: new menus start unpublished unless the client explicitly publishes them.
@@ -127,6 +129,8 @@ public class MenuServiceImpl implements MenuService {
         if (request.getDescription() != null) {
             menu.setDescription(blankToNull(request.getDescription()));
         }
+        // AGF-S2-23: omitted = unchanged; blank clears
+        if (request.getNameAm() != null) menu.setNameAm(AmharicText.normalize(request.getNameAm()));
 
         // AGF-S1-14: the menu type can be changed; it must exist (types are global, not tenant-owned)
         if (request.getMenuTypeId() != null) {
@@ -182,6 +186,7 @@ public class MenuServiceImpl implements MenuService {
         copy.setMenuType(source.getMenuType());
         copy.setName(copyName(source.getName(), request == null ? null : request.getName()));
         copy.setDescription(source.getDescription());
+        copy.setNameAm(source.getNameAm()); // AGF-S2-23
         copy.setVisibility(source.getVisibility());
         copy.setActive(false);
         copy = menuRepo.save(copy);
@@ -194,6 +199,7 @@ public class MenuServiceImpl implements MenuService {
             Category newCategory = new Category();
             newCategory.setMenu(copy);
             newCategory.setName(category.getName());
+            newCategory.setNameAm(category.getNameAm()); // AGF-S2-23
             newCategory.setSortOrder(category.getSortOrder());
             newCategory.setActive(category.isActive());
             newCategory = categoryRepo.save(newCategory);
@@ -235,6 +241,8 @@ public class MenuServiceImpl implements MenuService {
         copy.setCategory(category);
         copy.setName(item.getName());
         copy.setDescription(item.getDescription());
+        copy.setNameAm(item.getNameAm()); // AGF-S2-23
+        copy.setDescriptionAm(item.getDescriptionAm());
         copy.setPrice(item.getPrice());
         copy.setCalories(item.getCalories());
         copy.setIngredients(item.getIngredients() == null ? null : new ArrayList<>(item.getIngredients()));
@@ -303,6 +311,7 @@ public class MenuServiceImpl implements MenuService {
                 .menuTypeName(m.getMenuType().getName())
                 .name(m.getName())
                 .description(m.getDescription())
+                .nameAm(m.getNameAm())
                 .isActive(m.isActive())
                 .visibility(m.getVisibility())
                 .currency(currency)

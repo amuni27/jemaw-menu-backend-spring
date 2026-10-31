@@ -35,6 +35,9 @@ public class Menu extends AuditableEntity {
 
     private String description;
 
+    // AGF-S2-23: optional Amharic name (column name_am)
+    private String nameAm;
+
     @Column(name = "isActive", nullable = false)
     private boolean isActive = true;
 

@@ -12,5 +12,7 @@ public class CategoryResponse {
     private String name;
     private int sortOrder;
     private boolean isActive;
-}
 
+    /** AGF-S2-23: Amharic translation, or null */
+    private String nameAm;
+}

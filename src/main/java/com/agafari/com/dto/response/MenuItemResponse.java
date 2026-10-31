@@ -37,5 +37,8 @@ public class MenuItemResponse {
 
     private Instant createdAt;
     private Instant updatedAt;
-}
 
+    /** AGF-S2-23: Amharic translation, or null */
+    private String nameAm;
+    private String descriptionAm;
+}

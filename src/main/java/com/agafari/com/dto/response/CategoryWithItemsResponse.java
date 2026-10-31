@@ -14,4 +14,7 @@ public class CategoryWithItemsResponse {
     private int sortOrder;
     private boolean isActive;
     private List<MenuItemPublicResponse> items;
+
+    /** AGF-S2-23: Amharic translation, or null */
+    private String nameAm;
 }

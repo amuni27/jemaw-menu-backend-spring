@@ -31,4 +31,8 @@ public class MenuItemPublicResponse {
     private List<String> tags;
     /** The restaurant's currency (AGF-S2-02) */
     private String currency;
+
+    /** AGF-S2-23: Amharic translation, or null */
+    private String nameAm;
+    private String descriptionAm;
 }

@@ -31,5 +31,12 @@ public class MenuItemUpdateRequest {
     /** AGF-S2-30: true removes a saved spice level. A missing or null spiceLevel still means "unchanged". */
     private Boolean clearSpiceLevel;
     private MenuItemStatus status;
-}
 
+    /** AGF-S2-23: optional Amharic translation; blank clears (update), omitted keeps */
+    @Size(max = 255)
+    private String nameAm;
+
+    /** AGF-S2-23: optional Amharic description; blank clears (update), omitted keeps */
+    @Size(max = 255)
+    private String descriptionAm;
+}

@@ -27,6 +27,9 @@ public class Category extends AuditableEntity {
     @Column(nullable = false)
     private String name;
 
+    // AGF-S2-23: optional Amharic name (column name_am)
+    private String nameAm;
+
     @Column(name = "sortOrder", nullable = false)
     private int sortOrder = 0;
 

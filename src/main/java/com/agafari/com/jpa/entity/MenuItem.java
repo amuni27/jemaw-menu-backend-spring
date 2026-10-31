@@ -40,6 +40,11 @@ public class MenuItem extends AuditableEntity {
 
     private String description;
 
+    // AGF-S2-23: optional Amharic name and description (columns name_am, description_am)
+    private String nameAm;
+
+    private String descriptionAm;
+
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal price;
 

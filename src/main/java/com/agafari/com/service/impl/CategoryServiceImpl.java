@@ -1,5 +1,6 @@
 package com.agafari.com.service.impl;
 
+import com.agafari.com.service.AmharicText;
 import com.agafari.com.dto.request.CategoryCreateRequest;
 import com.agafari.com.dto.request.CategoryUpdateRequest;
 import com.agafari.com.dto.response.CategoryReorderRequest;
@@ -65,6 +66,7 @@ public class CategoryServiceImpl implements CategoryService {
         Category c = new Category();
         c.setMenu(menu);
         c.setName(request.getName());
+        c.setNameAm(AmharicText.normalize(request.getNameAm())); // AGF-S2-23
 
         // AGF-S2-07: a new category goes after the existing ones unless a position is given
         c.setSortOrder(request.getSortOrder() != null ? request.getSortOrder() : categoryRepo.maxSortOrder(menuId) + 1);
@@ -92,6 +94,8 @@ public class CategoryServiceImpl implements CategoryService {
 
         if (request.getName() != null)
             category.setName(request.getName());
+        if (request.getNameAm() != null) // AGF-S2-23: blank clears
+            category.setNameAm(AmharicText.normalize(request.getNameAm()));
 
         if (request.getSortOrder() != null)
             category.setSortOrder(request.getSortOrder());
@@ -169,6 +173,7 @@ public class CategoryServiceImpl implements CategoryService {
                 .id(c.getId())
                 .menuId(c.getMenu().getId())
                 .name(c.getName())
+                .nameAm(c.getNameAm())
                 .sortOrder(c.getSortOrder())
                 .isActive(c.isActive())
                 .build();

@@ -46,5 +46,12 @@ public class MenuItemCreateRequest {
     private SpiceLevel spiceLevel;
 
     private MenuItemStatus status;
-}
 
+    /** AGF-S2-23: optional Amharic translation; blank clears (update), omitted keeps */
+    @Size(max = 255)
+    private String nameAm;
+
+    /** AGF-S2-23: optional Amharic description; blank clears (update), omitted keeps */
+    @Size(max = 255)
+    private String descriptionAm;
+}

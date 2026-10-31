@@ -1,5 +1,6 @@
 package com.agafari.com.service.impl;
 
+import com.agafari.com.service.AmharicText;
 import com.agafari.com.dto.request.ConfirmImageUploadRequest;
 import com.agafari.com.dto.request.MenuItemCreateRequest;
 import com.agafari.com.dto.request.MenuItemStatusUpdateRequest;
@@ -107,6 +108,8 @@ public class MenuItemServiceImpl implements MenuItemService {
         item.setCategory(category);
         item.setName(req.getName());
         item.setDescription(nullIfBlank(req.getDescription()));
+        item.setNameAm(AmharicText.normalize(req.getNameAm())); // AGF-S2-23
+        item.setDescriptionAm(AmharicText.normalize(req.getDescriptionAm()));
         item.setPrice(money(req.getPrice()));
 
         // IMPORTANT: always store ONLY objectKey in DB (not full URL)
@@ -293,6 +296,9 @@ public class MenuItemServiceImpl implements MenuItemService {
 
         if (req.getName() != null) item.setName(req.getName());
         if (req.getDescription() != null) item.setDescription(nullIfBlank(req.getDescription()));
+        // AGF-S2-23: omitted = unchanged; blank clears
+        if (req.getNameAm() != null) item.setNameAm(AmharicText.normalize(req.getNameAm()));
+        if (req.getDescriptionAm() != null) item.setDescriptionAm(AmharicText.normalize(req.getDescriptionAm()));
         if (req.getPrice() != null) item.setPrice(money(req.getPrice()));
 
         // block manual URL updates
@@ -460,6 +466,8 @@ public class MenuItemServiceImpl implements MenuItemService {
                 .categoryId(i.getCategory().getId())
                 .name(i.getName())
                 .description(i.getDescription())
+                .nameAm(i.getNameAm())
+                .descriptionAm(i.getDescriptionAm())
                 .price(i.getPrice())
                 // IMPORTANT: DB stores key; this mapper converts to full public URL
                 .imageUrl(i.getImageUrl())

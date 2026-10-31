@@ -115,6 +115,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                             .id(cat.getId())
                             .menuId(cat.getMenu().getId())
                             .name(cat.getName())
+                            .nameAm(cat.getNameAm()) // AGF-S2-23
                             .sortOrder(cat.getSortOrder())
                             .isActive(cat.isActive())
                             .items(catItems.stream().map(this::toItemDto).toList())
@@ -137,6 +138,7 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                             .id(menu.getId())
                             .name(menu.getName())
                             .description(menu.getDescription())
+                            .nameAm(menu.getNameAm()) // AGF-S2-23
                             .isActive(menu.isActive())
                             .visibility(menu.getVisibility())
                             .menuType(toMenuTypeDto(menu.getMenuType()))
@@ -268,6 +270,8 @@ public class PublicMenuServiceImpl implements PublicMenuService {
                 .id(i.getId())
                 .name(i.getName())
                 .description(i.getDescription())
+                .nameAm(i.getNameAm()) // AGF-S2-23
+                .descriptionAm(i.getDescriptionAm())
                 .price(i.getPrice())
                 .imageUrl(imageUrl)
                 .calories(i.getCalories())

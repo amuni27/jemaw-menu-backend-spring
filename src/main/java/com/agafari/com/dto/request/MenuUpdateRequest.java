@@ -14,4 +14,8 @@ public class MenuUpdateRequest {
 
     /** Optional: change the menu type (AGF-S1-14); must reference an existing type. */
     private String menuTypeId;
+
+    /** AGF-S2-23: optional Amharic translation; blank clears (update), omitted keeps */
+    @Size(max = 255)
+    private String nameAm;
 }

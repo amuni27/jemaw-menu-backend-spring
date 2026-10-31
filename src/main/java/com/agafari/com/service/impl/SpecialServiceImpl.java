@@ -11,8 +11,8 @@ import com.agafari.com.jpa.repository.BusinessRepository;
 import com.agafari.com.jpa.repository.MenuItemRepository;
 import com.agafari.com.jpa.repository.SpecialRepository;
 import com.agafari.com.security.CurrentUser;
-import com.agafari.com.service.AmharicText;
 import com.agafari.com.service.CurrencyPolicy;
+import com.agafari.com.service.ScheduleRules;
 import com.agafari.com.service.SpecialSchedule;
 import com.agafari.com.service.TimeZoneRules;
 import lombok.RequiredArgsConstructor;
@@ -21,12 +21,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Clock;
-import java.time.LocalDate;
-import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 /**
  * AGF-S2-25 (checkpoint A): owner CRUD for specials, scoped to the caller's restaurant (another owner's dish or
@@ -37,8 +34,6 @@ import java.util.regex.Pattern;
 @Service
 @RequiredArgsConstructor
 public class SpecialServiceImpl {
-
-    private static final Pattern TIME = Pattern.compile("([01]\\d|2[0-3]):[0-5]\\d");
 
     private final SpecialRepository specials;
     private final MenuItemRepository items;
@@ -115,35 +110,7 @@ public class SpecialServiceImpl {
             if (problem != null) errors.put("specialPrice", problem);
         }
 
-        if (req.getNote() != null) s.setNote(req.getNote().isBlank() ? null : req.getNote().strip());
-        if (s.getNote() != null && s.getNote().length() > 255) errors.put("note", "Use at most 255 characters.");
-        if (req.getNoteAm() != null) s.setNoteAm(AmharicText.normalize(req.getNoteAm()));
-        if (s.getNoteAm() != null && s.getNoteAm().length() > 255) errors.put("noteAm", "Use at most 255 characters.");
-
-        if (Boolean.TRUE.equals(req.getClearStartsOn())) s.setStartsOn(null);
-        if (Boolean.TRUE.equals(req.getClearEndsOn())) s.setEndsOn(null);
-        if (req.getStartsOn() != null) s.setStartsOn(date(req.getStartsOn(), "startsOn", errors));
-        if (req.getEndsOn() != null) s.setEndsOn(date(req.getEndsOn(), "endsOn", errors));
-        if (s.getStartsOn() != null && s.getEndsOn() != null && s.getEndsOn().isBefore(s.getStartsOn()) && !errors.containsKey("endsOn")) {
-            errors.put("endsOn", "The end date can't be before the start date.");
-        }
-
-        if (req.getDaysOfWeek() != null) {
-            List<String> days = req.getDaysOfWeek().stream().map(d -> d == null ? "" : d.strip().toUpperCase()).distinct().toList();
-            if (!SpecialSchedule.DAYS.containsAll(days)) errors.put("daysOfWeek", "Choose days from Monday to Sunday.");
-            else s.setDaysOfWeek(SpecialSchedule.DAYS.stream().filter(days::contains).toList());
-        }
-        if (s.getDaysOfWeek() == null) s.setDaysOfWeek(List.of());
-
-        if (Boolean.TRUE.equals(req.getClearTimeWindow())) {
-            s.setStartTime(null);
-            s.setEndTime(null);
-        }
-        if (req.getStartTime() != null) s.setStartTime(req.getStartTime().strip());
-        if (req.getEndTime() != null) s.setEndTime(req.getEndTime().strip());
-        timeWindow(s, errors);
-
-        if (req.getPaused() != null) s.setPaused(req.getPaused());
+        ScheduleRules.apply(s, req, errors); // AGF-S2-36: shared with category specials (same rules and messages)
 
         if (!errors.isEmpty()) throw new FieldValidationException(errors);
     }
@@ -153,27 +120,6 @@ public class SpecialServiceImpl {
         if (price.stripTrailingZeros().scale() > 2) return "Use at most 2 decimals.";
         if (regular != null && price.compareTo(regular) >= 0) return "The special price must be lower than the regular price (" + regular.toPlainString() + ").";
         return null;
-    }
-
-    private static LocalDate date(String value, String field, Map<String, String> errors) {
-        try {
-            return LocalDate.parse(value.strip());
-        } catch (DateTimeParseException e) {
-            errors.put(field, "Use a date like 2026-11-30.");
-            return null;
-        }
-    }
-
-    private static void timeWindow(Special s, Map<String, String> errors) {
-        String start = s.getStartTime();
-        String end = s.getEndTime();
-        if (start == null && end == null) return;
-        if (start != null && !TIME.matcher(start).matches()) errors.put("startTime", "Use a time like 16:00.");
-        if (end != null && !TIME.matcher(end).matches()) errors.put("endTime", "Use a time like 18:00.");
-        if (errors.containsKey("startTime") || errors.containsKey("endTime")) return;
-        if (start == null) errors.put("startTime", "Add a start time too.");
-        else if (end == null) errors.put("endTime", "Add an end time too.");
-        else if (end.compareTo(start) <= 0) errors.put("endTime", "The end time must be after the start time.");
     }
 
     private SpecialResponse toResponse(Special s, Business business) {

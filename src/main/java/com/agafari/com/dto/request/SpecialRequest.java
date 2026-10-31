@@ -11,7 +11,7 @@ import java.util.List;
  * Dates and times are strings so a malformed value gets a field error. Rules: SpecialServiceImpl.
  */
 @Data
-public class SpecialRequest {
+public class SpecialRequest implements ScheduleInput { // AGF-S2-36: shared schedule fields
     private String menuItemId;
     private BigDecimal specialPrice;
     private String note;

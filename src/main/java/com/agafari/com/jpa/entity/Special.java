@@ -26,7 +26,7 @@ import java.util.List;
 @SuperBuilder
 @NoArgsConstructor
 @AllArgsConstructor
-public class Special extends AuditableEntity {
+public class Special extends AuditableEntity implements Scheduled { // AGF-S2-36: shared schedule
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)

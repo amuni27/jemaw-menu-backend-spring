@@ -128,4 +128,19 @@ class SpecialScheduleTest {
         assertThat(SpecialSchedule.endsAt(withDish(special(null, null, List.of(), null, null), "420", "350"), fri1630, ADDIS)).isNull();
         assertThat(SpecialSchedule.endsAt(withDish(special(null, null, List.of(), "09:00", "10:00"), "420", "350"), fri1630, ADDIS)).isNull(); // not active
     }
+
+    // ---- AGF-S2-36: category specials use the same schedule rules -------------------------------------------------
+
+    @Test
+    void categorySpecialsShareTheScheduleRules() {
+        com.agafari.com.jpa.entity.CategorySpecial c = new com.agafari.com.jpa.entity.CategorySpecial();
+        c.setDaysOfWeek(List.of("FRIDAY"));
+        c.setStartTime("16:00");
+        c.setEndTime("18:00");
+        assertThat(SpecialSchedule.isActive(c, at("2026-11-06T13:30:00Z"), ADDIS)).isTrue();
+        assertThat(SpecialSchedule.scheduleStatus(c, at("2026-11-05T13:30:00Z"), ADDIS)).isEqualTo(Status.SCHEDULED);
+        assertThat(SpecialSchedule.endsAt(c, at("2026-11-06T13:30:00Z"), ADDIS)).isEqualTo(at("2026-11-06T15:00:00Z"));
+        c.setPaused(true);
+        assertThat(SpecialSchedule.scheduleStatus(c, at("2026-11-06T13:30:00Z"), ADDIS)).isEqualTo(Status.PAUSED);
+    }
 }

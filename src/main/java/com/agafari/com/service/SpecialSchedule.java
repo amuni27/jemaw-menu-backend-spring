@@ -1,5 +1,6 @@
 package com.agafari.com.service;
 
+import com.agafari.com.jpa.entity.Scheduled;
 import com.agafari.com.jpa.entity.Special;
 
 import java.time.Instant;
@@ -22,7 +23,7 @@ public final class SpecialSchedule {
     private SpecialSchedule() {
     }
 
-    public static boolean isActive(Special s, Instant now, ZoneId zone) {
+    public static boolean isActive(Scheduled s, Instant now, ZoneId zone) {
         if (s.isPaused()) return false;
         ZonedDateTime local = now.atZone(zone);
         LocalDate today = local.toLocalDate();
@@ -57,7 +58,15 @@ public final class SpecialSchedule {
      * tomorrow (last day, or tomorrow not an included weekday); null when it doesn't end today or doesn't apply.
      */
     public static Instant endsAt(Special s, Instant now, ZoneId zone) {
-        if (!applies(s, now, zone)) return null;
+        return applies(s, now, zone) ? periodEnd(s, now, zone) : null;
+    }
+
+    /** AGF-S2-36: end of the current period for any schedule (category specials have no price guard). */
+    public static Instant endsAt(Scheduled s, Instant now, ZoneId zone) {
+        return isActive(s, now, zone) ? periodEnd(s, now, zone) : null;
+    }
+
+    private static Instant periodEnd(Scheduled s, Instant now, ZoneId zone) {
         ZonedDateTime local = now.atZone(zone);
         LocalDate today = local.toLocalDate();
         if (hasWindow(s)) return today.atTime(minutes(s.getEndTime()) / 60, minutes(s.getEndTime()) % 60).atZone(zone).toInstant();
@@ -66,7 +75,8 @@ public final class SpecialSchedule {
         return lastDay ? tomorrow.atStartOfDay(zone).toInstant() : null;
     }
 
-    private static Status scheduleStatus(Special s, Instant now, ZoneId zone) {
+    /** The schedule's own status (no price guard); shared with category specials (AGF-S2-36). */
+    public static Status scheduleStatus(Scheduled s, Instant now, ZoneId zone) {
         if (s.isPaused()) return Status.PAUSED;
         if (isActive(s, now, zone)) return Status.ACTIVE;
         ZonedDateTime local = now.atZone(zone);
@@ -83,16 +93,16 @@ public final class SpecialSchedule {
     }
 
     /** The local end time today ("HH:mm") while active with a daily window; otherwise null. */
-    public static String endsTodayAt(Special s, Instant now, ZoneId zone) {
+    public static String endsTodayAt(Scheduled s, Instant now, ZoneId zone) {
         return isActive(s, now, zone) && hasWindow(s) ? s.getEndTime() : null;
     }
 
-    private static boolean onDay(Special s, LocalDate day) {
+    private static boolean onDay(Scheduled s, LocalDate day) {
         List<String> days = s.getDaysOfWeek();
         return days == null || days.isEmpty() || days.contains(day.getDayOfWeek().name());
     }
 
-    private static boolean hasWindow(Special s) {
+    private static boolean hasWindow(Scheduled s) {
         return s.getStartTime() != null && s.getEndTime() != null;
     }
 

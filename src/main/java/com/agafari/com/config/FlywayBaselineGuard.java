@@ -22,7 +22,7 @@ import java.util.TreeSet;
  * <ul>
  *   <li><b>D12</b>: while V2 has not run, a menu type that uses a V2 seed id with another name would make V2 fail on the
  *       primary key (V2 skips existing types by name only);</li>
- *   <li><b>D14</b>: a schema without history must not already contain objects that V3–V8 create (left by a start with
+ *   <li><b>D14</b>: a schema without history must not already contain objects that V3 and later create (left by a start with
  *       Flyway off and {@code ddl-auto: update}); V3 would fail half-way after the baseline.</li>
  * </ul>
  * The guard only reads (catalog and {@code SELECT}); it never repairs data or schema. All problems are reported at once.
@@ -35,11 +35,11 @@ public final class FlywayBaselineGuard {
     /** Ids and names V2 seeds (kept equal to V2__seed_menu_types.sql by FlywayBaselineGuardTest). */
     public static final Map<String, String> V2_SEED_MENU_TYPES = seedMenuTypes();
 
-    /** Objects created by V3–V8 (checked against a fresh V1..V8 database by FlywayBaselineGuardTest). */
+    /** Objects created by V3–V9 (checked against a fresh database by FlywayBaselineGuardTest; V9: AGF-S2-24). */
     public static final List<String> LATER_MIGRATION_COLUMNS = List.of(
             "business.location_url", "business.country", "business.time_zone",
             "category.name_am", "menu.name_am", "menu_item.name_am", "menu_item.description_am");
-    public static final List<String> LATER_MIGRATION_TABLES = List.of("special", "category_special");
+    public static final List<String> LATER_MIGRATION_TABLES = List.of("special", "category_special", "menu_view_daily");
     public static final List<String> LATER_MIGRATION_FUNCTIONS =
             List.of("special_business_matches_dish", "category_special_business_matches_category");
 
@@ -66,7 +66,7 @@ public final class FlywayBaselineGuard {
             }
             List<String> present = laterMigrationObjects(connection, schema, tables);
             if (!present.isEmpty()) {
-                problems.add("D14: objects that V3-V8 create already exist without Flyway history (" + String.join(", ", present)
+                problems.add("D14: objects that V3 and later create already exist without Flyway history (" + String.join(", ", present)
                         + "); was the application started with Flyway off? Restore the backup taken before that start");
             }
         }

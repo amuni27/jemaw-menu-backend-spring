@@ -188,6 +188,27 @@ class FlywayBaselineGuardTest extends AbstractIntegrationTest {
         }
     }
 
+    @Test
+    void everyTableAddedAfterV1IsInTheD14List() {
+        // AGF-S2-24 (AC12): a migration that adds a table must extend the guard's D14 list (V1 creates the core tables)
+        List<String> later = jdbc.queryForList("select table_name from information_schema.tables where table_schema = 'public' "
+                + "and table_type = 'BASE TABLE' and table_name <> 'flyway_schema_history' order by 1", String.class)
+                .stream().filter(t -> !FlywayBaselineGuard.CORE_TABLES.contains(t)).toList();
+        assertThat(FlywayBaselineGuard.LATER_MIGRATION_TABLES).containsExactlyInAnyOrderElementsOf(later);
+    }
+
+    @Test
+    void d14RefusesALeftoverMenuViewTable() throws Exception {
+        legacySchema();
+        jdbc.execute("create table " + LEGACY + ".menu_view_daily (business_id varchar(255), view_date date, view_count int)");
+        try (Connection c = dataSource.getConnection()) {
+            assertThatThrownBy(() -> FlywayBaselineGuard.verify(c, LEGACY))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("D14")
+                    .hasMessageContaining("menu_view_daily");
+        }
+    }
+
     // ---- read-only, and before any baseline or migration ----
 
     @Test

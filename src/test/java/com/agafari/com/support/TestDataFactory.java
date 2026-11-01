@@ -106,6 +106,23 @@ public class TestDataFactory {
         return new Tenant(owner, business);
     }
 
+    /** AGF E4-M1: an ACTIVE platform admin (no business), as the bootstrap creates it. */
+    public User admin(String label) {
+        User admin = new User();
+        admin.setId(UUID.randomUUID().toString());
+        admin.setFullName(label + " Admin");
+        admin.setEmail(label + "@admin.agafari.local");
+        admin.setPasswordHash(passwordEncoder.encode(PASSWORD));
+        admin.setRole(UserRole.ADMIN);
+        admin.setStatus(UserStatus.ACTIVE);
+        return users.save(admin);
+    }
+
+    /** AGF E4-M1: Authorization header value for a platform admin. */
+    public String adminBearer(User admin) {
+        return "Bearer " + jwtService.signToken(admin.getEmail(), admin.getId(), null, admin.getRole().name());
+    }
+
     /** Authorization header value for the tenant's owner. */
     public String bearer(Tenant tenant) {
         User owner = tenant.owner();
@@ -186,6 +203,7 @@ public class TestDataFactory {
     /** Removes all rows so every test starts from an empty database, except the seeded menu types (reference data). */
     public void deleteAll() {
         jdbc.execute("TRUNCATE TABLE menu_item, category, menu, business_hours, business, users CASCADE");
+        jdbc.execute("TRUNCATE TABLE admin_audit_event"); // AGF E4-M1: a table-level reset (the row trigger blocks UPDATE/DELETE only)
         // AGF-S1-09: the seeded menu types (Flyway V2, ids 'mt-…') are reference data; only test-created types go
         jdbc.execute("DELETE FROM menu_type WHERE id NOT LIKE 'mt-%'");
     }

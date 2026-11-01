@@ -22,6 +22,9 @@ app:
   password-reset:
     secret: test-only-password-reset-secret-not-the-jwt-one-42
     link-base-url: http://frontend.test.invalid/auth/reset-password
+  admin: # AGF E4-M1: explicitly authorizes the first-admin bootstrap in this local/test profile (credentials: env only)
+    bootstrap:
+      environment-authorized: true
   email-verification: # AGF-S2-22
     secret: test-only-email-verification-secret-distinct-77
     link-base-url: http://frontend.test.invalid/auth/verify-email

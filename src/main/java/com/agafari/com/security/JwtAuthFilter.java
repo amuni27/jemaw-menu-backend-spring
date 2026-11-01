@@ -35,6 +35,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         // Skip JWT check for non-admin routes + login + swagger
         return path.startsWith("/api/auth/register")
                 || path.startsWith("/api/auth/login")
+                || path.equals("/api/admin/auth/login") // AGF E4-M1: a stale admin token must not affect sign-in
                 || path.startsWith("/swagger-ui")
                 || path.startsWith("/v3/api-docs")
                 || path.equals("/swagger-ui.html")

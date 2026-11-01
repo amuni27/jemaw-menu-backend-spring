@@ -31,6 +31,9 @@ app:
   # AGF-S2-13A: links open the local frontend; APP_PASSWORD_RESET_SECRET comes from the untracked .env.demo
   password-reset:
     link-base-url: http://localhost:5175/auth/reset-password
+  admin: # AGF E4-M1: explicitly authorizes the first-admin bootstrap in this local/test profile (credentials: env only)
+    bootstrap:
+      environment-authorized: true
   # AGF-S2-22: verification links open the local frontend; APP_EMAIL_VERIFICATION_SECRET comes from the environment
   email-verification:
     link-base-url: ${APP_EMAIL_VERIFICATION_LINK_BASE_URL:http://localhost:5175/auth/verify-email}

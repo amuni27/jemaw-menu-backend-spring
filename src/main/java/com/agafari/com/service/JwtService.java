@@ -34,8 +34,13 @@ public class JwtService {
      * Creates JWT similar to Node: { userId, businessId, role } and subject=email.
      */
     public String signToken(String email, String userId, String businessId, String role) {
+        return signToken(email, userId, businessId, role, java.time.Duration.ofMinutes(expiresMinutes));
+    }
+
+    /** AGF E4-M1: the same token with its own lifetime (Super Admin tokens are short-lived). */
+    public String signToken(String email, String userId, String businessId, String role, java.time.Duration lifetime) {
         Instant now = Instant.now();
-        Instant exp = now.plus(expiresMinutes, ChronoUnit.MINUTES);
+        Instant exp = now.plus(lifetime);
 
         return Jwts.builder()
                 .subject(email) // keep subject = email, matches your filter

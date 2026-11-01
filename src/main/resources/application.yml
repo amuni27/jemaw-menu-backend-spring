@@ -50,6 +50,14 @@ app:
     secret: ${APP_PASSWORD_RESET_SECRET:}
     link-base-url: ${APP_PASSWORD_RESET_LINK_BASE_URL:}
     token-ttl: 30m
+  # AGF E4-M1: Super Admin. Admin tokens are short-lived. The first admin is created at startup only where a local/test
+  # profile turns the authorization flag on (never here or in prod) and both APP_ADMIN_BOOTSTRAP_* variables are set.
+  admin:
+    jwt-expires-minutes: 30
+    bootstrap:
+      environment-authorized: false
+      email: ${APP_ADMIN_BOOTSTRAP_EMAIL:}
+      password: ${APP_ADMIN_BOOTSTRAP_PASSWORD:}
   # AGF-S2-22: email verification. Links work once a secret, a link address and a provider-backed mailer (D5) exist.
   # The publish gate also needs the explicit flag (default off): configuring a provider or secret never enables it.
   email-verification:

@@ -13,11 +13,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -158,6 +160,33 @@ class MenuViewsTest extends AbstractIntegrationTest {
             pool.shutdown();
         }
         assertThat(viewsOn(cafe.businessId(), LocalDate.parse("2026-11-02"))).isEqualTo(200);
+    }
+
+    @Test
+    void ac5SimultaneousFirstViewsOfADayAreAllCounted() throws Exception {
+        // Each round starts a new day, so all threads race to create that day's row; separate pooled connections,
+        // each statement in its own transaction. The losers' inserts hit the primary key and must retry the increment.
+        int threads = 8;
+        int days = 25;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        try {
+            for (int d = 0; d < days; d++) {
+                fixClock(LATE_EVENING_UTC.plus(Duration.ofDays(d)));
+                CyclicBarrier start = new CyclicBarrier(threads);
+                List<Future<?>> done = new ArrayList<>();
+                for (int t = 0; t < threads; t++) {
+                    done.add(pool.submit(() -> {
+                        start.await(10, TimeUnit.SECONDS);
+                        counter.record(cafe.businessId(), "Africa/Addis_Ababa");
+                        return null;
+                    }));
+                }
+                for (Future<?> f : done) f.get(30, TimeUnit.SECONDS);
+                assertThat(viewsOn(cafe.businessId(), LocalDate.parse("2026-11-02").plusDays(d))).as("day %d", d).isEqualTo(threads);
+            }
+        } finally {
+            pool.shutdown();
+        }
     }
 
     // ---- AC6: owner-only, own restaurant ----

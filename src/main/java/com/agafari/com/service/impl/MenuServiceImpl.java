@@ -28,6 +28,7 @@ import com.agafari.com.jpa.repository.MenuItemRepository;
 import com.agafari.com.jpa.repository.MenuRepository;
 import com.agafari.com.jpa.repository.MenuTypeRepository;
 import com.agafari.com.security.CurrentUser;
+import com.agafari.com.security.EmailVerificationService;
 import com.agafari.com.service.MenuService;
 import com.agafari.com.service.CurrencyPolicy;
 import jakarta.transaction.Transactional;
@@ -53,6 +54,7 @@ public class MenuServiceImpl implements MenuService {
     private final MenuItemRepository menuItemRepo;
 
     private final CurrentUser currentUser;
+    private final EmailVerificationService emailVerification; // AGF-S2-22
 
     // AGF-S2-18: copies item images when a menu is duplicated
     private final S3Client s3Client;
@@ -100,6 +102,7 @@ public class MenuServiceImpl implements MenuService {
         // AGF-S1-15 / PO-2: new menus start unpublished unless the client explicitly publishes them.
         // Existing rows are not touched.
         menu.setActive(Boolean.TRUE.equals(request.getIsActive()));
+        if (published(menu)) emailVerification.requireMayPublish(currentUser.userId()); // AGF-S2-22
 
         return toResponse(menuRepo.save(menu));
     }
@@ -139,8 +142,11 @@ public class MenuServiceImpl implements MenuService {
             menu.setMenuType(menuType);
         }
 
+        boolean wasPublished = published(menu);
         if (request.getIsActive() != null) menu.setActive(request.getIsActive());
         if (request.getVisibility() != null) menu.setVisibility(request.getVisibility());
+        // AGF-S2-22: only the step into "published" is gated; an already published menu stays editable
+        if (!wasPublished && published(menu)) emailVerification.requireMayPublish(currentUser.userId());
 
         return toResponse(menuRepo.save(menu));
     }
@@ -330,5 +336,10 @@ public class MenuServiceImpl implements MenuService {
      */
     private static String blankToNull(String value) {
         return (value == null || value.isBlank()) ? null : value;
+    }
+
+    /** AGF-S2-22: guests can see the menu (active and public). */
+    private static boolean published(Menu menu) {
+        return menu.isActive() && menu.getVisibility() == MenuVisibility.PUBLIC;
     }
 }

@@ -15,6 +15,7 @@ if [ ! -f "$ENV_FILE" ]; then
     echo "# Local demo only. Test credentials, never used outside this machine."
     echo "APP_JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')"
     echo "APP_PASSWORD_RESET_SECRET=$(openssl rand -base64 48 | tr -d '\n')"
+    echo "APP_EMAIL_VERIFICATION_SECRET=$(openssl rand -base64 48 | tr -d '\n')"
     echo "DEMO_OWNER_PASSWORD=Demo-$(openssl rand -hex 6)"
   } > "$ENV_FILE"
   echo "Created $ENV_FILE with new test-only credentials."
@@ -26,9 +27,18 @@ if ! grep -q '^APP_PASSWORD_RESET_SECRET=' "$ENV_FILE"; then
   echo "APP_PASSWORD_RESET_SECRET=$(openssl rand -base64 48 | tr -d '\n')" >> "$ENV_FILE"
 fi
 
+# AGF-S2-22: older .env.demo files get the email-verification secret added once (verification then works through the
+# local demo outbox; no email is sent)
+if ! grep -q '^APP_EMAIL_VERIFICATION_SECRET=' "$ENV_FILE"; then
+  umask 077
+  echo "APP_EMAIL_VERIFICATION_SECRET=$(openssl rand -base64 48 | tr -d '\n')" >> "$ENV_FILE"
+fi
 APP_JWT_SECRET=$(sed -n 's/^APP_JWT_SECRET=//p' "$ENV_FILE")
 APP_PASSWORD_RESET_SECRET=$(sed -n 's/^APP_PASSWORD_RESET_SECRET=//p' "$ENV_FILE")
 DEMO_OWNER_PASSWORD=$(sed -n 's/^DEMO_OWNER_PASSWORD=//p' "$ENV_FILE")
+APP_EMAIL_VERIFICATION_SECRET=$(sed -n 's/^APP_EMAIL_VERIFICATION_SECRET=//p' "$ENV_FILE")
+# AGF-S2-22: the publish gate stays off unless APP_EMAIL_VERIFICATION_ENFORCE=true is set in the shell or in .env.demo
+APP_EMAIL_VERIFICATION_ENFORCE=${APP_EMAIL_VERIFICATION_ENFORCE:-$(sed -n 's/^APP_EMAIL_VERIFICATION_ENFORCE=//p' "$ENV_FILE")}
 
 # Run from an empty working directory so the developer's ./application-local.yml is not imported,
 # and with a minimal environment so no database or R2 variables leak in from the shell.
@@ -42,6 +52,8 @@ exec env -i \
   APP_JWT_SECRET="$APP_JWT_SECRET" \
   APP_PASSWORD_RESET_SECRET="$APP_PASSWORD_RESET_SECRET" \
   DEMO_OWNER_PASSWORD="$DEMO_OWNER_PASSWORD" \
+  APP_EMAIL_VERIFICATION_SECRET="$APP_EMAIL_VERIFICATION_SECRET" \
+  APP_EMAIL_VERIFICATION_ENFORCE="${APP_EMAIL_VERIFICATION_ENFORCE:-false}" \
   sh ./mvnw -q -Pdemo spring-boot:run \
     -Dspring-boot.run.profiles=demo \
     -Dspring-boot.run.workingDirectory="$RUN_DIR"

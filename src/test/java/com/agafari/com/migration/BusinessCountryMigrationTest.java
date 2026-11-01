@@ -61,7 +61,7 @@ class BusinessCountryMigrationTest extends AbstractIntegrationTest {
                 .baselineOnMigrate(true).baselineVersion("1").load().migrate();
 
         assertThat(jdbc.queryForList("select version from " + DEV + ".flyway_schema_history order by installed_rank", String.class))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10");
         Map<String, Object> after = jdbc.queryForMap("select * from " + DEV + ".business where id = 'b1'");
         assertThat(after.get("country")).isEqualTo("ET");
         after.remove("country");

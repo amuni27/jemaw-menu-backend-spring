@@ -20,7 +20,7 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@Import({TestcontainersConfiguration.class, TestDataFactory.class})
+@Import({TestcontainersConfiguration.class, TestDataFactory.class, RecordingEmailVerificationMailer.class})
 public abstract class AbstractIntegrationTest {
 
     @Autowired

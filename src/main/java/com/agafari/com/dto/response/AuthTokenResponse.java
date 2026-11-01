@@ -21,6 +21,15 @@ public class AuthTokenResponse {
         private String phoneNumber;
         private String email;
         private String role;
+        /** AGF-S2-22 */
+        private EmailVerification emailVerification;
+    }
+
+    /**
+     * AGF-S2-22: the owner's verification state. {@code available}: links can be delivered now; {@code publishGateEnabled}:
+     * publishing currently requires a verified email (flag on AND available).
+     */
+    public record EmailVerification(boolean verified, boolean available, boolean publishGateEnabled) {
     }
 
     @Data @AllArgsConstructor

@@ -77,6 +77,31 @@ public class ApiExceptionHandler {
                 .body(ApiError.of(HttpStatus.SERVICE_UNAVAILABLE, PasswordResetUnavailableException.CODE, e.getMessage()));
     }
 
+    // AGF-S2-22
+    @ExceptionHandler(EmailVerificationLinkException.class)
+    public ResponseEntity<ApiError> verifyLink(EmailVerificationLinkException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiError.of(HttpStatus.BAD_REQUEST, EmailVerificationLinkException.CODE, e.getMessage()));
+    }
+
+    @ExceptionHandler(EmailNotVerifiedException.class)
+    public ResponseEntity<ApiError> emailNotVerified(EmailNotVerifiedException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiError.of(HttpStatus.FORBIDDEN, EmailNotVerifiedException.CODE, e.getMessage()));
+    }
+
+    @ExceptionHandler(EmailDeliveryFailedException.class)
+    public ResponseEntity<ApiError> emailDeliveryFailed(EmailDeliveryFailedException e) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiError.of(HttpStatus.SERVICE_UNAVAILABLE, EmailDeliveryFailedException.CODE, e.getMessage()));
+    }
+
+    @ExceptionHandler(EmailVerificationUnavailableException.class)
+    public ResponseEntity<ApiError> emailVerificationUnavailable(EmailVerificationUnavailableException e) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiError.of(HttpStatus.SERVICE_UNAVAILABLE, EmailVerificationUnavailableException.CODE, e.getMessage()));
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> conf(ConflictException e) {
         return domain(HttpStatus.CONFLICT, e);

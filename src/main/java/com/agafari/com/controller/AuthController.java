@@ -2,6 +2,9 @@ package com.agafari.com.controller;
 
 import com.agafari.com.dto.request.ForgotPasswordRequest;
 import com.agafari.com.dto.request.ResetPasswordRequest;
+import com.agafari.com.dto.request.VerifyEmailRequest;
+import com.agafari.com.security.CurrentUser;
+import com.agafari.com.security.EmailVerificationService;
 import com.agafari.com.security.PasswordResetService;
 import com.agafari.com.dto.request.AuthLoginRequest;
 import com.agafari.com.dto.request.AuthRegisterRequest;
@@ -31,6 +34,8 @@ public class AuthController {
     private final AuthService authService;
     private final AuthRateLimiter rateLimiter;
     private final PasswordResetService passwordResetService;
+    private final EmailVerificationService emailVerification; // AGF-S2-22
+    private final CurrentUser currentUser;
 
     @PostMapping("/register")
     public ResponseEntity<AuthRegisterResponse> register(@Valid @RequestBody AuthRegisterRequest req, HttpServletRequest http) {
@@ -72,6 +77,29 @@ public class AuthController {
         rateLimiter.countResetPassword(http.getRemoteAddr());
         passwordResetService.resetPassword(req.getToken(), req.getNewPassword());
         return ResponseEntity.ok(Map.of("message", "Your password has been changed. Sign in with your new password."));
+    }
+
+    // AGF-S2-22: completes verification from a link; a replay on a verified email answers ALREADY_VERIFIED
+    @PostMapping("/verify-email")
+    public ResponseEntity<Map<String, String>> verifyEmail(@RequestBody VerifyEmailRequest req, HttpServletRequest http) {
+        rateLimiter.countVerifyEmail(http.getRemoteAddr());
+        EmailVerificationService.Outcome outcome = emailVerification.verify(req.getToken());
+        return ResponseEntity.ok(Map.of("status", outcome.name(), "message",
+                outcome == EmailVerificationService.Outcome.VERIFIED ? "Your email is verified." : "Your email is already verified."));
+    }
+
+    // AGF-S2-22: honest answers; only links the email service accepted count toward the owner's limit
+    @PostMapping("/verify-email/resend")
+    public ResponseEntity<Map<String, String>> resendVerification(HttpServletRequest http) {
+        String userId = currentUser.userId();
+        rateLimiter.checkVerificationResend(userId, http.getRemoteAddr());
+        return emailVerification.resend(userId)
+                .map(email -> {
+                    rateLimiter.verificationResendSent(userId);
+                    return ResponseEntity.status(202).body(Map.of("message",
+                            "We sent a new link to " + email + ". It can take a few minutes; check your spam folder."));
+                })
+                .orElseGet(() -> ResponseEntity.ok(Map.of("message", "Your email is already verified.")));
     }
 
     @PostMapping("/change-password")

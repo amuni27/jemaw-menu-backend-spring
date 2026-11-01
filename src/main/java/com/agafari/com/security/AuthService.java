@@ -48,6 +48,7 @@ public class AuthService {
 
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final EmailVerificationService emailVerification; // AGF-S2-22
 
     @Value("${cloudflare.publicBaseUrl}")
     private String publicBaseUrl;
@@ -159,6 +160,9 @@ public class AuthService {
             log.info("event=auth.register.hours_saved email={} businessId={} hoursRows={}",
                     LogMasking.maskEmail(email), biz.getId(), hours.size());
 
+            // AGF-S2-22: a verification link goes out after the registration commits (nothing if unavailable)
+            emailVerification.sendAfterCommit(user.getId(), user.getEmail());
+
             // JWT (DO NOT LOG token)
             String token = jwtService.signToken(user.getEmail(), user.getId(), biz.getId(), user.getRole().name());
 
@@ -225,7 +229,8 @@ public class AuthService {
                         user.getFullName(),
                         user.getPhoneNumber(),
                         user.getEmail(),
-                        user.getRole().name()
+                        user.getRole().name(),
+                        verificationOf(user)
                 ),
                 new AuthTokenResponse.BusinessSummary(
                         biz.getId(),
@@ -280,7 +285,8 @@ public class AuthService {
                         user.getFullName(),
                         user.getPhoneNumber(),
                         user.getEmail(),
-                        user.getRole().name()
+                        user.getRole().name(),
+                        verificationOf(user)
                 ),
                 new AuthTokenResponse.BusinessSummary(
                         biz.getId(),
@@ -410,5 +416,11 @@ public class AuthService {
 
     private static String safe(String s) {
         return s == null ? "" : s.replaceAll("[\\r\\n\\t]", " ").trim();
+    }
+
+    /** AGF-S2-22 */
+    private AuthTokenResponse.EmailVerification verificationOf(User user) {
+        return new AuthTokenResponse.EmailVerification(
+                emailVerification.verified(user), emailVerification.operational(), emailVerification.publishGateEnabled());
     }
 }

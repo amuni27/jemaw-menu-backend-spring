@@ -39,10 +39,14 @@ public class User extends AuditableEntity {
     @Column(nullable = false)
     private UserStatus status = UserStatus.ACTIVE;
 
+    /** AGF-S2-22: when the owner verified their email; null = not verified (Flyway V10). */
+    @Column(name = "email_verified_at")
+    private java.time.Instant emailVerifiedAt;
+
     // businessId is nullable (on delete set null)
     @OneToOne(mappedBy = "owner", cascade = CascadeType.ALL, orphanRemoval = true)
     private Business business;
 
     // One business owner (unique ownerUserId) -> handled in Business side
-}
 
+}

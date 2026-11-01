@@ -15,4 +15,12 @@ public interface UserRepository extends JpaRepository<User, String> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update User u set u.passwordHash = :newHash where u.id = :id and u.passwordHash = :expectedHash")
     int updatePasswordHashIfUnchanged(@Param("id") String id, @Param("expectedHash") String expectedHash, @Param("newHash") String newHash);
+
+    /**
+     * AGF-S2-22: marks the email verified only if it is still {@code email} and not verified yet; returns the number of
+     * rows changed (0 or 1). One conditional update, so concurrent verifications change the account exactly once.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update User u set u.emailVerifiedAt = :now where u.id = :id and u.email = :email and u.emailVerifiedAt is null")
+    int markEmailVerifiedIfUnverified(@Param("id") String id, @Param("email") String email, @Param("now") java.time.Instant now);
 }

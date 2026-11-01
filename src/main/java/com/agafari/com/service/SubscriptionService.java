@@ -4,6 +4,7 @@ import com.agafari.com.dto.request.SubscriptionCreateRequest;
 import com.agafari.com.dto.request.SubscriptionUpdateRequest;
 import com.agafari.com.dto.response.AdminBusinessPage;
 import com.agafari.com.dto.response.BusinessSubscriptionView;
+import com.agafari.com.dto.response.PlanRequestSummary;
 import com.agafari.com.dto.response.SubscriptionPlanResponse;
 import com.agafari.com.dto.response.SubscriptionResponse;
 import com.agafari.com.enums.MonetizationModel;
@@ -11,6 +12,7 @@ import com.agafari.com.exception.ConfigVersionConflictException;
 import com.agafari.com.exception.FieldValidationException;
 import com.agafari.com.exception.MonetizationNotConfiguredException;
 import com.agafari.com.exception.NotFoundException;
+import com.agafari.com.exception.PlanRequestPendingException;
 import com.agafari.com.exception.SubscriptionExistsException;
 import com.agafari.com.exception.SubscriptionVersionConflictException;
 import com.agafari.com.jpa.entity.Business;
@@ -20,6 +22,7 @@ import com.agafari.com.jpa.entity.SubscriptionPlan;
 import com.agafari.com.jpa.repository.BusinessRepository;
 import com.agafari.com.jpa.repository.BusinessSubscriptionRepository;
 import com.agafari.com.jpa.repository.MonetizationConfigRepository;
+import com.agafari.com.jpa.repository.PlanRequestRepository;
 import com.agafari.com.jpa.repository.SubscriptionPlanRepository;
 import com.agafari.com.jpa.repository.UserRepository;
 import com.agafari.com.security.AdminAuditService;
@@ -67,11 +70,16 @@ public class SubscriptionService {
     private final EntitlementService entitlements;
     private final AdminAuditService audit;
     private final TransactionTemplate transaction;
+    private final PlanRequestRepository planRequests;
+    private final MonetizationLocks locks;
     private final Clock clock = Clock.systemUTC();
 
     public SubscriptionService(BusinessSubscriptionRepository subscriptions, SubscriptionPlanRepository plans,
                                MonetizationConfigRepository configs, BusinessRepository businesses, UserRepository users,
-                               EntitlementService entitlements, AdminAuditService audit, PlatformTransactionManager transactionManager) {
+                               EntitlementService entitlements, AdminAuditService audit, PlatformTransactionManager transactionManager,
+                               PlanRequestRepository planRequests, MonetizationLocks locks) {
+        this.planRequests = planRequests;
+        this.locks = locks;
         this.subscriptions = subscriptions;
         this.plans = plans;
         this.configs = configs;
@@ -108,8 +116,11 @@ public class SubscriptionService {
         Business business = businesses.findById(businessId).orElseThrow(() -> new NotFoundException("Restaurant not found"));
         MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElse(null);
         SubscriptionResponse current = subscriptions.findCurrentByBusinessId(businessId).map(s -> response(s, config)).orElse(null);
+        PlanRequestSummary pending = planRequests.findPendingByBusinessId(businessId)
+                .map(r -> new PlanRequestSummary(r.getId(), r.getPlanCode(), r.getConfigVersion(), r.getRequestedAt(), r.getRowVersion(),
+                        config != null && !config.models().contains(MonetizationModel.valueOf(r.getPlanCode())))).orElse(null);
         return new BusinessSubscriptionView(businessId, business.getName(), current, entitlements.forBusiness(businessId),
-                entitlements.isEnabled() && config != null);
+                entitlements.isEnabled() && config != null, pending);
     }
 
     public List<SubscriptionResponse> history(String businessId) {
@@ -127,17 +138,17 @@ public class SubscriptionService {
             validateCreate(request, now);
             if (!businesses.existsById(businessId)) throw new NotFoundException("Restaurant not found");
             return transaction.execute(status -> {
+                locks.configShared(); // E4-M4 §16.2: no configuration change between this check and the commit
+                locks.restaurant(businessId); // E4-M4 §16.1: serialized with owner plan requests for this restaurant
                 MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElseThrow(MonetizationNotConfiguredException::new);
                 if (!config.getVersion().equals(request.expectedConfigVersion())) throw new ConfigVersionConflictException();
                 if (!config.models().contains(MonetizationModel.valueOf(request.planCode()))) {
                     throw new FieldValidationException(Map.of("planCode", "This plan isn't enabled by the current configuration"));
                 }
                 if (subscriptions.findCurrentByBusinessId(businessId).isPresent()) throw new SubscriptionExistsException();
-                BusinessSubscription saved = subscriptions.saveAndFlush(BusinessSubscription.manual(businessId, request.planCode(),
-                        config.getVersion(), request.periodEnd(), now, adminId));
-                audit.success(CREATED, adminId, actor, TARGET, saved.getId(), saved.getPlanCode() + " " + saved.getStatus()
-                        + " source=" + saved.getSource() + " config=" + saved.getConfigVersion() + " periodEnd=" + saved.getPeriodEnd());
-                return response(saved, config);
+                if (planRequests.findPendingByBusinessId(businessId).isPresent()) throw new PlanRequestPendingException(); // invariant I1
+                return response(recordWithinTransaction(businessId, request.planCode(), config.getVersion(), request.periodEnd(), now,
+                        adminId, actor), config);
             });
         } catch (DataIntegrityViolationException e) {
             // a concurrent create won on the partial unique index; anything else is a real error
@@ -149,6 +160,18 @@ public class SubscriptionService {
             if (reason != null) reject(adminId, actor, reason);
             throw e;
         }
+    }
+
+    /**
+     * Inserts the manual ACTIVE record and its audit row. Callers hold the configuration and restaurant locks and have
+     * checked the configuration, the plan and that there is no current subscription (E4-M3 create, E4-M4 fulfil).
+     */
+    BusinessSubscription recordWithinTransaction(String businessId, String planCode, int configVersion, Instant periodEnd, Instant now,
+                                                 String adminId, String actor) {
+        BusinessSubscription saved = subscriptions.saveAndFlush(BusinessSubscription.manual(businessId, planCode, configVersion, periodEnd, now, adminId));
+        audit.success(CREATED, adminId, actor, TARGET, saved.getId(), saved.getPlanCode() + " " + saved.getStatus()
+                + " source=" + saved.getSource() + " config=" + saved.getConfigVersion() + " periodEnd=" + saved.getPeriodEnd());
+        return saved;
     }
 
     public SubscriptionResponse update(String businessId, SubscriptionUpdateRequest request, String adminId, String adminEmail) {
@@ -214,6 +237,7 @@ public class SubscriptionService {
         if (e instanceof MonetizationNotConfiguredException) return "not_configured";
         if (e instanceof ConfigVersionConflictException || e instanceof SubscriptionVersionConflictException) return "version_conflict";
         if (e instanceof SubscriptionExistsException) return "exists";
+        if (e instanceof PlanRequestPendingException) return "request_pending";
         return null;
     }
 

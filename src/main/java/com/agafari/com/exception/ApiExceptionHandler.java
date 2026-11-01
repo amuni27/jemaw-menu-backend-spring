@@ -128,6 +128,19 @@ public class ApiExceptionHandler {
                 .body(ApiError.of(HttpStatus.CONFLICT, SubscriptionVersionConflictException.CODE, e.getMessage()));
     }
 
+    // AGF E4-M4
+    @ExceptionHandler({PlanRequestExistsException.class, PlanRequestPendingException.class, PlanRequestVersionConflictException.class,
+            PlanNotEnabledException.class})
+    public ResponseEntity<ApiError> planRequestConflict(RuntimeException e) {
+        String code = switch (e) {
+            case PlanRequestExistsException x -> PlanRequestExistsException.CODE;
+            case PlanRequestPendingException x -> PlanRequestPendingException.CODE;
+            case PlanRequestVersionConflictException x -> PlanRequestVersionConflictException.CODE;
+            default -> PlanNotEnabledException.CODE;
+        };
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(HttpStatus.CONFLICT, code, e.getMessage()));
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> conf(ConflictException e) {
         return domain(HttpStatus.CONFLICT, e);

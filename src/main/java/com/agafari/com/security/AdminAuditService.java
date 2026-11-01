@@ -28,7 +28,13 @@ public class AdminAuditService {
     /** Written with the caller's transaction (the action and its audit row commit together). */
     @Transactional
     public void success(String action, String actorUserId, String actorLabel, String targetType, String targetId) {
-        events.save(new AdminAuditEvent(clock.instant(), actorUserId, actorLabel, action, targetType, targetId, "SUCCESS", null));
+        success(action, actorUserId, actorLabel, targetType, targetId, null);
+    }
+
+    /** As above, with a short, secret-free detail (e.g. E4-M2 "SETTING_2 [MODEL_2] (was SETTING_1 [MODEL_1])"). */
+    @Transactional
+    public void success(String action, String actorUserId, String actorLabel, String targetType, String targetId, String detail) {
+        events.save(new AdminAuditEvent(clock.instant(), actorUserId, actorLabel, action, targetType, targetId, "SUCCESS", detail));
     }
 
     /** Written in its own transaction, so it persists although the request that triggered it fails. */

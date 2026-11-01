@@ -62,7 +62,7 @@ class EmailVerificationMigrationTest extends AbstractIntegrationTest {
         migrateDev();
 
         assertThat(jdbc.queryForList("select version from " + DEV + ".flyway_schema_history order by installed_rank", String.class))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12");
         Map<String, Object> after = jdbc.queryForMap("select * from " + DEV + ".users where id = 'u1'");
         assertThat(after.remove("email_verified_at")).isEqualTo(before.get("createdAt"));
         assertThat(after).isEqualTo(before);

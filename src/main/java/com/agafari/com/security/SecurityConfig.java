@@ -43,6 +43,7 @@ public class SecurityConfig {
                                 "/api/auth/forgot-password", // AGF-S2-13A
                                 "/api/auth/reset-password",
                                 "/api/auth/verify-email", // AGF-S2-22 (resend stays signed-in only)
+                                "/api/admin/auth/login", // AGF E4-M1 (every other /api/admin/** path needs ROLE_ADMIN)
                                 "/api/demo/**", // only exists in -Pdemo builds (local demo outbox)
                                 "/actuator/**",
                                 "/venue/**",
@@ -55,8 +56,13 @@ public class SecurityConfig {
                                 "/api/categories/**",
                                 "/api/items/**",
                                 "/api/business/**",
-                                "/api/user/**"
+                                "/api/user/**",
+                                "/api/specials/**", // AGF E4-M1: now refused by role, not only by the services
+                                "/api/category-specials/**"
                         ).hasRole("VENUE")
+
+                        // AGF E4-M1: Super Admin APIs, database-backed ADMIN role on every request
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
                         .anyRequest().authenticated()
                 )

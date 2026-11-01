@@ -198,6 +198,14 @@ class FlywayBaselineGuardTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void everyDatabaseFunctionIsInTheD14List() {
+        // AGF E4-M1 (AC12): V1 creates no functions, so every public function comes from a later migration
+        List<String> functions = jdbc.queryForList("select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
+                + "where n.nspname = 'public' order by 1", String.class);
+        assertThat(FlywayBaselineGuard.LATER_MIGRATION_FUNCTIONS).containsExactlyInAnyOrderElementsOf(functions);
+    }
+
+    @Test
     void d14RefusesALeftoverMenuViewTable() throws Exception {
         legacySchema();
         jdbc.execute("create table " + LEGACY + ".menu_view_daily (business_id varchar(255), view_date date, view_count int)");

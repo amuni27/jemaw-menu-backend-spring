@@ -23,4 +23,7 @@ public interface UserRepository extends JpaRepository<User, String> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update User u set u.emailVerifiedAt = :now where u.id = :id and u.email = :email and u.emailVerifiedAt is null")
     int markEmailVerifiedIfUnverified(@Param("id") String id, @Param("email") String email, @Param("now") java.time.Instant now);
+
+    /** AGF E4-M1: whether any account has this role (the admin bootstrap runs only while no admin exists). */
+    boolean existsByRole(com.agafari.com.enums.UserRole role);
 }

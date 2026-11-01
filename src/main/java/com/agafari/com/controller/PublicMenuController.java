@@ -3,6 +3,7 @@ package com.agafari.com.controller;
 
 import com.agafari.com.dto.response.MenuItemPublicResponse;
 import com.agafari.com.dto.response.PublicBusinessMenuResponse;
+import com.agafari.com.service.MenuViewCounter;
 import com.agafari.com.service.PublicMenuService;
 import io.swagger.v3.oas.annotations.Operation;
 import lombok.RequiredArgsConstructor;
@@ -15,10 +16,14 @@ import org.springframework.web.bind.annotation.*;
 public class PublicMenuController {
 
     private final PublicMenuService publicMenuService;
+    private final MenuViewCounter menuViews; // AGF-S2-24
 
     @GetMapping("/{businessId}/menu")
     public ResponseEntity<PublicBusinessMenuResponse> getBusinessMenu(@PathVariable String businessId) {
-        return ResponseEntity.ok(publicMenuService.getBusinessMenu(businessId));
+        PublicBusinessMenuResponse menu = publicMenuService.getBusinessMenu(businessId);
+        // AGF-S2-24: a successful load counts once, outside the read-only menu transaction; never affects the response
+        menuViews.record(menu.getBusiness().getId(), menu.getBusiness().getTimeZone());
+        return ResponseEntity.ok(menu);
     }
 
     @GetMapping("/{businessId}/items/{itemId}")

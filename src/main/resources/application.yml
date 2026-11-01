@@ -58,6 +58,10 @@ app:
       environment-authorized: false
       email: ${APP_ADMIN_BOOTSTRAP_EMAIL:}
       password: ${APP_ADMIN_BOOTSTRAP_PASSWORD:}
+  # AGF E4-M3: central entitlements are computed only when this is true (default false). Turning it on in any shared
+  # environment needs separate PO approval; while off, every restaurant keeps today's behaviour.
+  monetization:
+    entitlements-enabled: ${APP_MONETIZATION_ENTITLEMENTS_ENABLED:false}
   # AGF-S2-22: email verification. Links work once a secret, a link address and a provider-backed mailer (D5) exist.
   # The publish gate also needs the explicit flag (default off): configuring a provider or secret never enables it.
   email-verification:

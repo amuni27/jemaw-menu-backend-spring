@@ -109,6 +109,25 @@ public class ApiExceptionHandler {
                 .body(ApiError.of(HttpStatus.CONFLICT, ConfigVersionConflictException.CODE, e.getMessage()));
     }
 
+    // AGF E4-M3
+    @ExceptionHandler(MonetizationNotConfiguredException.class)
+    public ResponseEntity<ApiError> monetizationNotConfigured(MonetizationNotConfiguredException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiError.of(HttpStatus.BAD_REQUEST, MonetizationNotConfiguredException.CODE, e.getMessage()));
+    }
+
+    @ExceptionHandler(SubscriptionExistsException.class)
+    public ResponseEntity<ApiError> subscriptionExists(SubscriptionExistsException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiError.of(HttpStatus.CONFLICT, SubscriptionExistsException.CODE, e.getMessage()));
+    }
+
+    @ExceptionHandler(SubscriptionVersionConflictException.class)
+    public ResponseEntity<ApiError> subscriptionVersionConflict(SubscriptionVersionConflictException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiError.of(HttpStatus.CONFLICT, SubscriptionVersionConflictException.CODE, e.getMessage()));
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> conf(ConflictException e) {
         return domain(HttpStatus.CONFLICT, e);

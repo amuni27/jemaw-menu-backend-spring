@@ -41,10 +41,12 @@ public final class FlywayBaselineGuard {
             "category.name_am", "menu.name_am", "menu_item.name_am", "menu_item.description_am",
             "users.email_verified_at"); // V10: AGF-S2-22
     public static final List<String> LATER_MIGRATION_TABLES = List.of("special", "category_special", "menu_view_daily",
-            "admin_audit_event"); // V11: AGF E4-M1
+            "admin_audit_event", // V11: AGF E4-M1
+            "monetization_config"); // V12: AGF E4-M2
     public static final List<String> LATER_MIGRATION_FUNCTIONS =
             List.of("special_business_matches_dish", "category_special_business_matches_category",
-                    "admin_audit_event_append_only"); // V11: AGF E4-M1
+                    "admin_audit_event_append_only", // V11: AGF E4-M1
+                    "monetization_config_append_only"); // V12: AGF E4-M2
 
     private FlywayBaselineGuard() {
     }

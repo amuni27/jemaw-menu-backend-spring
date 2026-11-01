@@ -76,7 +76,7 @@ class MenuTypeSeedUpgradeTest extends AbstractIntegrationTest {
         assertThat(jdbc.queryForObject("select t.name from " + DEV + ".menu m join " + DEV + ".menu_type t on t.id = m.menu_type_id where m.id = 'm1'",
                 String.class)).isEqualTo("lunch");
         assertThat(jdbc.queryForList("select version from " + DEV + ".flyway_schema_history order by installed_rank", String.class))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"); // V3 (AGF-S2-12), V4 (CR1), V5 (S2-26), V6 (S2-23), V7 (S2-25), V8 (S2-36), V9 (S2-24), V10 (S2-22) and V11 (E4-M1) follow the seed
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"); // V3 (AGF-S2-12), V4 (CR1), V5 (S2-26), V6 (S2-23), V7 (S2-25), V8 (S2-36), V9 (S2-24), V10 (S2-22) and V11 (E4-M1) follow the seed
     }
 
     // AC4

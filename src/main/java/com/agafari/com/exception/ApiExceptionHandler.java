@@ -102,6 +102,13 @@ public class ApiExceptionHandler {
                 .body(ApiError.of(HttpStatus.SERVICE_UNAVAILABLE, EmailVerificationUnavailableException.CODE, e.getMessage()));
     }
 
+    // AGF E4-M2
+    @ExceptionHandler(ConfigVersionConflictException.class)
+    public ResponseEntity<ApiError> configVersionConflict(ConfigVersionConflictException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiError.of(HttpStatus.CONFLICT, ConfigVersionConflictException.CODE, e.getMessage()));
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> conf(ConflictException e) {
         return domain(HttpStatus.CONFLICT, e);

@@ -19,6 +19,8 @@ import com.agafari.com.jpa.repository.CategoryRepository;
 import com.agafari.com.jpa.repository.MenuItemRepository;
 import com.agafari.com.jpa.repository.MenuRepository;
 import com.agafari.com.jpa.repository.MenuTypeRepository;
+import com.agafari.com.jpa.repository.SubscriptionPlanRepository;
+import com.agafari.com.jpa.entity.SubscriptionPlan;
 import com.agafari.com.jpa.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -58,6 +60,7 @@ public class DemoDataSeeder implements ApplicationRunner {
     private final MenuRepository menus;
     private final CategoryRepository categories;
     private final MenuItemRepository items;
+    private final SubscriptionPlanRepository plans;
 
     @Value("${spring.datasource.url}")
     private String datasourceUrl;
@@ -83,6 +86,8 @@ public class DemoDataSeeder implements ApplicationRunner {
         }
 
         List.of("Breakfast", "Lunch", "Dinner", "Drinks").forEach(this::menuType);
+        // AGF E4-M3: the V13 plan seed (Flyway is off in the demo); no subscriptions are created
+        if (plans.count() == 0) SubscriptionPlan.APPROVED.forEach(plan -> plans.save(plan.copy()));
 
         // Same rows as owner registration (AuthService.register), with fixed ids so demo URLs stay stable
         User owner = new User();

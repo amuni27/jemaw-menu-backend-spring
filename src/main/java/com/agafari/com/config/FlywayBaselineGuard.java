@@ -42,11 +42,13 @@ public final class FlywayBaselineGuard {
             "users.email_verified_at"); // V10: AGF-S2-22
     public static final List<String> LATER_MIGRATION_TABLES = List.of("special", "category_special", "menu_view_daily",
             "admin_audit_event", // V11: AGF E4-M1
-            "monetization_config"); // V12: AGF E4-M2
+            "monetization_config", // V12: AGF E4-M2
+            "subscription_plan", "business_subscription"); // V13: AGF E4-M3
     public static final List<String> LATER_MIGRATION_FUNCTIONS =
             List.of("special_business_matches_dish", "category_special_business_matches_category",
                     "admin_audit_event_append_only", // V11: AGF E4-M1
-                    "monetization_config_append_only"); // V12: AGF E4-M2
+                    "monetization_config_append_only", // V12: AGF E4-M2
+                    "subscription_plan_read_only", "business_subscription_guard"); // V13: AGF E4-M3
 
     private FlywayBaselineGuard() {
     }

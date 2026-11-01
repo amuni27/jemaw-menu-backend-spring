@@ -50,6 +50,13 @@ app:
     secret: ${APP_PASSWORD_RESET_SECRET:}
     link-base-url: ${APP_PASSWORD_RESET_LINK_BASE_URL:}
     token-ttl: 30m
+  # AGF-S2-22: email verification. Links work once a secret, a link address and a provider-backed mailer (D5) exist.
+  # The publish gate also needs the explicit flag (default off): configuring a provider or secret never enables it.
+  email-verification:
+    secret: ${APP_EMAIL_VERIFICATION_SECRET:}
+    link-base-url: ${APP_EMAIL_VERIFICATION_LINK_BASE_URL:}
+    token-ttl: 24h
+    enforce-publish-gate: ${APP_EMAIL_VERIFICATION_ENFORCE:false}
   # AGF-S2-21: guest menu base URL for share-page redirects (same value as the frontend VITE_PUBLIC_MENU_BASE_URL).
   # Empty = the existing production frontend (PublicMenuBaseUrl.FALLBACK). Never hard-code a brand domain (D2).
   public-menu-base-url: ${APP_PUBLIC_MENU_BASE_URL:}
@@ -74,6 +81,15 @@ app:
       limit: 10
       window: 1h
     reset-password-per-ip:      # reset submissions from one client IP
+      limit: 10
+      window: 15m
+    verify-email-resend-per-user: # verification links resent to one owner (AGF-S2-22; successful sends only)
+      limit: 3
+      window: 1h
+    verify-email-resend-per-ip:   # resend attempts from one client IP
+      limit: 10
+      window: 1h
+    verify-email-per-ip:          # verification-link submissions from one client IP
       limit: 10
       window: 15m
     max-tracked-keys: 100000    # memory bound for the counters

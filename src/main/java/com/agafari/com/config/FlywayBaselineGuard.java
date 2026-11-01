@@ -38,7 +38,8 @@ public final class FlywayBaselineGuard {
     /** Objects created by V3–V9 (checked against a fresh database by FlywayBaselineGuardTest; V9: AGF-S2-24). */
     public static final List<String> LATER_MIGRATION_COLUMNS = List.of(
             "business.location_url", "business.country", "business.time_zone",
-            "category.name_am", "menu.name_am", "menu_item.name_am", "menu_item.description_am");
+            "category.name_am", "menu.name_am", "menu_item.name_am", "menu_item.description_am",
+            "users.email_verified_at"); // V10: AGF-S2-22
     public static final List<String> LATER_MIGRATION_TABLES = List.of("special", "category_special", "menu_view_daily");
     public static final List<String> LATER_MIGRATION_FUNCTIONS =
             List.of("special_business_matches_dish", "category_special_business_matches_category");

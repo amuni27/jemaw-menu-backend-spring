@@ -18,6 +18,9 @@ public record RateLimitProperties(
         Rule forgotPasswordPerEmail, // AGF-S2-13A
         Rule forgotPasswordPerIp,
         Rule resetPasswordPerIp,
+        Rule verifyEmailResendPerUser, // AGF-S2-22: successful resends only
+        Rule verifyEmailResendPerIp,
+        Rule verifyEmailPerIp,
         int maxTrackedKeys
 ) {
     /** At most {@code limit} events per {@code window}. */

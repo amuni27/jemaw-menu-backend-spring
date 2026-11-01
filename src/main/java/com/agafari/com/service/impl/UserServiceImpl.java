@@ -1,5 +1,6 @@
 package com.agafari.com.service.impl;
 
+import com.agafari.com.security.EmailVerificationService;
 import com.agafari.com.dto.request.UserUpdateRequest;
 import com.agafari.com.dto.response.UserResponse;
 import com.agafari.com.exception.BadRequestException;
@@ -26,6 +27,7 @@ public class UserServiceImpl implements UserService {
     private final UserRepository userRepo;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final EmailVerificationService emailVerification; // AGF-S2-22
 
     @Override
     @Transactional
@@ -56,12 +58,14 @@ public class UserServiceImpl implements UserService {
                     throw new ConflictException("This email is already registered");
                 }
                 user.setEmail(newEmail);
+                user.setEmailVerifiedAt(null); // AGF-S2-22: the new address must be verified again
                 emailChanged = true;
             }
         }
 
         userRepo.save(user);
         log.info("User updated userId: {} emailChanged={}", userId, emailChanged);
+        if (emailChanged) emailVerification.sendAfterCommit(user.getId(), user.getEmail()); // AGF-S2-22
 
         UserResponse response = UserResponse.from(user);
         if (emailChanged) {

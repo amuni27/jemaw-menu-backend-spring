@@ -92,6 +92,7 @@ public class DemoDataSeeder implements ApplicationRunner {
         owner.setPasswordHash(passwordEncoder.encode(ownerPassword));
         owner.setRole(UserRole.VENUE);
         owner.setStatus(UserStatus.ACTIVE);
+        owner.setEmailVerifiedAt(java.time.Instant.now()); // AGF-S2-22: the seeded owner counts as verified
         owner = users.save(owner);
 
         Business business = new Business();

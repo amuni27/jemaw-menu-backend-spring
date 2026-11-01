@@ -209,6 +209,20 @@ class FlywayBaselineGuardTest extends AbstractIntegrationTest {
         }
     }
 
+    @Test
+    void d14ListsTheV10VerificationColumnAndRefusesItWithoutHistory() throws Exception {
+        // AGF-S2-22 (AC11): columns are listed by hand (the table test above covers tables only)
+        assertThat(FlywayBaselineGuard.LATER_MIGRATION_COLUMNS).contains("users.email_verified_at");
+        legacySchema();
+        jdbc.execute("alter table " + LEGACY + ".users add column email_verified_at timestamp(6) with time zone");
+        try (Connection c = dataSource.getConnection()) {
+            assertThatThrownBy(() -> FlywayBaselineGuard.verify(c, LEGACY))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("D14")
+                    .hasMessageContaining("users.email_verified_at");
+        }
+    }
+
     // ---- read-only, and before any baseline or migration ----
 
     @Test

@@ -42,6 +42,7 @@ public class SecurityConfig {
                                 "/api/auth/login",
                                 "/api/auth/forgot-password", // AGF-S2-13A
                                 "/api/auth/reset-password",
+                                "/api/auth/verify-email", // AGF-S2-22 (resend stays signed-in only)
                                 "/api/demo/**", // only exists in -Pdemo builds (local demo outbox)
                                 "/actuator/**",
                                 "/venue/**",

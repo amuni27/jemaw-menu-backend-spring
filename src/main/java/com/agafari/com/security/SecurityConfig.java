@@ -58,7 +58,8 @@ public class SecurityConfig {
                                 "/api/business/**",
                                 "/api/user/**",
                                 "/api/specials/**", // AGF E4-M1: now refused by role, not only by the services
-                                "/api/category-specials/**"
+                                "/api/category-specials/**",
+                                "/api/plan/**" // AGF E4-M4: owner plan view and requests (own restaurant from the token)
                         ).hasRole("VENUE")
 
                         // AGF E4-M1: Super Admin APIs, database-backed ADMIN role on every request

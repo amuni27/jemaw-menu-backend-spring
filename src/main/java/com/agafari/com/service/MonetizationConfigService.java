@@ -42,13 +42,15 @@ public class MonetizationConfigService {
     private final UserRepository users;
     private final AdminAuditService audit;
     private final TransactionTemplate transaction;
+    private final MonetizationLocks locks;
     private final Clock clock = Clock.systemUTC();
 
     public MonetizationConfigService(MonetizationConfigRepository configs, UserRepository users, AdminAuditService audit,
-                                     PlatformTransactionManager transactionManager) {
+                                     PlatformTransactionManager transactionManager, MonetizationLocks locks) {
         this.configs = configs;
         this.users = users;
         this.audit = audit;
+        this.locks = locks;
         this.transaction = new TransactionTemplate(transactionManager); // the version and its audit row commit together
     }
 
@@ -85,6 +87,7 @@ public class MonetizationConfigService {
     }
 
     private MonetizationConfigResponse apply(Change change, String adminId, String actor) {
+        locks.configExclusive(); // E4-M4 §16.2: waits for running subscription/request writes, and they wait for this change
         MonetizationConfig current = configs.findTopByOrderByVersionDesc().orElse(null);
         int currentVersion = current == null ? 0 : current.getVersion();
         if (change.expectedVersion() != currentVersion) throw new ConfigVersionConflictException();

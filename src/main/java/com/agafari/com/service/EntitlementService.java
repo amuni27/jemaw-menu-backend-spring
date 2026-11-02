@@ -1,6 +1,7 @@
 package com.agafari.com.service;
 
 import com.agafari.com.jpa.entity.BusinessSubscription;
+import com.agafari.com.jpa.entity.MonetizationConfig;
 import com.agafari.com.jpa.entity.SubscriptionPlan;
 import com.agafari.com.jpa.repository.BusinessSubscriptionRepository;
 import com.agafari.com.jpa.repository.MonetizationConfigRepository;
@@ -32,11 +33,13 @@ public class EntitlementService {
     private final BusinessSubscriptionRepository subscriptions;
     private final SubscriptionPlanRepository plans;
     private final MonetizationClock clock;
+    private final GrandfatheringService grandfathering;
     private volatile boolean enabled;
 
     public EntitlementService(MonetizationConfigRepository configs, BusinessSubscriptionRepository subscriptions,
                               SubscriptionPlanRepository plans, MonetizationClock clock,
-                              @Value("${app.monetization.entitlements-enabled:false}") boolean enabled) {
+                              @Value("${app.monetization.entitlements-enabled:false}") boolean enabled, GrandfatheringService grandfathering) {
+        this.grandfathering = grandfathering;
         this.configs = configs;
         this.subscriptions = subscriptions;
         this.plans = plans;
@@ -56,9 +59,12 @@ public class EntitlementService {
     public Entitlements forBusiness(String businessId) {
         if (!enabled) return Entitlements.unrestricted();
         try {
-            if (configs.findTopByOrderByVersionDesc().isEmpty()) return Entitlements.unrestricted();
-            // E4-M5: an effectively ended trial counts as no current subscription, also before the expiry job runs
-            Optional<BusinessSubscription> current = subscriptions.findCurrentByBusinessId(businessId).filter(s -> s.isEffectivelyCurrent(clock.now()));
+            MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElse(null);
+            if (config == null) return Entitlements.unrestricted();
+            // E4-M5: an effectively ended trial counts as no current subscription, also before the expiry job runs; E4-M6: so
+            // does a grandfathered subscription past its approved end, but only with transitions enabled
+            Optional<BusinessSubscription> current = subscriptions.findCurrentByBusinessId(businessId)
+                    .filter(s -> s.isEffectivelyCurrent(clock.now()) && !grandfathering.effectivelyEnded(s, config));
             if (current.isEmpty()) return Entitlements.unrestricted(); // launch defaults stay open (E4-Q10)
             BusinessSubscription subscription = current.get();
             SubscriptionPlan plan = plans.findById(subscription.getPlanCode()).orElseThrow();

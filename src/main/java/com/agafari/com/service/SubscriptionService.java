@@ -2,8 +2,10 @@ package com.agafari.com.service;
 
 import com.agafari.com.dto.request.SubscriptionCreateRequest;
 import com.agafari.com.dto.request.SubscriptionUpdateRequest;
+import com.agafari.com.dto.request.TransitionDateRequest;
 import com.agafari.com.dto.response.AdminBusinessPage;
 import com.agafari.com.dto.response.BusinessSubscriptionView;
+import com.agafari.com.dto.response.GrandfatheringInfo;
 import com.agafari.com.dto.response.PlanRequestSummary;
 import com.agafari.com.dto.response.SubscriptionPlanResponse;
 import com.agafari.com.dto.response.SubscriptionResponse;
@@ -44,6 +46,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -84,13 +87,15 @@ public class SubscriptionService {
     private final TrialExpirer trialExpirer;
     private final MonetizationClock monetizationClock;
     private final TrialIntentRepository trialIntents;
+    private final GrandfatheringService grandfathering;
     private final Clock clock = Clock.systemUTC();
 
     public SubscriptionService(BusinessSubscriptionRepository subscriptions, SubscriptionPlanRepository plans,
                                MonetizationConfigRepository configs, BusinessRepository businesses, UserRepository users,
                                EntitlementService entitlements, AdminAuditService audit, PlatformTransactionManager transactionManager,
                                PlanRequestRepository planRequests, MonetizationLocks locks, TrialExpirer trialExpirer,
-                               MonetizationClock monetizationClock, TrialIntentRepository trialIntents) {
+                               MonetizationClock monetizationClock, TrialIntentRepository trialIntents, GrandfatheringService grandfathering) {
+        this.grandfathering = grandfathering;
         this.trialIntents = trialIntents;
         this.planRequests = planRequests;
         this.locks = locks;
@@ -115,19 +120,37 @@ public class SubscriptionService {
     }
 
     public AdminBusinessPage businesses(String query, int page, int size) {
+        return businesses(query, page, size, false);
+    }
+
+    /** AGF E4-M6: {@code grandfatheredOnly} lists only restaurants whose current subscription is grandfathered. */
+    public AdminBusinessPage businesses(String query, int page, int size, boolean grandfatheredOnly) {
         PageRequest request = PageRequest.of(page, size, Sort.by("name").ascending().and(Sort.by("id")));
-        Page<Business> result = query == null || query.isBlank() ? businesses.findAll(request)
-                : businesses.search("%" + query.trim().toLowerCase(Locale.ROOT) + "%", request);
-        Map<String, BusinessSubscription> current = subscriptions.findCurrentByBusinessIds(result.getContent().stream().map(Business::getId).toList())
+        String pattern = query == null || query.isBlank() ? null : query.trim().toLowerCase(Locale.ROOT);
+        List<Business> content;
+        long total;
+        if (grandfatheredOnly) {
+            List<Business> all = businesses.findAllById(grandfathering.grandfatheredBusinessIds()).stream()
+                    .filter(b -> pattern == null || b.getName().toLowerCase(Locale.ROOT).contains(pattern) || b.getCustomSubdomain().toLowerCase(Locale.ROOT).contains(pattern))
+                    .sorted(Comparator.comparing(Business::getName).thenComparing(Business::getId)).toList();
+            total = all.size();
+            content = all.stream().skip((long) page * size).limit(size).toList();
+        } else {
+            Page<Business> result = pattern == null ? businesses.findAll(request) : businesses.search("%" + pattern + "%", request);
+            content = result.getContent();
+            total = result.getTotalElements();
+        }
+        MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElse(null);
+        Map<String, BusinessSubscription> current = subscriptions.findCurrentByBusinessIds(content.stream().map(Business::getId).toList())
                 .stream().collect(Collectors.toMap(BusinessSubscription::getBusinessId, Function.identity()));
-        List<AdminBusinessPage.Item> items = result.getContent().stream().map(b -> {
+        List<AdminBusinessPage.Item> items = content.stream().map(b -> {
             BusinessSubscription s = current.get(b.getId());
-            String status = s == null ? null : s.effectiveStatus(monetizationClock.now());
+            String status = s == null || grandfathering.effectivelyEnded(s, config) ? null : s.effectiveStatus(monetizationClock.now());
             boolean shown = status != null && !BusinessSubscription.EXPIRED.equals(status);
             return new AdminBusinessPage.Item(b.getId(), b.getName(), b.getCustomSubdomain(), b.getCreatedAt(),
-                    shown ? status : null, shown ? s.getPlanCode() : null);
+                    shown ? status : null, shown ? s.getPlanCode() : null, shown && grandfathering.assess(s, config).grandfathered());
         }).toList();
-        return new AdminBusinessPage(items, page, size, result.getTotalElements());
+        return new AdminBusinessPage(items, page, size, total);
     }
 
     public BusinessSubscriptionView view(String businessId) {
@@ -157,6 +180,7 @@ public class SubscriptionService {
             validateCreate(request, now);
             if (!businesses.existsById(businessId)) throw new NotFoundException("Restaurant not found");
             trialExpirer.expireDueOnTouch(businessId); // E4-M5: an effectively ended trial no longer blocks a record
+            grandfathering.expireDueOnTouch(businessId); // E4-M6: neither does a grandfathered subscription past its end (flag on)
             return transaction.execute(status -> {
                 locks.configShared(); // E4-M4 §16.2: no configuration change between this check and the commit
                 locks.restaurant(businessId); // E4-M4 §16.1: serialized with owner plan requests for this restaurant
@@ -200,20 +224,35 @@ public class SubscriptionService {
         try {
             validateUpdate(request, now);
             if (trialExpirer.expireDueOnTouch(businessId)) throw new TrialEndedException(); // E4-M5: an ended trial can't be extended
+            grandfathering.expireDueOnTouch(businessId); // E4-M6 (flag on): a grandfathered subscription past its end is ended first
             return transaction.execute(status -> {
+                locks.configShared(); // E4-M6: the grandfathering checks below use the configuration current at commit
                 locks.restaurant(businessId); // E4-M5: serialized with the expiry job and trial conversion
                 BusinessSubscription current = subscriptions.findCurrentByBusinessId(businessId)
                         .orElseThrow(() -> new NotFoundException("No current subscription"));
                 if (!current.getRowVersion().equals(request.rowVersion())) throw new SubscriptionVersionConflictException();
                 String statusBefore = current.getStatus();
                 Instant periodEndBefore = current.getPeriodEnd();
-                if (request.periodEnd() != null) current.changePeriodEnd(request.periodEnd(), now, adminId);
+                String transitionNote = "";
+                if (request.periodEnd() != null) {
+                    MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElse(null);
+                    // E4-M6 Q11: while grandfathered, an existing end date can be extended but never shortened
+                    if (periodEndBefore != null && request.periodEnd().isBefore(periodEndBefore) && grandfathering.assess(current, config).grandfathered()) {
+                        throw new FieldValidationException(Map.of("periodEnd", "The end date can only be extended while the subscription is grandfathered"));
+                    }
+                    // E4-M6 Q12 (D-M6-2): a period end on an open-ended subscription becomes authoritative and clears any transition date
+                    if (periodEndBefore == null && current.getTransitionDate() != null) {
+                        transitionNote = " transitionDate " + current.getTransitionDate() + " -> cleared";
+                        current.changeTransitionDate(null, now, adminId);
+                    }
+                    current.changePeriodEnd(request.periodEnd(), now, adminId);
+                }
                 if (request.periodEndDate() != null) current.changePeriodEnd(trialEndOf(businessId, current, LocalDate.parse(request.periodEndDate()), now), now, adminId);
                 if (BusinessSubscription.EXPIRED.equals(request.status())) current.end(now, adminId);
                 BusinessSubscription saved = subscriptions.saveAndFlush(current);
                 String action = !saved.isTrial() ? UPDATED : BusinessSubscription.EXPIRED.equals(saved.getStatus()) ? TRIAL_ENDED : TRIAL_EXTENDED;
                 audit.success(action, adminId, actor, TARGET, saved.getId(), saved.getPlanCode() + " " + statusBefore + " -> "
-                        + saved.getStatus() + " periodEnd " + periodEndBefore + " -> " + saved.getPeriodEnd() + " source=" + saved.getSource());
+                        + saved.getStatus() + " periodEnd " + periodEndBefore + " -> " + saved.getPeriodEnd() + " source=" + saved.getSource() + transitionNote);
                 return response(saved, configs.findTopByOrderByVersionDesc().orElse(null));
             });
         } catch (OptimisticLockingFailureException e) {
@@ -263,6 +302,78 @@ public class SubscriptionService {
         if (!errors.isEmpty()) throw new FieldValidationException(errors);
     }
 
+    // ------------------------------------------------------------------------------------------ E4-M6 transition dates
+
+    /**
+     * AGF E4-M6 (Q3, Option B, D-M6-1): the transition date of an open-ended grandfathered subscription: the end of the chosen
+     * day in the restaurant's time zone. Under the configuration and restaurant locks; recorded with the configuration version
+     * in the same transaction (the record is what makes the date valid).
+     */
+    public SubscriptionResponse setTransitionDate(String businessId, TransitionDateRequest request, String adminId, String adminEmail) {
+        return changeTransition(businessId, request, true, adminId, adminEmail);
+    }
+
+    public SubscriptionResponse clearTransitionDate(String businessId, TransitionDateRequest request, String adminId, String adminEmail) {
+        return changeTransition(businessId, request, false, adminId, adminEmail);
+    }
+
+    private SubscriptionResponse changeTransition(String businessId, TransitionDateRequest request, boolean set, String adminId, String adminEmail) {
+        String actor = LogMasking.maskEmail(adminEmail);
+        Instant now = clock.instant();
+        try {
+            Map<String, String> errors = new LinkedHashMap<>();
+            LocalDate date = null;
+            if (set) {
+                if (request.transitionDate() == null) errors.put("transitionDate", "Choose a date");
+                else {
+                    try {
+                        date = LocalDate.parse(request.transitionDate()); // ISO yyyy-MM-dd, strict
+                    } catch (DateTimeParseException e) {
+                        errors.put("transitionDate", "Use a calendar date (YYYY-MM-DD)");
+                    }
+                }
+            }
+            if (request.rowVersion() == null) errors.put("rowVersion", "Reload and try again");
+            if (!errors.isEmpty()) throw new FieldValidationException(errors);
+            LocalDate chosen = date;
+            return transaction.execute(status -> {
+                locks.configShared();
+                locks.restaurant(businessId);
+                BusinessSubscription current = subscriptions.findCurrentByBusinessId(businessId).orElseThrow(() -> new NotFoundException("No current subscription"));
+                if (!current.getRowVersion().equals(request.rowVersion())) throw new SubscriptionVersionConflictException();
+                MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElseThrow(MonetizationNotConfiguredException::new);
+                if (current.isTrial()) throw new FieldValidationException(Map.of("transitionDate", "A trial keeps its own end; a transition date isn't allowed"));
+                if (current.getPeriodEnd() != null) {
+                    throw new FieldValidationException(Map.of("transitionDate", "This subscription ends on its period end; a transition date isn't allowed"));
+                }
+                if (!grandfathering.assess(current, config).grandfathered()) {
+                    throw new FieldValidationException(Map.of("transitionDate", "Only a grandfathered subscription can get a transition date"));
+                }
+                Instant before = current.getTransitionDate();
+                if (set) {
+                    ZoneId zone = ZoneId.of(businesses.findById(businessId).orElseThrow(() -> new NotFoundException("Restaurant not found")).getTimeZone());
+                    Instant end = chosen.plusDays(1).atStartOfDay(zone).toInstant();
+                    if (!end.isAfter(now)) throw new FieldValidationException(Map.of("transitionDate", "Choose a date in the future"));
+                    current.changeTransitionDate(end, now, adminId);
+                } else {
+                    if (before == null) throw new FieldValidationException(Map.of("transitionDate", "There is no transition date to clear"));
+                    current.changeTransitionDate(null, now, adminId);
+                }
+                BusinessSubscription saved = subscriptions.saveAndFlush(current);
+                audit.success(set ? GrandfatheringService.TRANSITION_SET : GrandfatheringService.TRANSITION_CLEARED, adminId, actor, TARGET, saved.getId(),
+                        GrandfatheringService.record(config.getVersion(), set ? saved.getTransitionDate() : before));
+                return response(saved, config);
+            });
+        } catch (OptimisticLockingFailureException e) {
+            reject(adminId, actor, "version_conflict");
+            throw new SubscriptionVersionConflictException();
+        } catch (RuntimeException e) {
+            String reason = reason(e);
+            if (reason != null) reject(adminId, actor, reason);
+            throw e;
+        }
+    }
+
     /**
      * AGF E4-M5 (Option A): a trial extended to a calendar date runs through that whole day in the restaurant's configured
      * time zone; the stored, exclusive end is the start of the next local day (java.time handles DST and a missing midnight).
@@ -304,8 +415,11 @@ public class SubscriptionService {
         String createdBy = AdminAuditService.SYSTEM.equals(s.getCreatedByUserId()) ? AdminAuditService.SYSTEM
                 : users.findById(s.getCreatedByUserId()).map(u -> LogMasking.maskEmail(u.getEmail())).orElse("unknown");
         Instant now = monetizationClock.now();
+        GrandfatheringInfo info = grandfathering.info(s, config);
+        boolean ended = info != null && info.transitionsEnabled() && info.overdue(); // E4-M6: effective end only with the flag on
         return new SubscriptionResponse(s.getId(), s.getBusinessId(), s.getPlanCode(), s.getStatus(), s.getConfigVersion(),
                 s.getPeriodEnd(), s.getTransitionDate(), s.getSource(), false, label, s.getCreatedAt(),
-                createdBy, s.getUpdatedAt(), s.getEndedAt(), s.getRowVersion(), outside, s.effectiveStatus(now), s.effectiveEnd(now));
+                createdBy, s.getUpdatedAt(), s.getEndedAt(), s.getRowVersion(), outside,
+                ended ? BusinessSubscription.EXPIRED : s.effectiveStatus(now), ended ? info.until() : s.effectiveEnd(now), info);
     }
 }

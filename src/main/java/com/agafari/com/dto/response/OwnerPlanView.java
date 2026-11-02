@@ -13,10 +13,22 @@ import java.util.List;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record OwnerPlanView(boolean visible, String setting, Integer configVersion, List<Plan> plans, Subscription current,
                             PlanRequestSummary pendingRequest, Boolean canRequest, Boolean trialAvailable, Boolean featuresUnaffected,
-                            Trial trial) {
+                            Trial trial, EndedPlan endedPlan) {
 
     public static OwnerPlanView hidden() {
-        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null);
+        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    /**
+     * AGF E4-M6: the owner's view of grandfathering: the approved end (absent when none), whole days left, and whether
+     * transitions are on (only then does the plan actually end). Dates are shown in the restaurant's time zone.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record Grandfathering(Instant until, Long daysLeft, boolean transitionsEnabled, String timeZone) {
+    }
+
+    /** AGF E4-M6: the plan the restaurant's subscription ended on through grandfathering. */
+    public record EndedPlan(String planCode, Instant endedAt, String timeZone) {
     }
 
     /** AGF E4-M5: the restaurant's trial in its effective state only (the owner never sees the persisted status). */
@@ -28,6 +40,8 @@ public record OwnerPlanView(boolean visible, String setting, Integer configVersi
     }
 
     /** The current subscription as the owner sees it: no admin identity, no configuration version. */
-    public record Subscription(String planCode, String status, Instant periodEnd, String sourceLabel, boolean outsideCurrentConfiguration) {
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record Subscription(String planCode, String status, Instant periodEnd, String sourceLabel, boolean outsideCurrentConfiguration,
+                               Grandfathering grandfathering) {
     }
 }

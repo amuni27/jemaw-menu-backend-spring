@@ -83,6 +83,7 @@ public class TrialService {
     private final TransactionTemplate newTransaction;
     private final Duration duration;
     private final TrialIntentRepository intents;
+    private final GrandfatheringService grandfathering;
     private volatile boolean enabled;
     private volatile boolean afterCommitEnabled = true;
     private volatile int recoveryBatchSize;
@@ -92,7 +93,8 @@ public class TrialService {
                         MonetizationLocks locks, MonetizationClock clock, PlatformTransactionManager transactionManager,
                         @Value("${app.monetization.trials-enabled:false}") boolean enabled,
                         @Value("${app.monetization.trial-duration:P30D}") Duration duration, TrialIntentRepository intents,
-                        @Value("${app.monetization.trial-recovery-batch:100}") int recoveryBatchSize) {
+                        @Value("${app.monetization.trial-recovery-batch:100}") int recoveryBatchSize, GrandfatheringService grandfathering) {
+        this.grandfathering = grandfathering;
         this.intents = intents;
         this.recoveryBatchSize = recoveryBatchSize;
         this.subscriptions = subscriptions;
@@ -269,6 +271,7 @@ public class TrialService {
             if (request.expectedConfigVersion() == null) throw new FieldValidationException(Map.of("expectedConfigVersion", "Reload and try again"));
             if (!businesses.existsById(businessId)) throw new NotFoundException("Restaurant not found");
             expirer.expireDueOnTouch(businessId);
+            grandfathering.expireDueOnTouch(businessId); // E4-M6 (flag on): a grandfathered subscription past its end no longer blocks
             return transaction.execute(status -> {
                 locks.configShared();
                 locks.restaurant(businessId);

@@ -2,6 +2,7 @@ package com.agafari.com.controller;
 
 import com.agafari.com.dto.request.SubscriptionCreateRequest;
 import com.agafari.com.dto.request.SubscriptionUpdateRequest;
+import com.agafari.com.dto.request.TransitionDateRequest;
 import com.agafari.com.dto.response.AdminBusinessPage;
 import com.agafari.com.dto.response.BusinessSubscriptionView;
 import com.agafari.com.dto.response.SubscriptionPlanResponse;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -44,12 +46,13 @@ public class AdminSubscriptionController {
 
     @GetMapping("/businesses")
     public ResponseEntity<AdminBusinessPage> businesses(@RequestParam(required = false) String query,
+                                                        @RequestParam(defaultValue = "false") boolean grandfathered,
                                                         @RequestParam(defaultValue = "0") int page,
                                                         @RequestParam(defaultValue = "20") int size) {
         if (page < 0 || size < 1 || size > MAX_PAGE_SIZE) {
             throw new BadRequestException("page must be 0 or more and size between 1 and " + MAX_PAGE_SIZE);
         }
-        return ResponseEntity.ok(service.businesses(query, page, size));
+        return ResponseEntity.ok(service.businesses(query, page, size, grandfathered));
     }
 
     @GetMapping("/businesses/{businessId}/subscription")
@@ -71,5 +74,16 @@ public class AdminSubscriptionController {
     @PatchMapping("/businesses/{businessId}/subscription")
     public ResponseEntity<SubscriptionResponse> update(@PathVariable String businessId, @RequestBody SubscriptionUpdateRequest request) {
         return ResponseEntity.ok(service.update(businessId, request, currentUser.userId(), currentUser.email()));
+    }
+
+    /** AGF E4-M6: the transition date of an open-ended grandfathered subscription (a calendar date in the restaurant's time zone). */
+    @PutMapping("/businesses/{businessId}/subscription/transition-date")
+    public ResponseEntity<SubscriptionResponse> setTransitionDate(@PathVariable String businessId, @RequestBody TransitionDateRequest request) {
+        return ResponseEntity.ok(service.setTransitionDate(businessId, request, currentUser.userId(), currentUser.email()));
+    }
+
+    @PostMapping("/businesses/{businessId}/subscription/transition-date/clear")
+    public ResponseEntity<SubscriptionResponse> clearTransitionDate(@PathVariable String businessId, @RequestBody TransitionDateRequest request) {
+        return ResponseEntity.ok(service.clearTransitionDate(businessId, request, currentUser.userId(), currentUser.email()));
     }
 }

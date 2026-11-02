@@ -82,13 +82,16 @@ public class PlanRequestService {
     private final MonetizationClock monetizationClock;
     private final TransactionTemplate transaction;
     private final Clock clock = Clock.systemUTC();
+    private final GrandfatheringService grandfathering;
     private volatile boolean ownerPlansVisible;
 
     public PlanRequestService(PlanRequestRepository requests, BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs,
                               SubscriptionPlanRepository plans, BusinessRepository businesses, UserRepository users,
                               SubscriptionService subscriptionService, AdminAuditService audit, MonetizationLocks locks,
                               TrialExpirer trialExpirer, MonetizationClock monetizationClock, PlatformTransactionManager transactionManager,
-                              @Value("${app.monetization.owner-plans-visible:false}") boolean ownerPlansVisible) {
+                              @Value("${app.monetization.owner-plans-visible:false}") boolean ownerPlansVisible,
+                              GrandfatheringService grandfathering) {
+        this.grandfathering = grandfathering;
         this.requests = requests;
         this.subscriptions = subscriptions;
         this.configs = configs;
@@ -120,16 +123,22 @@ public class PlanRequestService {
                 .filter(p -> config.models().contains(MonetizationModel.valueOf(p.getModel())))
                 .map(p -> new OwnerPlanView.Plan(p.getCode(), p.getModel(), p.getAdSource(), p.isPaid())).toList();
         Instant now = monetizationClock.now();
-        BusinessSubscription currentRow = subscriptions.findCurrentByBusinessId(businessId).filter(s -> s.isEffectivelyCurrent(now)).orElse(null);
+        // E4-M6: with transitions on, a grandfathered subscription past its approved end counts as ended here too
+        BusinessSubscription currentRow = subscriptions.findCurrentByBusinessId(businessId)
+                .filter(s -> s.isEffectivelyCurrent(now) && !grandfathering.effectivelyEnded(s, config)).orElse(null);
+        String timeZone = timeZoneOf(businessId);
         // E4-M5: a trial is shown as the trial block, not as a plan; the owner sees only its effective state
         OwnerPlanView.Subscription current = currentRow == null || currentRow.isTrial() ? null
                 : new OwnerPlanView.Subscription(currentRow.getPlanCode(), currentRow.getStatus(), currentRow.getPeriodEnd(),
-                        BusinessSubscription.MANUAL.equals(currentRow.getSource()) ? SubscriptionService.MANUAL_LABEL : null, outside(config, currentRow.getPlanCode()));
+                        BusinessSubscription.MANUAL.equals(currentRow.getSource()) ? SubscriptionService.MANUAL_LABEL : null, outside(config, currentRow.getPlanCode()),
+                        ownerGrandfathering(currentRow, config, now, timeZone));
+        OwnerPlanView.EndedPlan endedPlan = currentRow != null ? null : grandfathering.endedPlan(businessId, config)
+                .map(e -> new OwnerPlanView.EndedPlan(e.planCode(), e.endedAt(), timeZone)).orElse(null);
         OwnerPlanView.Trial trial = current != null ? null : subscriptions.findFirstByBusinessIdAndSourceOrderByCreatedAtDesc(businessId, BusinessSubscription.TRIAL)
-                .map(t -> trialView(t, now, timeZoneOf(businessId))).orElse(null);
+                .map(t -> trialView(t, now, timeZone)).orElse(null);
         PlanRequestSummary pending = requests.findPendingByBusinessId(businessId).map(r -> summary(r, config)).orElse(null);
         return new OwnerPlanView(true, config.getSetting().name(), config.getVersion(), eligible, current, pending,
-                setting2 && currentRow == null && pending == null, trial != null, true, trial);
+                setting2 && currentRow == null && pending == null, trial != null, true, trial, endedPlan);
     }
 
     public PlanRequestResponse request(String businessId, PlanRequestCreateRequest request, String ownerId, String ownerEmail) {
@@ -139,6 +148,7 @@ public class PlanRequestService {
         try {
             validateRequest(request);
             trialExpirer.expireDueOnTouch(businessId); // E4-M5: an effectively ended trial no longer blocks a request
+            grandfathering.expireDueOnTouch(businessId); // E4-M6 (flag on): neither does a grandfathered subscription past its end
             return transaction.execute(status -> {
                 locks.configShared();
                 locks.restaurant(businessId);
@@ -295,6 +305,14 @@ public class PlanRequestService {
         if (e instanceof SubscriptionExistsException) return "subscription_exists";
         if (e instanceof PlanRequestExistsException) return "exists";
         return null;
+    }
+
+    /** AGF E4-M6: the owner's grandfathering block (no admin data: no transition-date record or configuration version). */
+    private OwnerPlanView.Grandfathering ownerGrandfathering(BusinessSubscription s, MonetizationConfig config, Instant now, String timeZone) {
+        GrandfatheringService.Assessment a = grandfathering.assess(s, config);
+        if (!a.grandfathered()) return null;
+        Long daysLeft = a.until() == null ? null : (Math.max(0, java.time.Duration.between(now, a.until()).getSeconds()) + 86_399) / 86_400;
+        return new OwnerPlanView.Grandfathering(a.until(), daysLeft, grandfathering.isEnabled(), timeZone);
     }
 
     private String timeZoneOf(String businessId) {

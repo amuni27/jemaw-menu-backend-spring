@@ -36,5 +36,17 @@ public interface BusinessSubscriptionRepository extends Repository<BusinessSubsc
 
     boolean existsByBusinessIdAndSource(String businessId, String source);
 
+    /** AGF E4-M6: current non-trial subscriptions (the only ones that can be grandfathered). */
+    @Query("select s from BusinessSubscription s where s.status <> 'EXPIRED' and s.source <> 'TRIAL'")
+    List<BusinessSubscription> findCurrentNonTrial();
+
+    Optional<BusinessSubscription> findById(String id);
+
+    /** AGF E4-M6: ends a grandfathered subscription at its approved end instant; 1 if this call ended it (idempotent). */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = "update business_subscription set status = 'EXPIRED', ended_at = :endedAt, updated_at = :now, updated_by_user_id = 'system', "
+            + "row_version = row_version + 1 where id = :id and status <> 'EXPIRED' and row_version = :rowVersion", nativeQuery = true)
+    int endGrandfathered(String id, Instant endedAt, Instant now, int rowVersion);
+
     Optional<BusinessSubscription> findFirstByBusinessIdAndSourceOrderByCreatedAtDesc(String businessId, String source);
 }

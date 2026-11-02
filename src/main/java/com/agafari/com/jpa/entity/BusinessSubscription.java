@@ -43,7 +43,7 @@ public class BusinessSubscription {
     private Instant periodEnd;
 
     @Column(name = "transition_date")
-    private Instant transitionDate; // reserved for E4-M6 (E4-Q11); M3 never sets it
+    private Instant transitionDate; // AGF E4-M6: only for open-ended grandfathered subscriptions (Option B), set by the Super Admin
 
     @Column(name = "source", nullable = false, length = 16, updatable = false)
     private String source;
@@ -126,6 +126,12 @@ public class BusinessSubscription {
     public void end(Instant now, String adminId) {
         status = EXPIRED;
         endedAt = now;
+        touch(now, adminId);
+    }
+
+    /** AGF E4-M6: the exclusive end of an open-ended grandfathered subscription (restaurant-local calendar rule), or null to clear. */
+    public void changeTransitionDate(Instant transitionDate, Instant now, String adminId) {
+        this.transitionDate = transitionDate;
         touch(now, adminId);
     }
 

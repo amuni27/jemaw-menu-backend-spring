@@ -37,3 +37,5 @@ cloudflare:
   bucket: test-bucket
   endpoint: https://r2.test.invalid
   publicBaseUrl: https://images.test.invalid
+# AGF E4-M5: tests run the trial expiry job directly (controlled clock), never on a schedule
+app.monetization.trial-expiry-cron: "-"

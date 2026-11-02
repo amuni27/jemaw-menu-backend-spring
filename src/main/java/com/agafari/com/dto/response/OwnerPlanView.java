@@ -12,10 +12,15 @@ import java.util.List;
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record OwnerPlanView(boolean visible, String setting, Integer configVersion, List<Plan> plans, Subscription current,
-                            PlanRequestSummary pendingRequest, Boolean canRequest, Boolean trialAvailable, Boolean featuresUnaffected) {
+                            PlanRequestSummary pendingRequest, Boolean canRequest, Boolean trialAvailable, Boolean featuresUnaffected,
+                            Trial trial) {
 
     public static OwnerPlanView hidden() {
-        return new OwnerPlanView(false, null, null, null, null, null, null, null, null);
+        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null);
+    }
+
+    /** AGF E4-M5: the restaurant's trial in its effective state only (the owner never sees the persisted status). */
+    public record Trial(Instant startedAt, Instant endsAt, long daysLeft, String effectiveStatus) {
     }
 
     public record Plan(String code, String model, String adSource, boolean paid) {

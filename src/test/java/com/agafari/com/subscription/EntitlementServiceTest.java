@@ -54,8 +54,11 @@ class EntitlementServiceTest extends AbstractIntegrationTest {
     }
 
     private void subscribe(Tenant t, String plan, String status, String periodEnd) {
+        // E4-M5 (V15): a TRIAL row is a trial (source TRIAL) and always has an end date
+        boolean trial = status.equals("TRIAL");
+        String end = trial && periodEnd.equals("null") ? "now() + interval '20 days'" : periodEnd;
         jdbc.update("insert into business_subscription (id, business_id, plan_code, status, config_version, period_end, source, created_at, "
-                + "created_by_user_id, updated_at, updated_by_user_id, ended_at, row_version) values (?, ?, ?, ?, 1, " + periodEnd + ", 'MANUAL', "
+                + "created_by_user_id, updated_at, updated_by_user_id, ended_at, row_version) values (?, ?, ?, ?, 1, " + end + ", '" + (trial ? "TRIAL" : "MANUAL") + "', "
                 + "now() - interval '10 days', ?, now(), ?, " + (status.equals("EXPIRED") ? "now()" : "null") + ", 0)",
                 UUID.randomUUID().toString(), t.businessId(), plan, status, admin.getId(), admin.getId());
     }

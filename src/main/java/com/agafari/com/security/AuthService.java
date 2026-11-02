@@ -49,6 +49,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final EmailVerificationService emailVerification; // AGF-S2-22
+    private final com.agafari.com.service.TrialService trials; // AGF E4-M5
 
     @Value("${cloudflare.publicBaseUrl}")
     private String publicBaseUrl;
@@ -159,6 +160,9 @@ public class AuthService {
 
             log.info("event=auth.register.hours_saved email={} businessId={} hoursRows={}",
                     LogMasking.maskEmail(email), biz.getId(), hours.size());
+
+            // AGF E4-M5: a 30-day Model 1 trial in the same transaction when trials are enabled and Setting 1 is current
+            trials.startAtRegistration(biz.getId());
 
             // AGF-S2-22: a verification link goes out after the registration commits (nothing if unavailable)
             emailVerification.sendAfterCommit(user.getId(), user.getEmail());

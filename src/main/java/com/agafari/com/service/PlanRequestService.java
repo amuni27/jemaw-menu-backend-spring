@@ -77,6 +77,8 @@ public class PlanRequestService {
     private final SubscriptionService subscriptionService;
     private final AdminAuditService audit;
     private final MonetizationLocks locks;
+    private final TrialExpirer trialExpirer;
+    private final MonetizationClock monetizationClock;
     private final TransactionTemplate transaction;
     private final Clock clock = Clock.systemUTC();
     private volatile boolean ownerPlansVisible;
@@ -84,7 +86,7 @@ public class PlanRequestService {
     public PlanRequestService(PlanRequestRepository requests, BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs,
                               SubscriptionPlanRepository plans, BusinessRepository businesses, UserRepository users,
                               SubscriptionService subscriptionService, AdminAuditService audit, MonetizationLocks locks,
-                              PlatformTransactionManager transactionManager,
+                              TrialExpirer trialExpirer, MonetizationClock monetizationClock, PlatformTransactionManager transactionManager,
                               @Value("${app.monetization.owner-plans-visible:false}") boolean ownerPlansVisible) {
         this.requests = requests;
         this.subscriptions = subscriptions;
@@ -95,6 +97,8 @@ public class PlanRequestService {
         this.subscriptionService = subscriptionService;
         this.audit = audit;
         this.locks = locks;
+        this.trialExpirer = trialExpirer;
+        this.monetizationClock = monetizationClock;
         this.transaction = new TransactionTemplate(transactionManager);
         this.ownerPlansVisible = ownerPlansVisible;
     }
@@ -114,13 +118,17 @@ public class PlanRequestService {
         List<OwnerPlanView.Plan> eligible = !setting2 ? List.of() : plans.findAllByOrderByCodeAsc().stream()
                 .filter(p -> config.models().contains(MonetizationModel.valueOf(p.getModel())))
                 .map(p -> new OwnerPlanView.Plan(p.getCode(), p.getModel(), p.getAdSource(), p.isPaid())).toList();
-        OwnerPlanView.Subscription current = subscriptions.findCurrentByBusinessId(businessId)
-                .map(s -> new OwnerPlanView.Subscription(s.getPlanCode(), s.getStatus(), s.getPeriodEnd(),
-                        BusinessSubscription.MANUAL.equals(s.getSource()) ? SubscriptionService.MANUAL_LABEL : null, outside(config, s.getPlanCode())))
-                .orElse(null);
+        Instant now = monetizationClock.now();
+        BusinessSubscription currentRow = subscriptions.findCurrentByBusinessId(businessId).filter(s -> s.isEffectivelyCurrent(now)).orElse(null);
+        // E4-M5: a trial is shown as the trial block, not as a plan; the owner sees only its effective state
+        OwnerPlanView.Subscription current = currentRow == null || currentRow.isTrial() ? null
+                : new OwnerPlanView.Subscription(currentRow.getPlanCode(), currentRow.getStatus(), currentRow.getPeriodEnd(),
+                        BusinessSubscription.MANUAL.equals(currentRow.getSource()) ? SubscriptionService.MANUAL_LABEL : null, outside(config, currentRow.getPlanCode()));
+        OwnerPlanView.Trial trial = current != null ? null : subscriptions.findFirstByBusinessIdAndSourceOrderByCreatedAtDesc(businessId, BusinessSubscription.TRIAL)
+                .map(t -> trialView(t, now)).orElse(null);
         PlanRequestSummary pending = requests.findPendingByBusinessId(businessId).map(r -> summary(r, config)).orElse(null);
         return new OwnerPlanView(true, config.getSetting().name(), config.getVersion(), eligible, current, pending,
-                setting2 && current == null && pending == null, false, true);
+                setting2 && currentRow == null && pending == null, trial != null, true, trial);
     }
 
     public PlanRequestResponse request(String businessId, PlanRequestCreateRequest request, String ownerId, String ownerEmail) {
@@ -129,6 +137,7 @@ public class PlanRequestService {
         Instant now = clock.instant();
         try {
             validateRequest(request);
+            trialExpirer.expireDueOnTouch(businessId); // E4-M5: an effectively ended trial no longer blocks a request
             return transaction.execute(status -> {
                 locks.configShared();
                 locks.restaurant(businessId);
@@ -285,6 +294,14 @@ public class PlanRequestService {
         if (e instanceof SubscriptionExistsException) return "subscription_exists";
         if (e instanceof PlanRequestExistsException) return "exists";
         return null;
+    }
+
+    private static OwnerPlanView.Trial trialView(BusinessSubscription t, Instant now) {
+        String effective = t.effectiveStatus(now);
+        Instant end = t.getEndedAt() != null ? t.getEndedAt() : t.getPeriodEnd();
+        long seconds = Math.max(0, java.time.Duration.between(now, t.getPeriodEnd()).getSeconds());
+        long daysLeft = BusinessSubscription.EXPIRED.equals(effective) ? 0 : (seconds + 86_399) / 86_400;
+        return new OwnerPlanView.Trial(t.getCreatedAt(), end, daysLeft, effective);
     }
 
     private static boolean outside(MonetizationConfig config, String planCode) {

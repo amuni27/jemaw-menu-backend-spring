@@ -70,6 +70,7 @@ public class SubscriptionService {
     public static final String CHANGE_REJECTED = "SUBSCRIPTION_CHANGE_REJECTED";
     public static final String MANUAL_LABEL = "Manual record, no payment verified";
     public static final String TRIAL_LABEL = "Trial (automatic), no payment involved";
+    public static final String OWNER_LABEL = "Self-service (owner), no payment"; // AGF Self-Service Phase A (SS-4)
     public static final String TRIAL_EXTENDED = "TRIAL_EXTENDED";
     public static final String TRIAL_ENDED = "TRIAL_ENDED";
     private static final String TARGET = "BUSINESS_SUBSCRIPTION";
@@ -411,7 +412,8 @@ public class SubscriptionService {
 
     private SubscriptionResponse response(BusinessSubscription s, MonetizationConfig config) {
         boolean outside = s.isCurrent() && config != null && !config.models().contains(MonetizationModel.valueOf(s.getPlanCode()));
-        String label = BusinessSubscription.MANUAL.equals(s.getSource()) ? MANUAL_LABEL : s.isTrial() ? TRIAL_LABEL : null;
+        String label = BusinessSubscription.MANUAL.equals(s.getSource()) ? MANUAL_LABEL : s.isTrial() ? TRIAL_LABEL
+                : BusinessSubscription.OWNER.equals(s.getSource()) ? OWNER_LABEL : null;
         String createdBy = AdminAuditService.SYSTEM.equals(s.getCreatedByUserId()) ? AdminAuditService.SYSTEM
                 : users.findById(s.getCreatedByUserId()).map(u -> LogMasking.maskEmail(u.getEmail())).orElse("unknown");
         Instant now = monetizationClock.now();

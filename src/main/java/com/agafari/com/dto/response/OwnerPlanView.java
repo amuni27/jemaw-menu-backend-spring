@@ -13,10 +13,18 @@ import java.util.List;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record OwnerPlanView(boolean visible, String setting, Integer configVersion, List<Plan> plans, Subscription current,
                             PlanRequestSummary pendingRequest, Boolean canRequest, Boolean trialAvailable, Boolean featuresUnaffected,
-                            Trial trial, EndedPlan endedPlan) {
+                            Trial trial, EndedPlan endedPlan, SelfService selfService) {
 
     public static OwnerPlanView hidden() {
-        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null, null);
+        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    /**
+     * AGF Self-Service Phase A: present only while self-service is on. {@code available}: a free enabled plan can be started
+     * now (Setting 2, no current subscription; a pending request needs the owner's explicit confirmation).
+     * {@code verificationRequired}: the owner must verify their email first (only while verification is operational, SS-2).
+     */
+    public record SelfService(boolean available, boolean verificationRequired) {
     }
 
     /**

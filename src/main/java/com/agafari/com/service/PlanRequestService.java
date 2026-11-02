@@ -18,6 +18,7 @@ import com.agafari.com.exception.NotFoundException;
 import com.agafari.com.exception.PlanNotEnabledException;
 import com.agafari.com.exception.PlanRequestExistsException;
 import com.agafari.com.exception.PlanRequestVersionConflictException;
+import com.agafari.com.exception.SelfServiceRefusedException;
 import com.agafari.com.exception.SubscriptionExistsException;
 import com.agafari.com.jpa.entity.Business;
 import com.agafari.com.jpa.entity.BusinessSubscription;
@@ -31,6 +32,7 @@ import com.agafari.com.jpa.repository.PlanRequestRepository;
 import com.agafari.com.jpa.repository.SubscriptionPlanRepository;
 import com.agafari.com.jpa.repository.UserRepository;
 import com.agafari.com.security.AdminAuditService;
+import com.agafari.com.security.EmailVerificationService;
 import com.agafari.com.security.LogMasking;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -83,15 +85,20 @@ public class PlanRequestService {
     private final TransactionTemplate transaction;
     private final Clock clock = Clock.systemUTC();
     private final GrandfatheringService grandfathering;
+    private final EmailVerificationService emailVerification;
     private volatile boolean ownerPlansVisible;
+    private volatile boolean selfServiceEnabled;
 
     public PlanRequestService(PlanRequestRepository requests, BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs,
                               SubscriptionPlanRepository plans, BusinessRepository businesses, UserRepository users,
                               SubscriptionService subscriptionService, AdminAuditService audit, MonetizationLocks locks,
                               TrialExpirer trialExpirer, MonetizationClock monetizationClock, PlatformTransactionManager transactionManager,
                               @Value("${app.monetization.owner-plans-visible:false}") boolean ownerPlansVisible,
-                              GrandfatheringService grandfathering) {
+                              GrandfatheringService grandfathering, EmailVerificationService emailVerification,
+                              @Value("${app.monetization.self-service-enabled:false}") boolean selfServiceEnabled) {
         this.grandfathering = grandfathering;
+        this.emailVerification = emailVerification;
+        this.selfServiceEnabled = selfServiceEnabled;
         this.requests = requests;
         this.subscriptions = subscriptions;
         this.configs = configs;
@@ -105,6 +112,27 @@ public class PlanRequestService {
         this.monetizationClock = monetizationClock;
         this.transaction = new TransactionTemplate(transactionManager);
         this.ownerPlansVisible = ownerPlansVisible;
+    }
+
+    public boolean isOwnerPlansVisible() {
+        return ownerPlansVisible;
+    }
+
+    /** AGF Self-Service Phase A: owners start free plans themselves ({@code app.monetization.self-service-enabled}, default false). */
+    public boolean isSelfServiceEnabled() {
+        return selfServiceEnabled;
+    }
+
+    /** Tests only: the flag itself comes from configuration. */
+    public void setSelfServiceEnabled(boolean enabled) {
+        this.selfServiceEnabled = enabled;
+    }
+
+    /** AGF Self-Service Phase A (SS-2): verification is required only while it is operational (an email provider, D5). */
+    public boolean verificationRequired(String businessId) {
+        if (!emailVerification.operational()) return false;
+        return businesses.findById(businessId).flatMap(b -> users.findById(b.getOwner().getId())) // id only: no lazy loading outside a transaction
+                .map(u -> !emailVerification.verified(u)).orElse(true);
     }
 
     /** Tests only: the flag itself comes from configuration. */
@@ -130,15 +158,26 @@ public class PlanRequestService {
         // E4-M5: a trial is shown as the trial block, not as a plan; the owner sees only its effective state
         OwnerPlanView.Subscription current = currentRow == null || currentRow.isTrial() ? null
                 : new OwnerPlanView.Subscription(currentRow.getPlanCode(), currentRow.getStatus(), currentRow.getPeriodEnd(),
-                        BusinessSubscription.MANUAL.equals(currentRow.getSource()) ? SubscriptionService.MANUAL_LABEL : null, outside(config, currentRow.getPlanCode()),
+                        ownerSourceLabel(currentRow), outside(config, currentRow.getPlanCode()),
                         ownerGrandfathering(currentRow, config, now, timeZone));
         OwnerPlanView.EndedPlan endedPlan = currentRow != null ? null : grandfathering.endedPlan(businessId, config)
                 .map(e -> new OwnerPlanView.EndedPlan(e.planCode(), e.endedAt(), timeZone)).orElse(null);
         OwnerPlanView.Trial trial = current != null ? null : subscriptions.findFirstByBusinessIdAndSourceOrderByCreatedAtDesc(businessId, BusinessSubscription.TRIAL)
                 .map(t -> trialView(t, now, timeZone)).orElse(null);
         PlanRequestSummary pending = requests.findPendingByBusinessId(businessId).map(r -> summary(r, config)).orElse(null);
+        // AGF Self-Service Phase A: a free enabled plan can be started while there is no current subscription
+        OwnerPlanView.SelfService selfService = !selfServiceEnabled ? null : new OwnerPlanView.SelfService(
+                setting2 && currentRow == null && eligible.stream().anyMatch(p -> !p.paid()), verificationRequired(businessId));
         return new OwnerPlanView(true, config.getSetting().name(), config.getVersion(), eligible, current, pending,
-                setting2 && currentRow == null && pending == null, trial != null, true, trial, endedPlan);
+                setting2 && currentRow == null && pending == null, trial != null, true, trial, endedPlan, selfService);
+    }
+
+    public static final String OWNER_LABEL = "Started by you";
+
+    private static String ownerSourceLabel(BusinessSubscription s) {
+        if (BusinessSubscription.MANUAL.equals(s.getSource())) return SubscriptionService.MANUAL_LABEL;
+        if (BusinessSubscription.OWNER.equals(s.getSource())) return OWNER_LABEL;
+        return null;
     }
 
     public PlanRequestResponse request(String businessId, PlanRequestCreateRequest request, String ownerId, String ownerEmail) {
@@ -156,6 +195,10 @@ public class PlanRequestService {
                 if (!config.getVersion().equals(request.expectedConfigVersion())) throw new ConfigVersionConflictException();
                 if (config.getSetting() != MonetizationSetting.SETTING_2 || !config.models().contains(MonetizationModel.valueOf(request.planCode()))) {
                     throw new FieldValidationException(Map.of("planCode", "This plan isn't available for your restaurant"));
+                }
+                // AGF Self-Service Phase A: a free plan is started by the owner, not requested
+                if (selfServiceEnabled && plans.findById(request.planCode()).map(p -> !p.isPaid()).orElse(false)) {
+                    throw SelfServiceRefusedException.useSelfService();
                 }
                 if (subscriptions.findCurrentByBusinessId(businessId).isPresent()) throw new SubscriptionExistsException();
                 if (requests.findPendingByBusinessId(businessId).isPresent()) throw new PlanRequestExistsException();
@@ -304,6 +347,7 @@ public class PlanRequestService {
         if (e instanceof PlanNotEnabledException) return "plan_not_enabled";
         if (e instanceof SubscriptionExistsException) return "subscription_exists";
         if (e instanceof PlanRequestExistsException) return "exists";
+        if (e instanceof SelfServiceRefusedException s) return s.auditReason();
         return null;
     }
 

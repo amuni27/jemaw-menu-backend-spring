@@ -76,6 +76,9 @@ app:
     agafari-ads-enabled: ${APP_MONETIZATION_AGAFARI_ADS_ENABLED:false}
     # AGF E4-M8: restaurant-managed ads (Model 3) on guest menus and owner ad management, in addition to entitlements; off by default
     restaurant-ads-enabled: ${APP_MONETIZATION_RESTAURANT_ADS_ENABLED:false}
+    # AGF Self-Service Phase A: owners start Free with Ads themselves (no Super Admin approval; paid plans keep requests);
+    # off by default, separate PO approval for any shared environment
+    self-service-enabled: ${APP_MONETIZATION_SELF_SERVICE_ENABLED:false}
     trial-duration: ${APP_MONETIZATION_TRIAL_DURATION:P30D}
     trial-expiry-cron: ${APP_MONETIZATION_TRIAL_EXPIRY_CRON:0 0 2 * * *}
   # AGF-S2-22: email verification. Links work once a secret, a link address and a provider-backed mailer (D5) exist.

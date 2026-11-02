@@ -166,6 +166,12 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiError.of(HttpStatus.FORBIDDEN, RestaurantAdsNotEntitledException.CODE, e.getMessage()));
     }
 
+    // AGF Self-Service Phase A
+    @ExceptionHandler(SelfServiceRefusedException.class)
+    public ResponseEntity<ApiError> selfServiceRefused(SelfServiceRefusedException e) {
+        return ResponseEntity.status(e.status()).body(ApiError.of(e.status(), e.code(), e.getMessage()));
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> conf(ConflictException e) {
         return domain(HttpStatus.CONFLICT, e);

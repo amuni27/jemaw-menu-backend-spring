@@ -22,6 +22,7 @@ public class BusinessSubscription {
     public static final String EXPIRED = "EXPIRED";
     public static final String MANUAL = "MANUAL";
     public static final String TRIAL = "TRIAL"; // AGF E4-M5: status and source of a trial
+    public static final String OWNER = "OWNER"; // AGF Self-Service Phase A: started by the owner (free plan, no payment)
 
     @Id
     @Column(name = "id", nullable = false, length = 36)
@@ -82,6 +83,13 @@ public class BusinessSubscription {
         s.createdByUserId = adminId;
         s.updatedAt = now;
         s.updatedByUserId = adminId;
+        return s;
+    }
+
+    /** AGF Self-Service Phase A: an open-ended ACTIVE subscription the owner started themselves (a free plan only). */
+    public static BusinessSubscription owner(String businessId, String planCode, int configVersion, Instant now, String ownerId) {
+        BusinessSubscription s = manual(businessId, planCode, configVersion, null, now, ownerId);
+        s.source = OWNER;
         return s;
     }
 

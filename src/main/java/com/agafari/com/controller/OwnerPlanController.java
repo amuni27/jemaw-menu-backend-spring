@@ -5,7 +5,10 @@ import com.agafari.com.dto.request.PlanRequestWithdrawRequest;
 import com.agafari.com.dto.response.OwnerPlanView;
 import com.agafari.com.dto.response.PlanRequestResponse;
 import com.agafari.com.security.CurrentUser;
+import com.agafari.com.dto.request.SubscriptionActivationRequest;
+import com.agafari.com.dto.response.SubscriptionActivationResponse;
 import com.agafari.com.service.PlanRequestService;
+import com.agafari.com.service.SelfServiceActivationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +30,7 @@ public class OwnerPlanController {
 
     private final CurrentUser currentUser;
     private final PlanRequestService service;
+    private final SelfServiceActivationService selfService;
 
     @GetMapping
     public ResponseEntity<OwnerPlanView> view() {
@@ -37,6 +41,13 @@ public class OwnerPlanController {
     public ResponseEntity<PlanRequestResponse> request(@RequestBody PlanRequestCreateRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(service.request(currentUser.businessId(), request, currentUser.userId(), currentUser.email()));
+    }
+
+    /** AGF Self-Service Phase A: the owner starts a free plan (201), or repeats the click (200, the same subscription). */
+    @PostMapping("/activations")
+    public ResponseEntity<SubscriptionActivationResponse> activate(@RequestBody SubscriptionActivationRequest request) {
+        SubscriptionActivationResponse response = selfService.activate(currentUser.businessId(), request, currentUser.userId(), currentUser.email());
+        return ResponseEntity.status(response.created() ? HttpStatus.CREATED : HttpStatus.OK).body(response);
     }
 
     @PatchMapping("/requests/current")

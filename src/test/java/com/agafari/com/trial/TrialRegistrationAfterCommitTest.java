@@ -26,10 +26,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * AGF E4-M5 (AC2, D-M5-3 as restored by the PO on 2026-11-02): the trial starts after the registration commits, in its
- * own transaction. A trial failure never fails the registration: the trial rolls back completely and TRIAL_START_FAILED
- * is recorded against the restaurant, so the Super Admin can start it by hand. A registration that rolls back gets no
- * trial.
+ * AGF E4-M5 (AC2, D-M5-3 as restored by the PO on 2026-11-02; recovery AC-R1, AC-R4): the trial starts after the
+ * registration commits, in its own transaction. A trial failure never fails the registration: the trial rolls back
+ * completely, TRIAL_START_FAILED is recorded against the restaurant and the durable intent stays pending for the daily
+ * retry. A registration that rolls back gets no trial and no intent.
  */
 class TrialRegistrationAfterCommitTest extends AbstractIntegrationTest {
 
@@ -71,6 +71,8 @@ class TrialRegistrationAfterCommitTest extends AbstractIntegrationTest {
                 .containsEntry("target_type", "BUSINESS").containsEntry("target_id", businessId)
                 .containsEntry("detail", "unexpected_error");
         assertThat(failed.get("actor_user_id")).isNull();
+        assertThat(jdbc.queryForMap("select status, failed_attempts from trial_intent where business_id = ?", businessId))
+                .containsEntry("status", "PENDING").containsEntry("failed_attempts", 1); // kept for the daily retry
     }
 
     @Test
@@ -82,8 +84,9 @@ class TrialRegistrationAfterCommitTest extends AbstractIntegrationTest {
 
         register(mockMvc, "trial-audit-fails").andExpect(status().isCreated());
 
-        assertThat(businessOf(jdbc, "trial-audit-fails")).isNotNull();
+        String businessId = businessOf(jdbc, "trial-audit-fails");
         assertThat(count("select count(*) from business_subscription")).isZero();
+        assertThat(count("select count(*) from trial_intent where business_id = ? and status = 'PENDING' and failed_attempts = 1", businessId)).isEqualTo(1);
     }
 
     @Test
@@ -97,5 +100,6 @@ class TrialRegistrationAfterCommitTest extends AbstractIntegrationTest {
         assertThat(count("select count(*) from business where custom_subdomain like 'registration-fails-%'")).isZero();
         assertThat(count("select count(*) from business_subscription")).isZero();
         assertThat(count("select count(*) from admin_audit_event where action like 'TRIAL%'")).isZero();
+        assertThat(count("select count(*) from trial_intent")).isZero();
     }
 }

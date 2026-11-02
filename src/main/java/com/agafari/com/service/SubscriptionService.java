@@ -7,6 +7,7 @@ import com.agafari.com.dto.response.BusinessSubscriptionView;
 import com.agafari.com.dto.response.PlanRequestSummary;
 import com.agafari.com.dto.response.SubscriptionPlanResponse;
 import com.agafari.com.dto.response.SubscriptionResponse;
+import com.agafari.com.dto.response.TrialIntentSummary;
 import com.agafari.com.enums.MonetizationModel;
 import com.agafari.com.exception.ConfigVersionConflictException;
 import com.agafari.com.exception.FieldValidationException;
@@ -25,6 +26,7 @@ import com.agafari.com.jpa.repository.BusinessSubscriptionRepository;
 import com.agafari.com.jpa.repository.MonetizationConfigRepository;
 import com.agafari.com.jpa.repository.PlanRequestRepository;
 import com.agafari.com.jpa.repository.SubscriptionPlanRepository;
+import com.agafari.com.jpa.repository.TrialIntentRepository;
 import com.agafari.com.jpa.repository.UserRepository;
 import com.agafari.com.security.AdminAuditService;
 import com.agafari.com.security.LogMasking;
@@ -78,13 +80,15 @@ public class SubscriptionService {
     private final MonetizationLocks locks;
     private final TrialExpirer trialExpirer;
     private final MonetizationClock monetizationClock;
+    private final TrialIntentRepository trialIntents;
     private final Clock clock = Clock.systemUTC();
 
     public SubscriptionService(BusinessSubscriptionRepository subscriptions, SubscriptionPlanRepository plans,
                                MonetizationConfigRepository configs, BusinessRepository businesses, UserRepository users,
                                EntitlementService entitlements, AdminAuditService audit, PlatformTransactionManager transactionManager,
                                PlanRequestRepository planRequests, MonetizationLocks locks, TrialExpirer trialExpirer,
-                               MonetizationClock monetizationClock) {
+                               MonetizationClock monetizationClock, TrialIntentRepository trialIntents) {
+        this.trialIntents = trialIntents;
         this.planRequests = planRequests;
         this.locks = locks;
         this.trialExpirer = trialExpirer;
@@ -131,7 +135,8 @@ public class SubscriptionService {
                 .map(r -> new PlanRequestSummary(r.getId(), r.getPlanCode(), r.getConfigVersion(), r.getRequestedAt(), r.getRowVersion(),
                         config != null && !config.models().contains(MonetizationModel.valueOf(r.getPlanCode())))).orElse(null);
         return new BusinessSubscriptionView(businessId, business.getName(), current, entitlements.forBusiness(businessId),
-                entitlements.isEnabled() && config != null, pending);
+                entitlements.isEnabled() && config != null, pending,
+                trialIntents.findById(businessId).map(i -> TrialIntentSummary.of(i, null)).orElse(null));
     }
 
     public List<SubscriptionResponse> history(String businessId) {

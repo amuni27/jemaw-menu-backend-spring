@@ -21,6 +21,7 @@ public class BusinessSubscription {
     public static final String ACTIVE = "ACTIVE";
     public static final String EXPIRED = "EXPIRED";
     public static final String MANUAL = "MANUAL";
+    public static final String TRIAL = "TRIAL"; // AGF E4-M5: status and source of a trial
 
     @Id
     @Column(name = "id", nullable = false, length = 36)
@@ -82,6 +83,39 @@ public class BusinessSubscription {
         s.updatedAt = now;
         s.updatedByUserId = adminId;
         return s;
+    }
+
+    /** AGF E4-M5: a Model 1 trial ending at {@code periodEnd} (actor "system" at registration, or the admin). */
+    public static BusinessSubscription trial(String businessId, int configVersion, Instant now, Instant periodEnd, String actor) {
+        BusinessSubscription s = manual(businessId, "MODEL_1", configVersion, periodEnd, now, actor);
+        s.status = TRIAL;
+        s.source = TRIAL;
+        return s;
+    }
+
+    public boolean isTrial() {
+        return TRIAL.equals(source);
+    }
+
+    /** AGF E4-M5: a trial counts as ended once its period end has passed, even before the job persists it (D-M5-13). */
+    public String effectiveStatus(Instant now) {
+        return TRIAL.equals(status) && periodEnd != null && !periodEnd.isAfter(now) ? EXPIRED : status;
+    }
+
+    public Instant effectiveEnd(Instant now) {
+        if (endedAt != null) return endedAt;
+        return EXPIRED.equals(effectiveStatus(now)) ? periodEnd : null;
+    }
+
+    public boolean isEffectivelyCurrent(Instant now) {
+        return !EXPIRED.equals(effectiveStatus(now));
+    }
+
+    /** AGF E4-M5: ends a trial at {@code endedAt} (conversion: the earlier of now and the period end). */
+    public void endTrial(Instant endedAt, Instant now, String adminId) {
+        status = EXPIRED;
+        this.endedAt = endedAt;
+        touch(now, adminId);
     }
 
     public boolean isCurrent() {

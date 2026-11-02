@@ -44,6 +44,12 @@ public class MonetizationLocks {
         if (enabled()) jdbc.execute("select pg_advisory_xact_lock_shared(" + CONFIG_LOCK_KEY + ")");
     }
 
+    /** AGF E4-M5: true if this transaction now runs the trial expiry job; false if another instance already does. */
+    public boolean tryTrialJob(long key) {
+        if (!enabled()) return true;
+        return Boolean.TRUE.equals(jdbc.queryForObject("select pg_try_advisory_xact_lock(" + key + ")", Boolean.class));
+    }
+
     public void restaurant(String businessId) {
         if (enabled()) jdbc.queryForList("select id from business where id = ? for no key update", String.class, businessId);
     }

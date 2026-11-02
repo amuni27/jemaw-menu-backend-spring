@@ -7,12 +7,14 @@ import com.agafari.com.dto.response.BusinessSubscriptionView;
 import com.agafari.com.dto.response.PlanRequestSummary;
 import com.agafari.com.dto.response.SubscriptionPlanResponse;
 import com.agafari.com.dto.response.SubscriptionResponse;
+import com.agafari.com.dto.response.TrialIntentSummary;
 import com.agafari.com.enums.MonetizationModel;
 import com.agafari.com.exception.ConfigVersionConflictException;
 import com.agafari.com.exception.FieldValidationException;
 import com.agafari.com.exception.MonetizationNotConfiguredException;
 import com.agafari.com.exception.NotFoundException;
 import com.agafari.com.exception.PlanRequestPendingException;
+import com.agafari.com.exception.TrialEndedException;
 import com.agafari.com.exception.SubscriptionExistsException;
 import com.agafari.com.exception.SubscriptionVersionConflictException;
 import com.agafari.com.jpa.entity.Business;
@@ -24,6 +26,7 @@ import com.agafari.com.jpa.repository.BusinessSubscriptionRepository;
 import com.agafari.com.jpa.repository.MonetizationConfigRepository;
 import com.agafari.com.jpa.repository.PlanRequestRepository;
 import com.agafari.com.jpa.repository.SubscriptionPlanRepository;
+import com.agafari.com.jpa.repository.TrialIntentRepository;
 import com.agafari.com.jpa.repository.UserRepository;
 import com.agafari.com.security.AdminAuditService;
 import com.agafari.com.security.LogMasking;
@@ -38,6 +41,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -60,6 +66,9 @@ public class SubscriptionService {
     public static final String UPDATED = "SUBSCRIPTION_UPDATED";
     public static final String CHANGE_REJECTED = "SUBSCRIPTION_CHANGE_REJECTED";
     public static final String MANUAL_LABEL = "Manual record, no payment verified";
+    public static final String TRIAL_LABEL = "Trial (automatic), no payment involved";
+    public static final String TRIAL_EXTENDED = "TRIAL_EXTENDED";
+    public static final String TRIAL_ENDED = "TRIAL_ENDED";
     private static final String TARGET = "BUSINESS_SUBSCRIPTION";
 
     private final BusinessSubscriptionRepository subscriptions;
@@ -72,14 +81,21 @@ public class SubscriptionService {
     private final TransactionTemplate transaction;
     private final PlanRequestRepository planRequests;
     private final MonetizationLocks locks;
+    private final TrialExpirer trialExpirer;
+    private final MonetizationClock monetizationClock;
+    private final TrialIntentRepository trialIntents;
     private final Clock clock = Clock.systemUTC();
 
     public SubscriptionService(BusinessSubscriptionRepository subscriptions, SubscriptionPlanRepository plans,
                                MonetizationConfigRepository configs, BusinessRepository businesses, UserRepository users,
                                EntitlementService entitlements, AdminAuditService audit, PlatformTransactionManager transactionManager,
-                               PlanRequestRepository planRequests, MonetizationLocks locks) {
+                               PlanRequestRepository planRequests, MonetizationLocks locks, TrialExpirer trialExpirer,
+                               MonetizationClock monetizationClock, TrialIntentRepository trialIntents) {
+        this.trialIntents = trialIntents;
         this.planRequests = planRequests;
         this.locks = locks;
+        this.trialExpirer = trialExpirer;
+        this.monetizationClock = monetizationClock;
         this.subscriptions = subscriptions;
         this.plans = plans;
         this.configs = configs;
@@ -106,8 +122,10 @@ public class SubscriptionService {
                 .stream().collect(Collectors.toMap(BusinessSubscription::getBusinessId, Function.identity()));
         List<AdminBusinessPage.Item> items = result.getContent().stream().map(b -> {
             BusinessSubscription s = current.get(b.getId());
+            String status = s == null ? null : s.effectiveStatus(monetizationClock.now());
+            boolean shown = status != null && !BusinessSubscription.EXPIRED.equals(status);
             return new AdminBusinessPage.Item(b.getId(), b.getName(), b.getCustomSubdomain(), b.getCreatedAt(),
-                    s == null ? null : s.getStatus(), s == null ? null : s.getPlanCode());
+                    shown ? status : null, shown ? s.getPlanCode() : null);
         }).toList();
         return new AdminBusinessPage(items, page, size, result.getTotalElements());
     }
@@ -120,7 +138,8 @@ public class SubscriptionService {
                 .map(r -> new PlanRequestSummary(r.getId(), r.getPlanCode(), r.getConfigVersion(), r.getRequestedAt(), r.getRowVersion(),
                         config != null && !config.models().contains(MonetizationModel.valueOf(r.getPlanCode())))).orElse(null);
         return new BusinessSubscriptionView(businessId, business.getName(), current, entitlements.forBusiness(businessId),
-                entitlements.isEnabled() && config != null, pending);
+                entitlements.isEnabled() && config != null, pending, business.getTimeZone(),
+                trialIntents.findById(businessId).map(i -> TrialIntentSummary.of(i, null)).orElse(null));
     }
 
     public List<SubscriptionResponse> history(String businessId) {
@@ -137,6 +156,7 @@ public class SubscriptionService {
         try {
             validateCreate(request, now);
             if (!businesses.existsById(businessId)) throw new NotFoundException("Restaurant not found");
+            trialExpirer.expireDueOnTouch(businessId); // E4-M5: an effectively ended trial no longer blocks a record
             return transaction.execute(status -> {
                 locks.configShared(); // E4-M4 §16.2: no configuration change between this check and the commit
                 locks.restaurant(businessId); // E4-M4 §16.1: serialized with owner plan requests for this restaurant
@@ -179,16 +199,20 @@ public class SubscriptionService {
         Instant now = clock.instant();
         try {
             validateUpdate(request, now);
+            if (trialExpirer.expireDueOnTouch(businessId)) throw new TrialEndedException(); // E4-M5: an ended trial can't be extended
             return transaction.execute(status -> {
+                locks.restaurant(businessId); // E4-M5: serialized with the expiry job and trial conversion
                 BusinessSubscription current = subscriptions.findCurrentByBusinessId(businessId)
                         .orElseThrow(() -> new NotFoundException("No current subscription"));
                 if (!current.getRowVersion().equals(request.rowVersion())) throw new SubscriptionVersionConflictException();
                 String statusBefore = current.getStatus();
                 Instant periodEndBefore = current.getPeriodEnd();
                 if (request.periodEnd() != null) current.changePeriodEnd(request.periodEnd(), now, adminId);
+                if (request.periodEndDate() != null) current.changePeriodEnd(trialEndOf(businessId, current, LocalDate.parse(request.periodEndDate()), now), now, adminId);
                 if (BusinessSubscription.EXPIRED.equals(request.status())) current.end(now, adminId);
                 BusinessSubscription saved = subscriptions.saveAndFlush(current);
-                audit.success(UPDATED, adminId, actor, TARGET, saved.getId(), saved.getPlanCode() + " " + statusBefore + " -> "
+                String action = !saved.isTrial() ? UPDATED : BusinessSubscription.EXPIRED.equals(saved.getStatus()) ? TRIAL_ENDED : TRIAL_EXTENDED;
+                audit.success(action, adminId, actor, TARGET, saved.getId(), saved.getPlanCode() + " " + statusBefore + " -> "
                         + saved.getStatus() + " periodEnd " + periodEndBefore + " -> " + saved.getPeriodEnd() + " source=" + saved.getSource());
                 return response(saved, configs.findTopByOrderByVersionDesc().orElse(null));
             });
@@ -222,12 +246,35 @@ public class SubscriptionService {
         if (request.status() != null && !BusinessSubscription.EXPIRED.equals(request.status())) {
             errors.put("status", "A subscription can only be ended");
         }
-        if (request.status() == null && request.periodEnd() == null && request.planCode() == null) {
+        if (request.status() == null && request.periodEnd() == null && request.planCode() == null && request.periodEndDate() == null) {
             errors.put("status", "Nothing to change");
+        }
+        if (request.periodEndDate() != null && request.periodEnd() != null) errors.put("periodEndDate", "Send a date or an end time, not both");
+        if (request.periodEndDate() != null && request.status() != null) errors.put("periodEndDate", "Extending and ending are separate actions");
+        if (request.periodEndDate() != null && !errors.containsKey("periodEndDate")) {
+            try {
+                LocalDate.parse(request.periodEndDate()); // ISO yyyy-MM-dd, strict: no time, no zone, no impossible dates
+            } catch (DateTimeParseException e) {
+                errors.put("periodEndDate", "Use a calendar date (YYYY-MM-DD)");
+            }
         }
         if (request.periodEnd() != null && !request.periodEnd().isAfter(now)) errors.put("periodEnd", "Choose a date in the future");
         if (request.rowVersion() == null) errors.put("rowVersion", "Reload and try again");
         if (!errors.isEmpty()) throw new FieldValidationException(errors);
+    }
+
+    /**
+     * AGF E4-M5 (Option A): a trial extended to a calendar date runs through that whole day in the restaurant's configured
+     * time zone; the stored, exclusive end is the start of the next local day (java.time handles DST and a missing midnight).
+     */
+    private Instant trialEndOf(String businessId, BusinessSubscription current, LocalDate date, Instant now) {
+        if (!current.isTrial() || !BusinessSubscription.TRIAL.equals(current.getStatus())) {
+            throw new FieldValidationException(Map.of("periodEndDate", "Only a running trial can be extended to a date"));
+        }
+        ZoneId zone = ZoneId.of(businesses.findById(businessId).orElseThrow(() -> new NotFoundException("Restaurant not found")).getTimeZone());
+        Instant end = date.plusDays(1).atStartOfDay(zone).toInstant();
+        if (!end.isAfter(now)) throw new FieldValidationException(Map.of("periodEndDate", "Choose a date in the future"));
+        return end;
     }
 
     /** The audit reason category for an expected rejection, or null for unexpected errors (not audited as rejections). */
@@ -238,6 +285,7 @@ public class SubscriptionService {
         if (e instanceof ConfigVersionConflictException || e instanceof SubscriptionVersionConflictException) return "version_conflict";
         if (e instanceof SubscriptionExistsException) return "exists";
         if (e instanceof PlanRequestPendingException) return "request_pending";
+        if (e instanceof TrialEndedException) return "trial_ended";
         return null;
     }
 
@@ -245,12 +293,19 @@ public class SubscriptionService {
         audit.failure(CHANGE_REJECTED, adminId, actor, reason);
     }
 
+    /** AGF E4-M5: for {@link TrialService}. */
+    SubscriptionResponse toResponse(BusinessSubscription s, MonetizationConfig config) {
+        return response(s, config);
+    }
+
     private SubscriptionResponse response(BusinessSubscription s, MonetizationConfig config) {
         boolean outside = s.isCurrent() && config != null && !config.models().contains(MonetizationModel.valueOf(s.getPlanCode()));
-        boolean manual = BusinessSubscription.MANUAL.equals(s.getSource());
-        String createdBy = users.findById(s.getCreatedByUserId()).map(u -> LogMasking.maskEmail(u.getEmail())).orElse("unknown");
+        String label = BusinessSubscription.MANUAL.equals(s.getSource()) ? MANUAL_LABEL : s.isTrial() ? TRIAL_LABEL : null;
+        String createdBy = AdminAuditService.SYSTEM.equals(s.getCreatedByUserId()) ? AdminAuditService.SYSTEM
+                : users.findById(s.getCreatedByUserId()).map(u -> LogMasking.maskEmail(u.getEmail())).orElse("unknown");
+        Instant now = monetizationClock.now();
         return new SubscriptionResponse(s.getId(), s.getBusinessId(), s.getPlanCode(), s.getStatus(), s.getConfigVersion(),
-                s.getPeriodEnd(), s.getTransitionDate(), s.getSource(), false, manual ? MANUAL_LABEL : null, s.getCreatedAt(),
-                createdBy, s.getUpdatedAt(), s.getEndedAt(), s.getRowVersion(), outside);
+                s.getPeriodEnd(), s.getTransitionDate(), s.getSource(), false, label, s.getCreatedAt(),
+                createdBy, s.getUpdatedAt(), s.getEndedAt(), s.getRowVersion(), outside, s.effectiveStatus(now), s.effectiveEnd(now));
     }
 }

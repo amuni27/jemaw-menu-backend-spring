@@ -141,6 +141,13 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(HttpStatus.CONFLICT, code, e.getMessage()));
     }
 
+    // AGF E4-M5
+    @ExceptionHandler({TrialEndedException.class, TrialAlreadyUsedException.class})
+    public ResponseEntity<ApiError> trialConflict(RuntimeException e) {
+        String code = e instanceof TrialEndedException ? TrialEndedException.CODE : TrialAlreadyUsedException.CODE;
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(HttpStatus.CONFLICT, code, e.getMessage()));
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> conf(ConflictException e) {
         return domain(HttpStatus.CONFLICT, e);

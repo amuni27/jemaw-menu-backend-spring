@@ -65,6 +65,11 @@ app:
   monetization:
     entitlements-enabled: ${APP_MONETIZATION_ENTITLEMENTS_ENABLED:false}
     owner-plans-visible: ${APP_MONETIZATION_OWNER_PLANS_VISIBLE:false}
+    # AGF E4-M5: 30-day Model 1 trials for new registrations under Setting 1, only when trials-enabled is true (default
+    # false; separate PO approval for any shared environment). Expiry changes nothing for owners or guests.
+    trials-enabled: ${APP_MONETIZATION_TRIALS_ENABLED:false}
+    trial-duration: ${APP_MONETIZATION_TRIAL_DURATION:P30D}
+    trial-expiry-cron: ${APP_MONETIZATION_TRIAL_EXPIRY_CRON:0 0 2 * * *}
   # AGF-S2-22: email verification. Links work once a secret, a link address and a provider-backed mailer (D5) exist.
   # The publish gate also needs the explicit flag (default off): configuring a provider or secret never enables it.
   email-verification:

@@ -31,14 +31,16 @@ public class EntitlementService {
     private final MonetizationConfigRepository configs;
     private final BusinessSubscriptionRepository subscriptions;
     private final SubscriptionPlanRepository plans;
+    private final MonetizationClock clock;
     private volatile boolean enabled;
 
     public EntitlementService(MonetizationConfigRepository configs, BusinessSubscriptionRepository subscriptions,
-                              SubscriptionPlanRepository plans,
+                              SubscriptionPlanRepository plans, MonetizationClock clock,
                               @Value("${app.monetization.entitlements-enabled:false}") boolean enabled) {
         this.configs = configs;
         this.subscriptions = subscriptions;
         this.plans = plans;
+        this.clock = clock;
         this.enabled = enabled;
     }
 
@@ -55,7 +57,8 @@ public class EntitlementService {
         if (!enabled) return Entitlements.unrestricted();
         try {
             if (configs.findTopByOrderByVersionDesc().isEmpty()) return Entitlements.unrestricted();
-            Optional<BusinessSubscription> current = subscriptions.findCurrentByBusinessId(businessId);
+            // E4-M5: an effectively ended trial counts as no current subscription, also before the expiry job runs
+            Optional<BusinessSubscription> current = subscriptions.findCurrentByBusinessId(businessId).filter(s -> s.isEffectivelyCurrent(clock.now()));
             if (current.isEmpty()) return Entitlements.unrestricted(); // launch defaults stay open (E4-Q10)
             BusinessSubscription subscription = current.get();
             SubscriptionPlan plan = plans.findById(subscription.getPlanCode()).orElseThrow();

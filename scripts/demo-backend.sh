@@ -38,6 +38,7 @@ APP_PASSWORD_RESET_SECRET=$(sed -n 's/^APP_PASSWORD_RESET_SECRET=//p' "$ENV_FILE
 DEMO_OWNER_PASSWORD=$(sed -n 's/^DEMO_OWNER_PASSWORD=//p' "$ENV_FILE")
 APP_EMAIL_VERIFICATION_SECRET=$(sed -n 's/^APP_EMAIL_VERIFICATION_SECRET=//p' "$ENV_FILE")
 # AGF E4-M4: owners see plans only if APP_MONETIZATION_OWNER_PLANS_VISIBLE=true is set in the shell (E2E sets it).
+# AGF E4-M5: new registrations get trials only if APP_MONETIZATION_TRIALS_ENABLED=true is set in the shell (E2E sets it).
 # AGF E4-M1: the first Super Admin is created only if APP_ADMIN_BOOTSTRAP_EMAIL and APP_ADMIN_BOOTSTRAP_PASSWORD are set in
 # the shell for this start (never stored in .env.demo by this script)
 # AGF-S2-22: the publish gate stays off unless APP_EMAIL_VERIFICATION_ENFORCE=true is set in the shell or in .env.demo
@@ -60,6 +61,7 @@ exec env -i \
   ${APP_ADMIN_BOOTSTRAP_EMAIL:+APP_ADMIN_BOOTSTRAP_EMAIL="$APP_ADMIN_BOOTSTRAP_EMAIL"} \
   ${APP_ADMIN_BOOTSTRAP_PASSWORD:+APP_ADMIN_BOOTSTRAP_PASSWORD="$APP_ADMIN_BOOTSTRAP_PASSWORD"} \
   ${APP_MONETIZATION_OWNER_PLANS_VISIBLE:+APP_MONETIZATION_OWNER_PLANS_VISIBLE="$APP_MONETIZATION_OWNER_PLANS_VISIBLE"} \
+  ${APP_MONETIZATION_TRIALS_ENABLED:+APP_MONETIZATION_TRIALS_ENABLED="$APP_MONETIZATION_TRIALS_ENABLED"} \
   sh ./mvnw -q -Pdemo spring-boot:run \
     -Dspring-boot.run.profiles=demo \
     -Dspring-boot.run.workingDirectory="$RUN_DIR"

@@ -41,6 +41,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -135,7 +138,7 @@ public class SubscriptionService {
                 .map(r -> new PlanRequestSummary(r.getId(), r.getPlanCode(), r.getConfigVersion(), r.getRequestedAt(), r.getRowVersion(),
                         config != null && !config.models().contains(MonetizationModel.valueOf(r.getPlanCode())))).orElse(null);
         return new BusinessSubscriptionView(businessId, business.getName(), current, entitlements.forBusiness(businessId),
-                entitlements.isEnabled() && config != null, pending,
+                entitlements.isEnabled() && config != null, pending, business.getTimeZone(),
                 trialIntents.findById(businessId).map(i -> TrialIntentSummary.of(i, null)).orElse(null));
     }
 
@@ -205,6 +208,7 @@ public class SubscriptionService {
                 String statusBefore = current.getStatus();
                 Instant periodEndBefore = current.getPeriodEnd();
                 if (request.periodEnd() != null) current.changePeriodEnd(request.periodEnd(), now, adminId);
+                if (request.periodEndDate() != null) current.changePeriodEnd(trialEndOf(businessId, current, LocalDate.parse(request.periodEndDate()), now), now, adminId);
                 if (BusinessSubscription.EXPIRED.equals(request.status())) current.end(now, adminId);
                 BusinessSubscription saved = subscriptions.saveAndFlush(current);
                 String action = !saved.isTrial() ? UPDATED : BusinessSubscription.EXPIRED.equals(saved.getStatus()) ? TRIAL_ENDED : TRIAL_EXTENDED;
@@ -242,12 +246,35 @@ public class SubscriptionService {
         if (request.status() != null && !BusinessSubscription.EXPIRED.equals(request.status())) {
             errors.put("status", "A subscription can only be ended");
         }
-        if (request.status() == null && request.periodEnd() == null && request.planCode() == null) {
+        if (request.status() == null && request.periodEnd() == null && request.planCode() == null && request.periodEndDate() == null) {
             errors.put("status", "Nothing to change");
+        }
+        if (request.periodEndDate() != null && request.periodEnd() != null) errors.put("periodEndDate", "Send a date or an end time, not both");
+        if (request.periodEndDate() != null && request.status() != null) errors.put("periodEndDate", "Extending and ending are separate actions");
+        if (request.periodEndDate() != null && !errors.containsKey("periodEndDate")) {
+            try {
+                LocalDate.parse(request.periodEndDate()); // ISO yyyy-MM-dd, strict: no time, no zone, no impossible dates
+            } catch (DateTimeParseException e) {
+                errors.put("periodEndDate", "Use a calendar date (YYYY-MM-DD)");
+            }
         }
         if (request.periodEnd() != null && !request.periodEnd().isAfter(now)) errors.put("periodEnd", "Choose a date in the future");
         if (request.rowVersion() == null) errors.put("rowVersion", "Reload and try again");
         if (!errors.isEmpty()) throw new FieldValidationException(errors);
+    }
+
+    /**
+     * AGF E4-M5 (Option A): a trial extended to a calendar date runs through that whole day in the restaurant's configured
+     * time zone; the stored, exclusive end is the start of the next local day (java.time handles DST and a missing midnight).
+     */
+    private Instant trialEndOf(String businessId, BusinessSubscription current, LocalDate date, Instant now) {
+        if (!current.isTrial() || !BusinessSubscription.TRIAL.equals(current.getStatus())) {
+            throw new FieldValidationException(Map.of("periodEndDate", "Only a running trial can be extended to a date"));
+        }
+        ZoneId zone = ZoneId.of(businesses.findById(businessId).orElseThrow(() -> new NotFoundException("Restaurant not found")).getTimeZone());
+        Instant end = date.plusDays(1).atStartOfDay(zone).toInstant();
+        if (!end.isAfter(now)) throw new FieldValidationException(Map.of("periodEndDate", "Choose a date in the future"));
+        return end;
     }
 
     /** The audit reason category for an expected rejection, or null for unexpected errors (not audited as rejections). */

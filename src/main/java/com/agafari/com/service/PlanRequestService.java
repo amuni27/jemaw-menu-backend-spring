@@ -19,6 +19,7 @@ import com.agafari.com.exception.PlanNotEnabledException;
 import com.agafari.com.exception.PlanRequestExistsException;
 import com.agafari.com.exception.PlanRequestVersionConflictException;
 import com.agafari.com.exception.SubscriptionExistsException;
+import com.agafari.com.jpa.entity.Business;
 import com.agafari.com.jpa.entity.BusinessSubscription;
 import com.agafari.com.jpa.entity.MonetizationConfig;
 import com.agafari.com.jpa.entity.PlanRequest;
@@ -125,7 +126,7 @@ public class PlanRequestService {
                 : new OwnerPlanView.Subscription(currentRow.getPlanCode(), currentRow.getStatus(), currentRow.getPeriodEnd(),
                         BusinessSubscription.MANUAL.equals(currentRow.getSource()) ? SubscriptionService.MANUAL_LABEL : null, outside(config, currentRow.getPlanCode()));
         OwnerPlanView.Trial trial = current != null ? null : subscriptions.findFirstByBusinessIdAndSourceOrderByCreatedAtDesc(businessId, BusinessSubscription.TRIAL)
-                .map(t -> trialView(t, now)).orElse(null);
+                .map(t -> trialView(t, now, timeZoneOf(businessId))).orElse(null);
         PlanRequestSummary pending = requests.findPendingByBusinessId(businessId).map(r -> summary(r, config)).orElse(null);
         return new OwnerPlanView(true, config.getSetting().name(), config.getVersion(), eligible, current, pending,
                 setting2 && currentRow == null && pending == null, trial != null, true, trial);
@@ -296,12 +297,16 @@ public class PlanRequestService {
         return null;
     }
 
-    private static OwnerPlanView.Trial trialView(BusinessSubscription t, Instant now) {
+    private String timeZoneOf(String businessId) {
+        return businesses.findById(businessId).map(Business::getTimeZone).orElse(null);
+    }
+
+    private static OwnerPlanView.Trial trialView(BusinessSubscription t, Instant now, String timeZone) {
         String effective = t.effectiveStatus(now);
         Instant end = t.getEndedAt() != null ? t.getEndedAt() : t.getPeriodEnd();
         long seconds = Math.max(0, java.time.Duration.between(now, t.getPeriodEnd()).getSeconds());
         long daysLeft = BusinessSubscription.EXPIRED.equals(effective) ? 0 : (seconds + 86_399) / 86_400;
-        return new OwnerPlanView.Trial(t.getCreatedAt(), end, daysLeft, effective);
+        return new OwnerPlanView.Trial(t.getCreatedAt(), end, daysLeft, effective, timeZone);
     }
 
     private static boolean outside(MonetizationConfig config, String planCode) {

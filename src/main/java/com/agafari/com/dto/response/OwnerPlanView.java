@@ -20,7 +20,8 @@ public record OwnerPlanView(boolean visible, String setting, Integer configVersi
     }
 
     /** AGF E4-M5: the restaurant's trial in its effective state only (the owner never sees the persisted status). */
-    public record Trial(Instant startedAt, Instant endsAt, long daysLeft, String effectiveStatus) {
+    /** AGF E4-M5: {@code timeZone} is the restaurant's, in which the end date is shown (Option A). */
+    public record Trial(Instant startedAt, Instant endsAt, long daysLeft, String effectiveStatus, String timeZone) {
     }
 
     public record Plan(String code, String model, String adSource, boolean paid) {

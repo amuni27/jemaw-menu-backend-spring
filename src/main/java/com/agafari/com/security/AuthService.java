@@ -161,7 +161,7 @@ public class AuthService {
             log.info("event=auth.register.hours_saved email={} businessId={} hoursRows={}",
                     LogMasking.maskEmail(email), biz.getId(), hours.size());
 
-            // AGF E4-M5: a 30-day Model 1 trial in the same transaction when trials are enabled and Setting 1 is current
+            // AGF E4-M5: a 30-day Model 1 trial after the registration commits, in its own transaction (a failure never fails registration)
             trials.startAtRegistration(biz.getId());
 
             // AGF-S2-22: a verification link goes out after the registration commits (nothing if unavailable)

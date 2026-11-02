@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * AGF E4-M5 (AC1–AC4, AC10; D-M5-3): a 30-day Model 1 trial starts inside the registration transaction when trials are
+ * AGF E4-M5 (AC1–AC4, AC10; D-M5-3): a 30-day Model 1 trial starts after the registration commits when trials are
  * enabled and Setting 1 is current. Off by default; never under Setting 2 or while not configured; never for restaurants
  * registered earlier; at most one trial per restaurant.
  */
@@ -64,7 +64,7 @@ class TrialStartTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void ac2UnderSetting1ANewRestaurantGetsExactlyOneThirtyDayTrialInTheRegistrationTransaction() throws Exception {
+    void ac2UnderSetting1ANewRestaurantGetsExactlyOneThirtyDayTrialAfterRegistrationCommits() throws Exception {
         trials.setEnabled(true);
         config(jdbc, 1, "SETTING_1", false, false, false, admin.getId());
         register(mockMvc, "trial-new").andExpect(status().isCreated());

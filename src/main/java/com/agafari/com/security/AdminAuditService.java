@@ -40,6 +40,12 @@ public class AdminAuditService {
     /** Written in its own transaction, so it persists although the request that triggered it fails. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void failure(String action, String actorUserId, String actorLabel, String reason) {
-        events.save(new AdminAuditEvent(clock.instant(), actorUserId, actorLabel, action, null, null, "FAILURE", reason));
+        failure(action, actorUserId, actorLabel, null, null, reason);
+    }
+
+    /** As above, naming what failed (e.g. E4-M5 TRIAL_START_FAILED for a restaurant, so the trial can be started by hand). */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void failure(String action, String actorUserId, String actorLabel, String targetType, String targetId, String reason) {
+        events.save(new AdminAuditEvent(clock.instant(), actorUserId, actorLabel, action, targetType, targetId, "FAILURE", reason));
     }
 }

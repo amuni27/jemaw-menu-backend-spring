@@ -26,6 +26,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
@@ -36,8 +39,9 @@ import java.util.Map;
 /**
  * AGF E4-M5: Model 1 trials (approved E4-Q2/Q4, D-M5-1…13).
  * <ul>
- *   <li>Start: inside the registration transaction when trials are enabled and Setting 1 is current (atomic; D-M5-3), or
- *   by the Super Admin for one eligible restaurant (D-M5-8). At most one trial per restaurant, ever.</li>
+ *   <li>Start: after the registration commits, in its own transaction, when trials are enabled and Setting 1 is current
+ *   (D-M5-3; a failure is audited as TRIAL_START_FAILED and never fails the registration), or by the Super Admin for one
+ *   eligible restaurant (D-M5-8). At most one trial per restaurant, ever.</li>
  *   <li>Expiry: the daily job (one run at a time) and expire-on-touch, both through {@link TrialExpirer}. Expiry changes
  *   nothing for owners, QR menus or guests (status and in-app notice only).</li>
  *   <li>Convert: one transaction ends the trial (kept, frozen) and records a MANUAL Model 1 subscription, "no payment
@@ -50,9 +54,11 @@ public class TrialService {
 
     public static final long TRIAL_JOB_LOCK_KEY = 4_400_000_002L;
     public static final String STARTED = "TRIAL_STARTED";
+    public static final String START_FAILED = "TRIAL_START_FAILED";
     public static final String CONVERTED = "TRIAL_CONVERTED";
     public static final String REJECTED = "TRIAL_CHANGE_REJECTED";
     private static final String TARGET = "BUSINESS_SUBSCRIPTION";
+    private static final String BUSINESS = "BUSINESS";
 
     private final BusinessSubscriptionRepository subscriptions;
     private final MonetizationConfigRepository configs;
@@ -64,6 +70,7 @@ public class TrialService {
     private final MonetizationLocks locks;
     private final MonetizationClock clock;
     private final TransactionTemplate transaction;
+    private final TransactionTemplate newTransaction;
     private final Duration duration;
     private volatile boolean enabled;
 
@@ -82,6 +89,8 @@ public class TrialService {
         this.locks = locks;
         this.clock = clock;
         this.transaction = new TransactionTemplate(transactionManager);
+        this.newTransaction = new TransactionTemplate(transactionManager);
+        this.newTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW); // runs after the caller's commit
         this.duration = duration;
         this.enabled = enabled;
     }
@@ -96,15 +105,45 @@ public class TrialService {
     }
 
     /**
-     * Called by registration inside its transaction, after the restaurant row exists. With trials disabled it does nothing
-     * (no lock, no query). A failure here rolls back the registration: restaurant and trial commit together or not at all.
+     * Called by registration inside its transaction, after the restaurant row exists (D-M5-3, restored by the PO on
+     * 2026-11-02). With trials disabled it does nothing (no lock, no query, no callback). Otherwise the trial starts after
+     * the registration commits, in its own transaction: a registration that rolls back gets no trial, and a trial failure
+     * never fails the registration (the trial rolls back and TRIAL_START_FAILED is recorded against the restaurant).
      */
     public void startAtRegistration(String businessId) {
         if (!enabled) return;
-        locks.configShared();
-        MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElse(null);
-        if (config == null || config.getSetting() != MonetizationSetting.SETTING_1) return;
-        insertTrial(businessId, config, AdminAuditService.SYSTEM, null, AdminAuditService.SYSTEM);
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            startForNewRestaurant(businessId);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                startForNewRestaurant(businessId);
+            }
+        });
+    }
+
+    /** Never throws: the registration has already committed and its response must not depend on the trial. */
+    private void startForNewRestaurant(String businessId) {
+        try {
+            newTransaction.executeWithoutResult(status -> {
+                locks.configShared();
+                locks.restaurant(businessId);
+                MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElse(null);
+                if (config == null || config.getSetting() != MonetizationSetting.SETTING_1) return; // eligibility at start time
+                if (subscriptions.existsByBusinessIdAndSource(businessId, BusinessSubscription.TRIAL)
+                        || subscriptions.findCurrentByBusinessId(businessId).isPresent()) return;
+                insertTrial(businessId, config, AdminAuditService.SYSTEM, null, AdminAuditService.SYSTEM);
+            });
+        } catch (RuntimeException e) {
+            log.warn("event=trial.start_failed businessId={} errorClass={}", businessId, e.getClass().getSimpleName());
+            try {
+                audit.failure(START_FAILED, null, AdminAuditService.SYSTEM, BUSINESS, businessId, "unexpected_error");
+            } catch (RuntimeException auditError) {
+                log.error("event=trial.start_failed.audit_failed businessId={} errorClass={}", businessId, auditError.getClass().getSimpleName());
+            }
+        }
     }
 
     /** The daily job: expires due trials. -1 if another instance is running, 0 when disabled or nothing is due. */

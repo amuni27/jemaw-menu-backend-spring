@@ -242,6 +242,13 @@ class AdDeliveryTest extends AbstractIntegrationTest {
         assertThat(served(id, addis.businessId())).isEqualTo(21);
         mockMvc.perform(get("/api/admin/ads").header("Authorization", bearer)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
                 .jsonPath("$[0].servedImpressions").value(22));
+        // §3.7: the per-ad report (per restaurant-local day and per restaurant)
+        String report = mockMvc.perform(get("/api/admin/ads/{id}/impressions", id).header("Authorization", bearer)).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(((Number) JsonPath.read(report, "$.total")).longValue()).isEqualTo(22);
+        assertThat(JsonPath.<List<String>>read(report, "$.days[*].date")).containsExactly("2026-11-02", "2026-11-03");
+        assertThat(JsonPath.<List<Integer>>read(report, "$.days[*].served")).containsExactly(1, 21);
+        assertThat(JsonPath.<List<String>>read(report, "$.restaurants[*].businessId")).containsExactly(addis.businessId(), chicago.businessId());
     }
 
     @Test

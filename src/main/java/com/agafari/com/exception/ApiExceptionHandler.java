@@ -148,6 +148,13 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(HttpStatus.CONFLICT, code, e.getMessage()));
     }
 
+    // AGF E4-M7
+    @ExceptionHandler({AdVersionConflictException.class, AdArchivedException.class})
+    public ResponseEntity<ApiError> adConflict(RuntimeException e) {
+        String code = e instanceof AdArchivedException ? AdArchivedException.CODE : AdVersionConflictException.CODE;
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(HttpStatus.CONFLICT, code, e.getMessage()));
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> conf(ConflictException e) {
         return domain(HttpStatus.CONFLICT, e);

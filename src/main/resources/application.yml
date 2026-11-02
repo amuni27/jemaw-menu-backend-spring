@@ -71,6 +71,9 @@ app:
     # AGF E4-M6: the daily job ends grandfathered subscriptions at their approved end only when this is true (default false;
     # separate PO approval for any shared environment). While false, grandfathering is shown for information only.
     transitions-enabled: ${APP_MONETIZATION_TRANSITIONS_ENABLED:false}
+    # AGF E4-M7: one Agafari ad in the guest menu of Model 2 restaurants (existing entitlements say so) only when this is
+    # true (default false; separate PO approval for any shared environment, together with entitlements-enabled).
+    agafari-ads-enabled: ${APP_MONETIZATION_AGAFARI_ADS_ENABLED:false}
     trial-duration: ${APP_MONETIZATION_TRIAL_DURATION:P30D}
     trial-expiry-cron: ${APP_MONETIZATION_TRIAL_EXPIRY_CRON:0 0 2 * * *}
   # AGF-S2-22: email verification. Links work once a secret, a link address and a provider-backed mailer (D5) exist.

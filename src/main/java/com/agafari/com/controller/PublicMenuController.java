@@ -4,6 +4,7 @@ package com.agafari.com.controller;
 import com.agafari.com.dto.response.MenuItemPublicResponse;
 import com.agafari.com.dto.response.PublicBusinessMenuResponse;
 import com.agafari.com.service.AgafariAdDelivery;
+import com.agafari.com.service.RestaurantAdDelivery;
 import com.agafari.com.service.MenuViewCounter;
 import com.agafari.com.service.PublicMenuService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -19,6 +20,7 @@ public class PublicMenuController {
     private final PublicMenuService publicMenuService;
     private final MenuViewCounter menuViews; // AGF-S2-24
     private final AgafariAdDelivery ads; // AGF E4-M7
+    private final RestaurantAdDelivery restaurantAds; // AGF E4-M8
 
     @GetMapping("/{businessId}/menu")
     public ResponseEntity<PublicBusinessMenuResponse> getBusinessMenu(@PathVariable String businessId) {
@@ -26,6 +28,7 @@ public class PublicMenuController {
         // AGF-S2-24: a successful load counts once, outside the read-only menu transaction; never affects the response
         menuViews.record(menu.getBusiness().getId(), menu.getBusiness().getTimeZone());
         ads.serve(menu); // AGF E4-M7: one Agafari ad for an eligible Model 2 restaurant; never affects the menu
+        restaurantAds.serve(menu); // AGF E4-M8: one of its own ads for an eligible Model 3 restaurant; never a second ad
         return ResponseEntity.ok(menu);
     }
 

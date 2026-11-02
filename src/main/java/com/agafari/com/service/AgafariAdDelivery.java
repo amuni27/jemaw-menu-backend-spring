@@ -8,9 +8,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -63,7 +60,7 @@ public class AgafariAdDelivery {
             List<AgafariAd> servable = ads.findServable(now);
             if (servable.isEmpty()) return;
             day = LocalDate.ofInstant(now, TimeZoneRules.zoneId(menu.getBusiness().getTimeZone()));
-            ad = servable.get(Math.floorMod(dailyKey(businessId, day), servable.size()));
+            ad = servable.get(AdRotation.index(businessId, day, servable.size())); // C3, shared with E4-M8
         } catch (RuntimeException e) {
             log.warn("event=ad.not_served businessId={} errorClass={}", businessId, e.getClass().getSimpleName());
             return;
@@ -71,15 +68,5 @@ public class AgafariAdDelivery {
         menu.setSponsored(new SponsoredAd(ad.getId(), ad.getTitle(), ad.getBody(), ad.getTitleAm(), ad.getBodyAm(), ad.getLinkUrl(),
                 adService.publicImageUrl(ad.getImageKey()), ad.getImageAlt()));
         impressions.record(ad.getId(), businessId, day); // never throws
-    }
-
-    /** C3: the first 4 bytes of SHA-256("businessId|yyyy-MM-dd") as an int (stable across instances and restarts). */
-    static int dailyKey(String businessId, LocalDate day) {
-        try {
-            byte[] h = MessageDigest.getInstance("SHA-256").digest((businessId + "|" + day).getBytes(StandardCharsets.UTF_8));
-            return ((h[0] & 0xff) << 24) | ((h[1] & 0xff) << 16) | ((h[2] & 0xff) << 8) | (h[3] & 0xff);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
     }
 }

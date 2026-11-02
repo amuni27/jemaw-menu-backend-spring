@@ -54,6 +54,14 @@ public class MonetizationLocks {
         if (enabled()) jdbc.queryForList("select id from business where id = ? for no key update", String.class, businessId);
     }
 
+    /**
+     * AGF E4-M8: marks this transaction as a Super Admin restaurant-ad moderation (suspend or reinstate). The V18 trigger
+     * refuses those status changes without it; transaction-local, so it never reaches another request on the connection.
+     */
+    public void markAdminAdModeration() {
+        if (enabled()) jdbc.queryForObject("select set_config('agafari.ad_actor', 'ADMIN', true)", String.class);
+    }
+
     private boolean enabled() {
         if (!TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException("Monetization locks must be taken inside a transaction");

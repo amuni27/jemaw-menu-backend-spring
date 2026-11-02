@@ -46,7 +46,8 @@ public final class FlywayBaselineGuard {
             "subscription_plan", "business_subscription", // V13: AGF E4-M3
             "plan_request", // V14: AGF E4-M4
             "trial_intent", // V16: AGF E4-M5 recovery
-            "agafari_ad", "ad_impression_daily"); // V17: AGF E4-M7
+            "agafari_ad", "ad_impression_daily", // V17: AGF E4-M7
+            "restaurant_ad"); // V18: AGF E4-M8
     public static final List<String> LATER_MIGRATION_FUNCTIONS =
             List.of("special_business_matches_dish", "category_special_business_matches_category",
                     "admin_audit_event_append_only", // V11: AGF E4-M1
@@ -54,7 +55,8 @@ public final class FlywayBaselineGuard {
                     "subscription_plan_read_only", "business_subscription_guard", // V13: AGF E4-M3
                     "plan_request_guard", // V14: AGF E4-M4
                     "trial_intent_guard", // V16: AGF E4-M5 recovery
-                    "agafari_ad_guard"); // V17: AGF E4-M7
+                    "agafari_ad_guard", // V17: AGF E4-M7
+                    "restaurant_ad_guard"); // V18: AGF E4-M8
 
     private FlywayBaselineGuard() {
     }

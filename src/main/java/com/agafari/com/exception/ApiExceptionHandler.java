@@ -155,6 +155,17 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(HttpStatus.CONFLICT, code, e.getMessage()));
     }
 
+    @ExceptionHandler({AdSuspendedException.class, RestaurantAdLimitException.class})
+    public ResponseEntity<ApiError> restaurantAdConflict(RuntimeException e) {
+        String code = e instanceof AdSuspendedException ? AdSuspendedException.CODE : RestaurantAdLimitException.CODE;
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(HttpStatus.CONFLICT, code, e.getMessage()));
+    }
+
+    @ExceptionHandler(RestaurantAdsNotEntitledException.class)
+    public ResponseEntity<ApiError> restaurantAdsNotEntitled(RestaurantAdsNotEntitledException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiError.of(HttpStatus.FORBIDDEN, RestaurantAdsNotEntitledException.CODE, e.getMessage()));
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> conf(ConflictException e) {
         return domain(HttpStatus.CONFLICT, e);

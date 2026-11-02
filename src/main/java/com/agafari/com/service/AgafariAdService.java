@@ -30,7 +30,6 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
-import java.net.URI;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -246,12 +245,7 @@ public class AgafariAdService {
 
     private AgafariAd.Content validate(AdRequest r) {
         Map<String, String> errors = new LinkedHashMap<>();
-        String title = trim(r.title()), body = trim(r.body()), titleAm = trim(r.titleAm()), bodyAm = trim(r.bodyAm()), link = trim(r.linkUrl());
-        if (title == null || title.length() > 60) errors.put("title", "Enter a title (at most 60 characters)");
-        if (body == null || body.length() > 200) errors.put("body", "Enter the text (at most 200 characters)");
-        if (titleAm != null && titleAm.length() > 60) errors.put("titleAm", "At most 60 characters");
-        if (bodyAm != null && bodyAm.length() > 200) errors.put("bodyAm", "At most 200 characters");
-        if (!httpsLink(link)) errors.put("linkUrl", "Use an https:// link (at most 2,048 characters)");
+        AdContentRules.Text text = AdContentRules.check(r.title(), r.body(), r.titleAm(), r.bodyAm(), r.linkUrl(), errors); // shared with E4-M8
         ZoneId zone = AdSchedule.zone(r.timeZone(), errors);
         Instant start = null, end = null;
         if (r.startLocal() == null || r.startLocal().isBlank()) errors.put("startLocal", "Enter a start date and time");
@@ -261,24 +255,7 @@ public class AgafariAdService {
             if (start != null && end != null && !end.isAfter(start)) errors.put("endLocal", "The end must be after the start");
         }
         if (!errors.isEmpty()) throw new FieldValidationException(errors);
-        return new AgafariAd.Content(title, body, titleAm, bodyAm, link, start, end, zone.getId());
-    }
-
-    /** https only: refuses http, javascript:, data: and anything without a host (E4-Q5 minimum). */
-    static boolean httpsLink(String link) {
-        if (link == null || link.length() > 2048 || !link.startsWith("https://") || link.chars().anyMatch(Character::isWhitespace)) return false;
-        try {
-            URI uri = URI.create(link);
-            return "https".equals(uri.getScheme()) && uri.getHost() != null && !uri.getHost().isBlank();
-        } catch (IllegalArgumentException e) {
-            return false;
-        }
-    }
-
-    private static String trim(String s) {
-        if (s == null) return null;
-        String t = s.trim();
-        return t.isEmpty() ? null : t;
+        return new AgafariAd.Content(text.title(), text.body(), text.titleAm(), text.bodyAm(), text.linkUrl(), start, end, zone.getId());
     }
 
     private long served(String id) {

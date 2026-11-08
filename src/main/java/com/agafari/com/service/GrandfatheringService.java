@@ -1,5 +1,6 @@
 package com.agafari.com.service;
 
+import com.agafari.com.subscription.SubscriptionLifecycle;
 import com.agafari.com.dto.response.GrandfatheringInfo;
 import com.agafari.com.dto.response.GrandfatheringPreview;
 import com.agafari.com.enums.MonetizationModel;
@@ -72,11 +73,13 @@ public class GrandfatheringService {
     private final MonetizationClock clock;
     private final TransactionTemplate transaction;
     private final TransactionTemplate newTransaction;
+    private final SubscriptionLifecycle lifecycle;
     private volatile boolean enabled;
 
     public GrandfatheringService(BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs, AdminAuditEventRepository events,
                                  AdminAuditService audit, MonetizationLocks locks, MonetizationClock clock, PlatformTransactionManager transactionManager,
-                                 @Value("${app.monetization.transitions-enabled:false}") boolean enabled) {
+                                 @Value("${app.monetization.transitions-enabled:false}") boolean enabled, SubscriptionLifecycle lifecycle) {
+        this.lifecycle = lifecycle;
         this.subscriptions = subscriptions;
         this.configs = configs;
         this.events = events;
@@ -214,7 +217,7 @@ public class GrandfatheringService {
         Instant now = clock.now();
         Assessment a = assess(s, config);
         if (!due(a, now)) return false;
-        if (subscriptions.endGrandfathered(s.getId(), a.until(), now, s.getRowVersion()) != 1) return false;
+        if (!lifecycle.endGrandfathered(s, a.until(), now)) return false; // AGF SUB-R2-04
         boolean late = a.until().isBefore(now.minus(Duration.ofDays(1)));
         audit.success(ENDED, null, AdminAuditService.SYSTEM, TARGET, s.getId(), s.getPlanCode() + " ACTIVE -> EXPIRED source="
                 + (PERIOD_END.equals(a.untilSource()) ? "period_end" : "transition_date") + " config=" + s.getConfigVersion() + " current="

@@ -1,5 +1,6 @@
 package com.agafari.com.service;
 
+import com.agafari.com.subscription.SubscriptionLifecycle;
 import com.agafari.com.jpa.entity.BusinessSubscription;
 import com.agafari.com.jpa.repository.BusinessSubscriptionRepository;
 import com.agafari.com.security.AdminAuditService;
@@ -22,9 +23,11 @@ public class TrialExpirer {
     private final MonetizationLocks locks;
     private final MonetizationClock clock;
     private final TransactionTemplate transaction;
+    private final SubscriptionLifecycle lifecycle;
 
     public TrialExpirer(BusinessSubscriptionRepository subscriptions, AdminAuditService audit, MonetizationLocks locks,
-                        MonetizationClock clock, PlatformTransactionManager transactionManager) {
+                        MonetizationClock clock, PlatformTransactionManager transactionManager, SubscriptionLifecycle lifecycle) {
+        this.lifecycle = lifecycle;
         this.subscriptions = subscriptions;
         this.audit = audit;
         this.locks = locks;
@@ -33,8 +36,8 @@ public class TrialExpirer {
     }
 
     /** Expires one due trial; the caller holds the restaurant lock inside a transaction. True if this call expired it. */
-    boolean expire(String subscriptionId, String how) {
-        if (subscriptions.expireIfDue(subscriptionId, clock.now()) != 1) return false;
+    boolean expire(String businessId, String subscriptionId, String how) {
+        if (!lifecycle.expireTrialIfDue(businessId, subscriptionId, clock.now())) return false; // AGF SUB-R2-04
         audit.success(EXPIRED_ACTION, null, AdminAuditService.SYSTEM, "BUSINESS_SUBSCRIPTION", subscriptionId, "MODEL_1 TRIAL -> EXPIRED " + how);
         return true;
     }
@@ -48,7 +51,7 @@ public class TrialExpirer {
             locks.restaurant(businessId);
             return subscriptions.findCurrentByBusinessId(businessId)
                     .filter(s -> BusinessSubscription.TRIAL.equals(s.getStatus()) && !s.isEffectivelyCurrent(clock.now()))
-                    .map(s -> expire(s.getId(), "on_touch")).orElse(false);
+                    .map(s -> expire(s.getBusinessId(), s.getId(), "on_touch")).orElse(false);
         });
         return Boolean.TRUE.equals(expired);
     }

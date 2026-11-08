@@ -88,6 +88,12 @@ public class MonetizationLocks {
         if (!held.contains(businessId)) throw new IllegalStateException("The restaurant lock must be held");
     }
 
+    /** AGF SUB-R2-04: the narrower check for trial expiry, which has always held only the restaurant lock (no configuration dependence). */
+    public void assertRestaurantHeld(String businessId) {
+        if (!enabled()) return;
+        if (!heldInThisTransaction().contains(businessId)) throw new IllegalStateException("The restaurant lock must be held");
+    }
+
     @SuppressWarnings("unchecked")
     private Set<String> heldInThisTransaction() {
         Set<String> held = (Set<String>) TransactionSynchronizationManager.getResource(heldKey);

@@ -1,5 +1,8 @@
 package com.agafari.com.service;
 
+import com.agafari.com.subscription.Actor;
+import com.agafari.com.subscription.ManualRecord;
+import com.agafari.com.subscription.SubscriptionLifecycle;
 import com.agafari.com.dto.request.TrialConvertRequest;
 import com.agafari.com.dto.request.TrialStartRequest;
 import com.agafari.com.dto.response.SubscriptionResponse;
@@ -84,6 +87,7 @@ public class TrialService {
     private final Duration duration;
     private final TrialIntentRepository intents;
     private final GrandfatheringService grandfathering;
+    private final SubscriptionLifecycle lifecycle;
     private volatile boolean enabled;
     private volatile boolean afterCommitEnabled = true;
     private volatile int recoveryBatchSize;
@@ -93,7 +97,8 @@ public class TrialService {
                         MonetizationLocks locks, MonetizationClock clock, PlatformTransactionManager transactionManager,
                         @Value("${app.monetization.trials-enabled:false}") boolean enabled,
                         @Value("${app.monetization.trial-duration:P30D}") Duration duration, TrialIntentRepository intents,
-                        @Value("${app.monetization.trial-recovery-batch:100}") int recoveryBatchSize, GrandfatheringService grandfathering) {
+                        @Value("${app.monetization.trial-recovery-batch:100}") int recoveryBatchSize, GrandfatheringService grandfathering, SubscriptionLifecycle lifecycle) {
+        this.lifecycle = lifecycle;
         this.grandfathering = grandfathering;
         this.intents = intents;
         this.recoveryBatchSize = recoveryBatchSize;
@@ -257,7 +262,7 @@ public class TrialService {
             for (BusinessSubscription due : subscriptions.findDueTrials(clock.now())) {
                 String id = due.getId();
                 locks.restaurant(due.getBusinessId());
-                if (expirer.expire(id, "job")) count++;
+                if (expirer.expire(due.getBusinessId(), id, "job")) count++;
             }
             return count;
         });
@@ -307,10 +312,8 @@ public class TrialService {
                         .orElseThrow(SubscriptionVersionConflictException::new);
                 MonetizationConfig config = currentSetting1(request.expectedConfigVersion());
                 Instant end = trial.getPeriodEnd().isBefore(now) ? trial.getPeriodEnd() : now; // an effectively ended trial keeps its real end
-                trial.endTrial(end, now, adminId);
-                subscriptions.saveAndFlush(trial);
-                BusinessSubscription manual = subscriptionService.recordWithinTransaction(businessId, "MODEL_1", config.getVersion(),
-                        request.periodEnd(), now, adminId, actor);
+                BusinessSubscription manual = lifecycle.replace(trial, end, new ManualRecord("MODEL_1", config.getVersion(), request.periodEnd(), now), new Actor(adminId)); // AGF SUB-R2-04
+                subscriptionService.auditManualRecord(manual, adminId, actor);
                 audit.success(CONVERTED, adminId, actor, TARGET, trial.getId(), "trial=" + trial.getId() + " -> subscription=" + manual.getId()
                         + " source=" + manual.getSource() + " config=" + config.getVersion());
                 return subscriptionService.toResponse(manual, config);
@@ -335,7 +338,7 @@ public class TrialService {
     private BusinessSubscription insertTrial(String businessId, MonetizationConfig config, String createdBy, String actorId, String actorLabel,
                                              String detail) {
         Instant now = clock.now();
-        BusinessSubscription trial = subscriptions.saveAndFlush(BusinessSubscription.trial(businessId, config.getVersion(), now, now.plus(duration), createdBy));
+        BusinessSubscription trial = lifecycle.startTrial(businessId, config.getVersion(), now, now.plus(duration), new Actor(createdBy)); // AGF SUB-R2-04
         audit.success(STARTED, actorId, actorLabel, TARGET, trial.getId(), "MODEL_1 TRIAL config=" + config.getVersion() + " periodEnd=" + trial.getPeriodEnd() + detail);
         log.info("event=trial.started businessId={} subscriptionId={} by={}", businessId, trial.getId(), actorId == null ? "system" : "admin");
         return trial;

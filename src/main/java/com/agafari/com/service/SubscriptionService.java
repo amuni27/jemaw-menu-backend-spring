@@ -223,9 +223,14 @@ public class SubscriptionService {
     BusinessSubscription recordWithinTransaction(String businessId, String planCode, int configVersion, Instant periodEnd, Instant now,
                                                  String adminId, String actor) {
         BusinessSubscription saved = lifecycle.recordManual(businessId, new ManualRecord(planCode, configVersion, periodEnd, now), new Actor(adminId)); // AGF SUB-R2-02
+        auditManualRecord(saved, adminId, actor);
+        return saved;
+    }
+
+    /** The audit row of a new manual record (also written for a trial conversion's successor). */
+    void auditManualRecord(BusinessSubscription saved, String adminId, String actor) {
         audit.success(CREATED, adminId, actor, TARGET, saved.getId(), saved.getPlanCode() + " " + saved.getStatus()
                 + " source=" + saved.getSource() + " config=" + saved.getConfigVersion() + " periodEnd=" + saved.getPeriodEnd());
-        return saved;
     }
 
     public SubscriptionResponse update(String businessId, SubscriptionUpdateRequest request, String adminId, String adminEmail) {

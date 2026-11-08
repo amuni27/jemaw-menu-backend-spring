@@ -181,6 +181,11 @@ public class ApiExceptionHandler {
     }
 
     // AGF Self-Service Phase A
+    @ExceptionHandler(ScheduledChangeRefusedException.class)
+    public ResponseEntity<ApiError> scheduledChangeRefused(ScheduledChangeRefusedException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(HttpStatus.CONFLICT, ScheduledChangeRefusedException.CODE, e.getMessage()));
+    }
+
     @ExceptionHandler(SelfServiceRefusedException.class)
     public ResponseEntity<ApiError> selfServiceRefused(SelfServiceRefusedException e) {
         return ResponseEntity.status(e.status()).body(ApiError.of(e.status(), e.code(), e.getMessage()));

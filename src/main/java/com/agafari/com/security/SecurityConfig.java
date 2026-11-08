@@ -59,6 +59,7 @@ public class SecurityConfig {
                                 "/api/user/**",
                                 "/api/specials/**", // AGF E4-M1: now refused by role, not only by the services
                                 "/api/category-specials/**",
+                                "/api/billing/subscription/**", // AGF SUB-R2-11: the owner's scheduled changes (behind billing-enabled)
                                 "/api/plan/**", // AGF E4-M4: owner plan view and requests (own restaurant from the token)
                                 "/api/restaurant-ads/**" // AGF E4-M8: the owner's own ads (own restaurant from the token)
                         ).hasRole("VENUE")

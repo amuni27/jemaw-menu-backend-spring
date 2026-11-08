@@ -127,6 +127,26 @@ public class SubscriptionLifecycle {
         return subscriptions.endGrandfathered(s.getId(), endedAt, now, s.getRowVersion()) == 1;
     }
 
+    /** AGF SUB-R2-11: a scheduled cancellation takes effect at {@code effectiveAt}. */
+    public BusinessSubscription applyScheduledCancel(BusinessSubscription current, Instant effectiveAt, Instant now) {
+        locks.assertHeld(current.getBusinessId());
+        TransitionRules.require(LifecycleStatus.of(current.getStatus()), LifecycleStatus.EXPIRED, TransitionReason.CANCELLED, SubscriptionSource.of(current.getSource()));
+        current.endAtEffectiveTime(effectiveAt, TransitionReason.CANCELLED.name(), now, AdminAuditService.SYSTEM);
+        return subscriptions.saveAndFlush(current);
+    }
+
+    /** AGF SUB-R2-11: a scheduled move to a free plan: the row ends and the owner's row starts at {@code effectiveAt}. */
+    public BusinessSubscription applyScheduledDowngrade(BusinessSubscription current, String planCode, int configVersion, Instant effectiveAt, Instant now, String ownerId) {
+        locks.assertHeld(current.getBusinessId());
+        TransitionRules.requireReplacement(LifecycleStatus.of(current.getStatus()), SubscriptionSource.of(current.getSource()), TransitionReason.CHANGED,
+                TransitionReason.OWNER_FREE, SubscriptionSource.OWNER);
+        BusinessSubscription next = BusinessSubscription.owner(current.getBusinessId(), planCode, configVersion, effectiveAt, ownerId);
+        current.endAtEffectiveTime(effectiveAt, TransitionReason.CHANGED.name(), now, AdminAuditService.SYSTEM);
+        current.recordEnding(TransitionReason.CHANGED.name(), next.getId());
+        subscriptions.saveAndFlush(current);
+        return subscriptions.saveAndFlush(next);
+    }
+
     /**
      * AGF SUB-R2-07 (DD §3.3): persists the effective state of the current row, so the one-current index never blocks a
      * legitimate successor. Does nothing with {@code period-end-enabled} off. Trials and grandfathering keep their own
@@ -138,6 +158,7 @@ public class SubscriptionLifecycle {
         BusinessSubscription s = subscriptions.findCurrentByBusinessId(businessId).orElse(null);
         if (s == null || s.isTrial()) return;
         Instant now = clock.now();
+        if (subscriptions.findDueScheduledChange(s.getId(), now).isPresent()) return; // AGF SUB-R2-11: the owner's change decides how this row ends
         EffectiveView view = evaluator.view(s, false, now);
         LifecycleStatus stored = LifecycleStatus.of(s.getStatus());
         SubscriptionSource source = SubscriptionSource.of(s.getSource());

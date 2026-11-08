@@ -2,6 +2,7 @@ package com.agafari.com.service;
 
 import com.agafari.com.jpa.entity.BusinessSubscription;
 import com.agafari.com.jpa.entity.MonetizationConfig;
+import com.agafari.com.jpa.entity.ScheduledChange;
 import com.agafari.com.jpa.entity.SubscriptionPlan;
 import com.agafari.com.jpa.repository.BusinessSubscriptionRepository;
 import com.agafari.com.jpa.repository.MonetizationConfigRepository;
@@ -60,6 +61,13 @@ public class EntitlementService {
         this.enabled = enabled;
     }
 
+    private Entitlements applied(ScheduledChange change) {
+        if (change.getTargetPlanCode() == null) return Entitlements.unrestricted();
+        SubscriptionPlan target = plans.findById(change.getTargetPlanCode()).orElseThrow();
+        Entitlements.AdSource adSource = Entitlements.AdSource.valueOf(target.getAdSource());
+        return new Entitlements(Entitlements.Mode.ACTIVE, target.getCode(), "ACTIVE", adSource, adSource == Entitlements.AdSource.RESTAURANT, Map.of(), BusinessSubscription.OWNER, false);
+    }
+
     public Entitlements forBusiness(String businessId) {
         if (!enabled) return Entitlements.unrestricted();
         try {
@@ -71,6 +79,9 @@ public class EntitlementService {
             BusinessSubscription subscription = subscriptions.findCurrentByBusinessId(businessId).orElse(null);
             if (subscription == null) return Entitlements.unrestricted(); // launch defaults stay open (E4-Q10)
             EffectiveView view = evaluator.view(subscription, grandfathering.effectivelyEnded(subscription, config), clock.now());
+            // AGF SUB-R2-11: from effective_at, a cancellation or Free downgrade counts as applied, also before the job persists it
+            ScheduledChange due = subscriptions.findDueScheduledChange(subscription.getId(), clock.now()).orElse(null);
+            if (due != null) return applied(due);
             if (!view.entitledToPlan()) return Entitlements.unrestricted();
             SubscriptionPlan plan = plans.findById(subscription.getPlanCode()).orElseThrow();
             Entitlements.AdSource adSource = Entitlements.AdSource.valueOf(plan.getAdSource());

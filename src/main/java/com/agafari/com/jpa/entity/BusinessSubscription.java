@@ -1,5 +1,7 @@
 package com.agafari.com.jpa.entity;
 
+import com.agafari.com.subscription.EffectiveState;
+import com.agafari.com.subscription.GraceSettings;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -22,6 +24,7 @@ public class BusinessSubscription {
     public static final String EXPIRED = "EXPIRED";
     public static final String MANUAL = "MANUAL";
     public static final String TRIAL = "TRIAL"; // AGF E4-M5: status and source of a trial
+    private static final GraceSettings NO_GRACE = GraceSettings.ofDays(0);
     public static final String OWNER = "OWNER"; // AGF Self-Service Phase A: started by the owner (free plan, no payment)
 
     @Id
@@ -135,7 +138,7 @@ public class BusinessSubscription {
 
     /** AGF E4-M5: a trial counts as ended once its period end has passed, even before the job persists it (D-M5-13). */
     public String effectiveStatus(Instant now) {
-        return TRIAL.equals(status) && periodEnd != null && !periodEnd.isAfter(now) ? EXPIRED : status;
+        return EffectiveState.of(this, NO_GRACE, false, false, now).status().name(); // AGF SUB-R2-07: one rule; the period-end flag is applied by EffectiveStateEvaluator
     }
 
     public Instant effectiveEnd(Instant now) {
@@ -144,7 +147,7 @@ public class BusinessSubscription {
     }
 
     public boolean isEffectivelyCurrent(Instant now) {
-        return !EXPIRED.equals(effectiveStatus(now));
+        return EffectiveState.of(this, NO_GRACE, false, false, now).entitledToPlan();
     }
 
     /** AGF E4-M5: ends a trial at {@code endedAt} (conversion: the earlier of now and the period end). */
@@ -158,6 +161,22 @@ public class BusinessSubscription {
     public void recordEnding(String endedReason, String replacedById) {
         this.endedReason = endedReason;
         this.replacedById = replacedById;
+    }
+
+    /** AGF SUB-R2-07: persists an effective end at the instant it took effect (period end or grace end). */
+    public void endAtEffectiveTime(Instant endedAt, String endedReason, Instant now, String actor) {
+        status = EXPIRED;
+        this.endedAt = endedAt;
+        this.endedReason = endedReason;
+        pastDueSince = null;
+        touch(now, actor);
+    }
+
+    /** AGF SUB-R2-07: persists the grace state of a PROVIDER row. */
+    public void markPastDue(Instant since, Instant now, String actor) {
+        status = "PAST_DUE";
+        pastDueSince = since;
+        touch(now, actor);
     }
 
     public boolean isCurrent() {

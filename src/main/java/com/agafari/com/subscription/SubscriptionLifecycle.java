@@ -3,6 +3,8 @@ package com.agafari.com.subscription;
 import com.agafari.com.exception.ProviderPeriodManagedByBillingException;
 import com.agafari.com.jpa.entity.BusinessSubscription;
 import com.agafari.com.jpa.repository.BusinessSubscriptionRepository;
+import com.agafari.com.security.AdminAuditService;
+import com.agafari.com.service.MonetizationClock;
 import com.agafari.com.service.MonetizationLocks;
 import org.springframework.stereotype.Service;
 
@@ -17,12 +19,22 @@ import java.time.Instant;
 @Service
 public class SubscriptionLifecycle {
 
+    static final String PERIOD_ENDED = "SUBSCRIPTION_PERIOD_ENDED";
+    static final String PAST_DUE = "SUBSCRIPTION_PAST_DUE";
+
     private final BusinessSubscriptionRepository subscriptions;
     private final MonetizationLocks locks;
+    private final EffectiveStateEvaluator evaluator;
+    private final MonetizationClock clock;
+    private final AdminAuditService audit;
 
-    public SubscriptionLifecycle(BusinessSubscriptionRepository subscriptions, MonetizationLocks locks) {
+    public SubscriptionLifecycle(BusinessSubscriptionRepository subscriptions, MonetizationLocks locks, EffectiveStateEvaluator evaluator,
+                                 MonetizationClock clock, AdminAuditService audit) {
         this.subscriptions = subscriptions;
         this.locks = locks;
+        this.evaluator = evaluator;
+        this.clock = clock;
+        this.audit = audit;
     }
 
     public BusinessSubscription startOwnerFree(String businessId, String planCode, int configVersion, Instant now, Actor owner) {
@@ -115,7 +127,38 @@ public class SubscriptionLifecycle {
         return subscriptions.endGrandfathered(s.getId(), endedAt, now, s.getRowVersion()) == 1;
     }
 
-    /** Persists the effective expiry of the current row before a new one is created. A no-op until SUB-R2-07. */
+    /**
+     * AGF SUB-R2-07 (DD §3.3): persists the effective state of the current row, so the one-current index never blocks a
+     * legitimate successor. Does nothing with {@code period-end-enabled} off. Trials and grandfathering keep their own
+     * expiry paths and audit rows ({@code TrialExpirer}, {@code GrandfatheringService}).
+     */
     public void materialize(String businessId) {
+        if (!evaluator.isPeriodEndEnabled()) return;
+        locks.assertHeld(businessId);
+        BusinessSubscription s = subscriptions.findCurrentByBusinessId(businessId).orElse(null);
+        if (s == null || s.isTrial()) return;
+        Instant now = clock.now();
+        EffectiveView view = evaluator.view(s, false, now);
+        LifecycleStatus stored = LifecycleStatus.of(s.getStatus());
+        SubscriptionSource source = SubscriptionSource.of(s.getSource());
+        boolean ended = view.reasonCode().equals("PERIOD_END_PASSED") || view.reasonCode().equals("GRACE_ENDED");
+        if (ended) {
+            TransitionReason reason = stored == LifecycleStatus.GRANDFATHERED ? TransitionReason.GRANDFATHERED_END
+                    : source == SubscriptionSource.PROVIDER ? TransitionReason.PAYMENT_FAILED : TransitionReason.PERIOD_END;
+            if (source == SubscriptionSource.PROVIDER && stored == LifecycleStatus.ACTIVE) {
+                TransitionRules.require(LifecycleStatus.ACTIVE, LifecycleStatus.PAST_DUE, TransitionReason.RENEWAL_FAILED, source); // grace passed unpersisted
+                TransitionRules.require(LifecycleStatus.PAST_DUE, LifecycleStatus.EXPIRED, reason, source);
+            } else {
+                TransitionRules.require(stored, LifecycleStatus.EXPIRED, reason, source);
+            }
+            s.endAtEffectiveTime(view.graceUntil() != null ? view.graceUntil() : view.periodEnd(), reason.name(), now, AdminAuditService.SYSTEM);
+            subscriptions.saveAndFlush(s);
+            audit.success(PERIOD_ENDED, null, AdminAuditService.SYSTEM, "BUSINESS_SUBSCRIPTION", s.getId(), stored + " -> EXPIRED reason=" + reason);
+        } else if (view.reasonCode().equals("IN_GRACE") && stored == LifecycleStatus.ACTIVE) {
+            TransitionRules.require(LifecycleStatus.ACTIVE, LifecycleStatus.PAST_DUE, TransitionReason.RENEWAL_FAILED, source);
+            s.markPastDue(view.periodEnd(), now, AdminAuditService.SYSTEM);
+            subscriptions.saveAndFlush(s);
+            audit.success(PAST_DUE, null, AdminAuditService.SYSTEM, "BUSINESS_SUBSCRIPTION", s.getId(), "ACTIVE -> PAST_DUE");
+        }
     }
 }

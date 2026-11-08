@@ -15,6 +15,11 @@ public record GraceSettings(Duration providerGrace) {
         }
     }
 
+    /** AGF SUB-R2-07: the grace snapshotted on a row. None recorded means no grace: AD-7 is open and nothing may extend a period. */
+    public static GraceSettings ofSnapshot(Integer days) {
+        return ofDays(days == null ? 0 : days);
+    }
+
     public static GraceSettings ofDays(int days) {
         return new GraceSettings(Duration.ofDays(days));
     }

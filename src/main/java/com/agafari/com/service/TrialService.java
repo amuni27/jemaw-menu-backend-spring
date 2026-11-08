@@ -212,6 +212,7 @@ public class TrialService {
                 }
                 BusinessSubscription existingTrial = subscriptions.findFirstByBusinessIdAndSourceOrderByCreatedAtDesc(businessId, BusinessSubscription.TRIAL).orElse(null);
                 if (existingTrial != null) return resolve(businessId, TrialIntent.STARTED, TrialIntent.EXISTING_TRIAL, existingTrial.getId(), now);
+                lifecycle.materialize(businessId); // AGF SUB-R2-07
                 BusinessSubscription current = subscriptions.findCurrentByBusinessId(businessId).orElse(null);
                 if (current != null) return resolve(businessId, TrialIntent.NOT_STARTED, TrialIntent.SUBSCRIPTION_EXISTS, current.getId(), now);
                 BusinessSubscription trial = insertTrial(businessId, config, AdminAuditService.SYSTEM, null, AdminAuditService.SYSTEM,
@@ -281,6 +282,7 @@ public class TrialService {
                 locks.configShared();
                 locks.restaurant(businessId);
                 MonetizationConfig config = currentSetting1(request.expectedConfigVersion());
+                lifecycle.materialize(businessId); // AGF SUB-R2-07
                 if (subscriptions.findCurrentByBusinessId(businessId).isPresent()) throw new SubscriptionExistsException();
                 if (planRequests.findPendingByBusinessId(businessId).isPresent()) throw new PlanRequestPendingException();
                 if (subscriptions.existsByBusinessIdAndSource(businessId, BusinessSubscription.TRIAL)) throw new TrialAlreadyUsedException();

@@ -34,6 +34,7 @@ import com.agafari.com.jpa.repository.UserRepository;
 import com.agafari.com.security.AdminAuditService;
 import com.agafari.com.security.EmailVerificationService;
 import com.agafari.com.security.LogMasking;
+import com.agafari.com.subscription.SubscriptionLifecycle;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -88,6 +89,7 @@ public class PlanRequestService {
     private final EmailVerificationService emailVerification;
     private volatile boolean ownerPlansVisible;
     private volatile boolean selfServiceEnabled;
+    private final SubscriptionLifecycle lifecycle;
 
     public PlanRequestService(PlanRequestRepository requests, BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs,
                               SubscriptionPlanRepository plans, BusinessRepository businesses, UserRepository users,
@@ -95,7 +97,8 @@ public class PlanRequestService {
                               TrialExpirer trialExpirer, MonetizationClock monetizationClock, PlatformTransactionManager transactionManager,
                               @Value("${app.monetization.owner-plans-visible:false}") boolean ownerPlansVisible,
                               GrandfatheringService grandfathering, EmailVerificationService emailVerification,
-                              @Value("${app.monetization.self-service-enabled:false}") boolean selfServiceEnabled) {
+                              @Value("${app.monetization.self-service-enabled:false}") boolean selfServiceEnabled, SubscriptionLifecycle lifecycle) {
+        this.lifecycle = lifecycle;
         this.grandfathering = grandfathering;
         this.emailVerification = emailVerification;
         this.selfServiceEnabled = selfServiceEnabled;
@@ -200,6 +203,7 @@ public class PlanRequestService {
                 if (selfServiceEnabled && plans.findById(request.planCode()).map(p -> !p.isPaid()).orElse(false)) {
                     throw SelfServiceRefusedException.useSelfService();
                 }
+                lifecycle.materialize(businessId); // AGF SUB-R2-07: an effectively ended row no longer blocks
                 if (subscriptions.findCurrentByBusinessId(businessId).isPresent()) throw new SubscriptionExistsException();
                 if (requests.findPendingByBusinessId(businessId).isPresent()) throw new PlanRequestExistsException();
                 PlanRequest saved = requests.saveAndFlush(PlanRequest.pending(businessId, request.planCode(), config.getVersion(), now, ownerId));
@@ -273,6 +277,7 @@ public class PlanRequestService {
                 MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElseThrow(MonetizationNotConfiguredException::new);
                 if (!config.getVersion().equals(request.expectedConfigVersion())) throw new ConfigVersionConflictException();
                 if (!config.models().contains(MonetizationModel.valueOf(pending.getPlanCode()))) throw new PlanNotEnabledException();
+                lifecycle.materialize(businessId); // AGF SUB-R2-07
                 if (subscriptions.findCurrentByBusinessId(businessId).isPresent()) throw new SubscriptionExistsException();
                 BusinessSubscription subscription = subscriptionService.recordWithinTransaction(businessId, pending.getPlanCode(),
                         config.getVersion(), request.periodEnd(), now, adminId, actor);

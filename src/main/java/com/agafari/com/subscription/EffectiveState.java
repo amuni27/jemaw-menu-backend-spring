@@ -23,7 +23,7 @@ import static com.agafari.com.subscription.LifecycleStatus.TRIAL;
  *   <li>PROVIDER: grace anchored at {@code period_end}: from it until {@code period_end + grace} the row is PAST_DUE (still
  *   entitled), from the grace end on it is ended. A PROVIDER row without a period end is never entitled.</li>
  * </ol>
- * Not wired into entitlements or publishing yet (SUB-R2-07).
+ * Wired into entitlements and {@code materialize} through {@link EffectiveStateEvaluator} (SUB-R2-07).
  */
 public final class EffectiveState {
 

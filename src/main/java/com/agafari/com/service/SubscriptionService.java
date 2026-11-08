@@ -199,6 +199,7 @@ public class SubscriptionService {
                 if (!config.models().contains(MonetizationModel.valueOf(request.planCode()))) {
                     throw new FieldValidationException(Map.of("planCode", "This plan isn't enabled by the current configuration"));
                 }
+                lifecycle.materialize(businessId); // AGF SUB-R2-07: an effectively ended row no longer blocks
                 if (subscriptions.findCurrentByBusinessId(businessId).isPresent()) throw new SubscriptionExistsException();
                 if (planRequests.findPendingByBusinessId(businessId).isPresent()) throw new PlanRequestPendingException(); // invariant I1
                 return response(recordWithinTransaction(businessId, request.planCode(), config.getVersion(), request.periodEnd(), now,

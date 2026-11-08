@@ -107,6 +107,7 @@ public class SelfServiceActivationService {
         if (!config.models().contains(MonetizationModel.valueOf(plan.getModel()))) throw SelfServiceRefusedException.notEnabled();
         if (plan.isPaid()) throw SelfServiceRefusedException.requiresPayment();
 
+        lifecycle.materialize(businessId); // AGF SUB-R2-07: an effectively ended row no longer blocks
         Optional<BusinessSubscription> current = subscriptions.findCurrentByBusinessId(businessId);
         if (current.isPresent()) {
             BusinessSubscription s = current.get();

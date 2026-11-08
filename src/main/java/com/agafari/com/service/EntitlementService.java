@@ -6,12 +6,13 @@ import com.agafari.com.jpa.entity.SubscriptionPlan;
 import com.agafari.com.jpa.repository.BusinessSubscriptionRepository;
 import com.agafari.com.jpa.repository.MonetizationConfigRepository;
 import com.agafari.com.jpa.repository.SubscriptionPlanRepository;
+import com.agafari.com.subscription.EffectiveStateEvaluator;
+import com.agafari.com.subscription.EffectiveView;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * AGF E4-M3: the one place that answers "what may this restaurant use?". Future approved stories (ads, limits, trial
@@ -34,11 +35,14 @@ public class EntitlementService {
     private final SubscriptionPlanRepository plans;
     private final MonetizationClock clock;
     private final GrandfatheringService grandfathering;
+    private final EffectiveStateEvaluator evaluator;
     private volatile boolean enabled;
 
     public EntitlementService(MonetizationConfigRepository configs, BusinessSubscriptionRepository subscriptions,
                               SubscriptionPlanRepository plans, MonetizationClock clock,
-                              @Value("${app.monetization.entitlements-enabled:false}") boolean enabled, GrandfatheringService grandfathering) {
+                              @Value("${app.monetization.entitlements-enabled:false}") boolean enabled, GrandfatheringService grandfathering,
+                              EffectiveStateEvaluator evaluator) {
+        this.evaluator = evaluator;
         this.grandfathering = grandfathering;
         this.configs = configs;
         this.subscriptions = subscriptions;
@@ -62,14 +66,15 @@ public class EntitlementService {
             MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElse(null);
             if (config == null) return Entitlements.unrestricted();
             // E4-M5: an effectively ended trial counts as no current subscription, also before the expiry job runs; E4-M6: so
-            // does a grandfathered subscription past its approved end, but only with transitions enabled
-            Optional<BusinessSubscription> current = subscriptions.findCurrentByBusinessId(businessId)
-                    .filter(s -> s.isEffectivelyCurrent(clock.now()) && !grandfathering.effectivelyEnded(s, config));
-            if (current.isEmpty()) return Entitlements.unrestricted(); // launch defaults stay open (E4-Q10)
-            BusinessSubscription subscription = current.get();
+            // does a grandfathered subscription past its approved end, with transitions enabled; SUB-R2-07: so does a row past
+            // its period end (and grace), with period-end-enabled on
+            BusinessSubscription subscription = subscriptions.findCurrentByBusinessId(businessId).orElse(null);
+            if (subscription == null) return Entitlements.unrestricted(); // launch defaults stay open (E4-Q10)
+            EffectiveView view = evaluator.view(subscription, grandfathering.effectivelyEnded(subscription, config), clock.now());
+            if (!view.entitledToPlan()) return Entitlements.unrestricted();
             SubscriptionPlan plan = plans.findById(subscription.getPlanCode()).orElseThrow();
             Entitlements.AdSource adSource = Entitlements.AdSource.valueOf(plan.getAdSource());
-            return new Entitlements(Entitlements.Mode.ACTIVE, plan.getCode(), subscription.getStatus(), adSource,
+            return new Entitlements(Entitlements.Mode.ACTIVE, plan.getCode(), view.status().name(), adSource,
                     adSource == Entitlements.AdSource.RESTAURANT, Map.of(), subscription.getSource(), false);
         } catch (RuntimeException e) {
             log.warn("event=entitlements.degraded businessId={} error={}", businessId, e.getClass().getSimpleName());

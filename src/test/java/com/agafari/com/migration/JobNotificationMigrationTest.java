@@ -33,7 +33,7 @@ class JobNotificationMigrationTest extends AbstractIntegrationTest {
     private static final String FRESH = "v21_fresh";
     private static final String CLAIM = "update job set status = 'RUNNING', claims = claims + 1, claim_token = ?, lease_until = now() + interval '10 min', "
             + "first_attempt_at = coalesce(first_attempt_at, now()) where id = ?";
-    private static final String FENCED_DONE = "update job set status = 'DONE' where id = ? and claim_token = ?";
+    private static final String FENCED_DONE = "update job set status = 'DONE', finished_at = now() where id = ? and claim_token = ?";
 
     @Autowired private DataSource dataSource;
     @Autowired private JdbcTemplate jdbc;
@@ -86,13 +86,18 @@ class JobNotificationMigrationTest extends AbstractIntegrationTest {
 
     private String job(String type, String key, String hash) {
         String id = UUID.randomUUID().toString();
-        jdbc.update("insert into job (id, type, key, payload_hash) values (?, ?, ?, ?)", id, type, key, hash);
+        jdbc.update("insert into job (id, type, key, payload, payload_hash) values (?, ?, ?, '{}'::jsonb, ?)", id, type, key, hash);
         return id;
     }
 
     private void notice(String business, String kind, String key) {
-        jdbc.update("insert into notification (id, business_id, kind, key, channel, kind_class, status) values (?, ?, ?, ?, 'IN_APP', 'ESSENTIAL', 'PENDING')",
-                UUID.randomUUID().toString(), business, kind, key);
+        notice(business, kind, key, "IN_APP");
+    }
+
+    private String notice(String business, String kind, String key, String channel) {
+        String id = UUID.randomUUID().toString();
+        jdbc.update("insert into notification (id, business_id, kind, key, channel, kind_class) values (?, ?, ?, ?, ?, 'ESSENTIAL')", id, business, kind, key, channel);
+        return id;
     }
 
     private String unique() {
@@ -146,9 +151,9 @@ class JobNotificationMigrationTest extends AbstractIntegrationTest {
     @Test
     void aNewJobIsPendingWithNoClaims() {
         String id = job("t", unique(), "h");
-        Map<String, Object> row = jdbc.queryForMap("select status, claims, claim_token, lease_until, first_attempt_at, run_at is not null as scheduled from job where id = ?", id);
+        Map<String, Object> row = jdbc.queryForMap("select status, claims, claim_token, lease_until, first_attempt_at, finished_at, run_at is not null as scheduled, created_at is not null as created from job where id = ?", id);
         assertThat(row).containsEntry("status", "PENDING").containsEntry("claims", 0).containsEntry("claim_token", null)
-                .containsEntry("lease_until", null).containsEntry("first_attempt_at", null).containsEntry("scheduled", true);
+                .containsEntry("lease_until", null).containsEntry("first_attempt_at", null).containsEntry("finished_at", null).containsEntry("scheduled", true).containsEntry("created", true);
     }
 
     @Test
@@ -163,7 +168,7 @@ class JobNotificationMigrationTest extends AbstractIntegrationTest {
     void anExistingKeysHashIsVisibleToTheEnqueuer() {
         String key = unique();
         job("t", key, "first");
-        String insert = "insert into job (id, type, key, payload_hash) values (?, 't', ?, ?) on conflict (type, key) do nothing";
+        String insert = "insert into job (id, type, key, payload, payload_hash) values (?, 't', ?, '{}'::jsonb, ?) on conflict (type, key) do nothing";
         assertThat(jdbc.update(insert, UUID.randomUUID().toString(), key, "second")).isZero();
         assertThat(jdbc.queryForObject("select payload_hash from job where type = 't' and key = ?", String.class, key)).isEqualTo("first");
     }
@@ -179,7 +184,9 @@ class JobNotificationMigrationTest extends AbstractIntegrationTest {
         assertThatThrownBy(() -> jdbc.update("update job set status = 'NONSENSE' where id = ?", id)).hasMessageContaining("ck_job_status");
         assertThatThrownBy(() -> jdbc.update("update job set last_error_kind = 'NONSENSE' where id = ?", id)).hasMessageContaining("ck_job_error_kind");
         for (String kind : List.of("TRANSIENT", "PERMANENT")) jdbc.update("update job set last_error_kind = ? where id = ?", kind, id);
-        for (String status : List.of("PENDING", "DONE", "DEAD")) jdbc.update("update job set status = ? where id = ?", status, id);
+        jdbc.update("update job set status = 'DONE', finished_at = now() where id = ?", id);
+        jdbc.update("update job set status = 'DEAD' where id = ?", id);
+        jdbc.update("update job set status = 'PENDING', finished_at = null where id = ?", id);
     }
 
     @Test
@@ -193,6 +200,19 @@ class JobNotificationMigrationTest extends AbstractIntegrationTest {
         String id = job("t", unique(), "h");
         assertThatThrownBy(() -> jdbc.update("update job set status = 'RUNNING' where id = ?", id)).hasMessageContaining("ck_job_running_claim");
         assertThatThrownBy(() -> jdbc.update("update job set status = 'RUNNING', claim_token = 'x' where id = ?", id)).hasMessageContaining("ck_job_running_claim");
+    }
+
+    @Test
+    void finishedAtAccompaniesAFinishedJobOnly() {
+        String id = job("t", unique(), "h");
+        assertThatThrownBy(() -> jdbc.update("update job set status = 'DONE' where id = ?", id)).hasMessageContaining("ck_job_finished");
+        assertThatThrownBy(() -> jdbc.update("update job set finished_at = now() where id = ?", id)).hasMessageContaining("ck_job_finished");
+    }
+
+    @Test
+    void aJobPayloadIsRequiredJson() {
+        assertThatThrownBy(() -> jdbc.update("insert into job (id, type, key, payload_hash) values (?, 't', ?, 'h')", unique(), unique())).hasMessageContaining("payload");
+        assertThat(jdbc.queryForObject("select data_type from information_schema.columns where table_schema = 'public' and table_name = 'job' and column_name = 'payload'", String.class)).isEqualTo("jsonb");
     }
 
     // ---- claim and fencing prerequisites (DD §9.2, MT-03)
@@ -250,20 +270,23 @@ class JobNotificationMigrationTest extends AbstractIntegrationTest {
     // ---- notification
 
     @Test
-    void aNoticeIsUniquePerRestaurantKindAndKey() {
+    void aNoticeIsUniquePerRestaurantKindKeyAndChannel() {
         Tenant a = data.tenant("n-a");
         Tenant b = data.tenant("n-b");
         notice(a.businessId(), "EXPIRY", "k1");
-        assertThatThrownBy(() -> notice(a.businessId(), "EXPIRY", "k1")).hasMessageContaining("uk_notification_restaurant_kind_key");
+        assertThatThrownBy(() -> notice(a.businessId(), "EXPIRY", "k1")).hasMessageContaining("uk_notification_restaurant_kind_key_channel");
+        assertThatCode(() -> notice(a.businessId(), "EXPIRY", "k1", "EMAIL")).doesNotThrowAnyException();
         assertThatCode(() -> notice(a.businessId(), "OTHER", "k1")).doesNotThrowAnyException();
         assertThatCode(() -> notice(a.businessId(), "EXPIRY", "k2")).doesNotThrowAnyException();
         assertThatCode(() -> notice(b.businessId(), "EXPIRY", "k1")).doesNotThrowAnyException();
     }
 
     @Test
-    void aNoticeStartsWithNoAttempts() {
+    void aNoticeStartsPendingWithNoAttemptsAndEmptyData() {
         Tenant a = data.tenant("n-att");
         notice(a.businessId(), "EXPIRY", "k1");
+        assertThat(jdbc.queryForMap("select status, template_data::text as data, created_at is not null as c, updated_at is not null as u from notification where business_id = ?", a.businessId()))
+                .containsEntry("status", "PENDING").containsEntry("data", "{}").containsEntry("c", true).containsEntry("u", true);
         assertThat(jdbc.queryForObject("select attempts from notification where business_id = ?", Integer.class, a.businessId())).isZero();
         assertThatThrownBy(() -> jdbc.update("update notification set attempts = -1 where business_id = ?", a.businessId())).hasMessageContaining("ck_notification_attempts");
     }
@@ -276,6 +299,63 @@ class JobNotificationMigrationTest extends AbstractIntegrationTest {
         assertThatThrownBy(() -> jdbc.update(insert, unique(), a.businessId(), "2", "SMS", "ESSENTIAL")).hasMessageContaining("ck_notification_channel");
         assertThatCode(() -> jdbc.update(insert, unique(), a.businessId(), "3", "EMAIL", "PAYMENT_REQUEST")).doesNotThrowAnyException();
         assertThatCode(() -> jdbc.update(insert, unique(), a.businessId(), "4", "IN_APP", "ESSENTIAL")).doesNotThrowAnyException();
+    }
+
+    private void status(String id, String to) {
+        jdbc.update("update notification set status = ? where id = ?", to, id);
+    }
+
+    @Test
+    void aNoticeStatusMustBeKnown() {
+        String tenant = data.tenant("n-s").businessId();
+        assertThatThrownBy(() -> jdbc.update("insert into notification (id, business_id, kind, key, channel, kind_class, status) values (?, ?, 'K', '1', 'IN_APP', 'ESSENTIAL', 'NONSENSE')", unique(), tenant))
+                .hasMessageContaining("ck_notification_status");
+    }
+
+    @Test
+    void theApprovedStatusPathsAreAllowed() {
+        String tenant = data.tenant("n-ok").businessId();
+        String a = notice(tenant, "K", "a", "IN_APP");
+        status(a, "SENT");
+        status(a, "READ");
+        String b = notice(tenant, "K", "b", "IN_APP");
+        status(b, "FAILED");
+        status(b, "PENDING");
+        status(b, "SENT");
+        assertThat(jdbc.queryForObject("select status from notification where id = ?", String.class, a)).isEqualTo("READ");
+    }
+
+    @Test
+    void otherStatusChangesAreRefused() {
+        String tenant = data.tenant("n-no").businessId();
+        String pending = notice(tenant, "K", "p", "IN_APP");
+        assertThatThrownBy(() -> status(pending, "READ")).hasMessageContaining("notification status can't change");
+        String sent = notice(tenant, "K", "s", "IN_APP");
+        status(sent, "SENT");
+        for (String to : List.of("PENDING", "FAILED")) assertThatThrownBy(() -> status(sent, to)).as(to).hasMessageContaining("notification status can't change");
+        String failed = notice(tenant, "K", "f", "IN_APP");
+        status(failed, "FAILED");
+        assertThatThrownBy(() -> status(failed, "READ")).hasMessageContaining("notification status can't change");
+        status(sent, "READ");
+        for (String to : List.of("PENDING", "SENT", "FAILED")) assertThatThrownBy(() -> status(sent, to)).as(to).hasMessageContaining("notification status can't change");
+    }
+
+    @Test
+    void anEmailCantBeRead() {
+        String id = notice(data.tenant("n-mail").businessId(), "K", "1", "EMAIL");
+        status(id, "SENT");
+        assertThatThrownBy(() -> status(id, "READ")).hasMessageContaining("only an in-app notice");
+    }
+
+    @Test
+    void channelsKeepIndependentDeliveryState() {
+        String tenant = data.tenant("n-ind").businessId();
+        String app = notice(tenant, "K", "1", "IN_APP");
+        String mail = notice(tenant, "K", "1", "EMAIL");
+        status(app, "SENT");
+        status(mail, "FAILED");
+        assertThat(jdbc.queryForObject("select status from notification where id = ?", String.class, app)).isEqualTo("SENT");
+        assertThat(jdbc.queryForObject("select status from notification where id = ?", String.class, mail)).isEqualTo("FAILED");
     }
 
     @Test

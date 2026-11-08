@@ -59,7 +59,8 @@ public final class FlywayBaselineGuard {
                     "trial_intent_guard", // V16: AGF E4-M5 recovery
                     "agafari_ad_guard", // V17: AGF E4-M7
                     "restaurant_ad_guard", // V18: AGF E4-M8
-                    "business_subscription_refuse_provider"); // V20: AGF SUB-R2-06
+                    "business_subscription_refuse_provider", // V20: AGF SUB-R2-06
+                    "notification_status_guard"); // V21: AGF SUB-R2-08
 
     private FlywayBaselineGuard() {
     }

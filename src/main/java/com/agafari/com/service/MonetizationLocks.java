@@ -57,6 +57,11 @@ public class MonetizationLocks {
 
     /** AGF E4-M5: true if this transaction now runs the trial expiry job; false if another instance already does. */
     public boolean tryTrialJob(long key) {
+        return tryJob(key);
+    }
+
+    /** AGF SUB-R2-08: true if this transaction now holds the singleton job lock; false if another instance does. */
+    public boolean tryJob(long key) {
         if (!enabled()) return true;
         return Boolean.TRUE.equals(jdbc.queryForObject("select pg_try_advisory_xact_lock(" + key + ")", Boolean.class));
     }

@@ -20,8 +20,8 @@ public interface JobHandler<T> {
     }
 
     /**
-     * The transient-error time cap of a non-financial job type; null means none. Financial types always use
-     * {@link JobFailurePolicy#FINANCIAL_TRANSIENT_CAP}.
+     * The transient-error time cap of a non-financial job type; null means {@link JobFailurePolicy#NON_FINANCIAL_TRANSIENT_CAP}.
+     * Financial types always use {@link JobFailurePolicy#FINANCIAL_TRANSIENT_CAP}. The eight-claim limit applies either way.
      */
     default Duration transientCap() {
         return null;

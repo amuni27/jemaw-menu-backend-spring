@@ -9,6 +9,7 @@ public final class JobFailurePolicy {
 
     public static final int MAX_CLAIMS = 8;
     public static final Duration FINANCIAL_TRANSIENT_CAP = Duration.ofHours(72);
+    public static final Duration NON_FINANCIAL_TRANSIENT_CAP = Duration.ofHours(24);
     private static final List<Duration> BACKOFF = List.of(Duration.ofMinutes(1), Duration.ofMinutes(5), Duration.ofMinutes(30), Duration.ofHours(2), Duration.ofHours(6));
 
     public enum Kind { TRANSIENT, PERMANENT }
@@ -30,12 +31,19 @@ public final class JobFailurePolicy {
         return type.startsWith("refund.") || type.startsWith("checkout.") || type.equals("inbox.process");
     }
 
+    /** Financial types have the fixed cap; another type uses the handler's own, or the default. */
+    public static Duration transientCap(String type, Duration declared) {
+        if (isFinancial(type)) return FINANCIAL_TRANSIENT_CAP;
+        return declared != null ? declared : NON_FINANCIAL_TRANSIENT_CAP;
+    }
+
     public static Duration backoff(int claims) {
         return BACKOFF.get(Math.min(Math.max(claims, 1), BACKOFF.size()) - 1);
     }
 
+    /** BD-18: dead after eight claims or at the transient time cap, whichever comes first. */
     public static Decision decide(Kind kind, int claims, Instant firstAttemptAt, Instant now, Duration transientCap) {
-        boolean dead = kind == Kind.TRANSIENT ? transientCap != null && !now.isBefore(firstAttemptAt.plus(transientCap)) : claims >= MAX_CLAIMS;
+        boolean dead = claims >= MAX_CLAIMS || (kind == Kind.TRANSIENT && !now.isBefore(firstAttemptAt.plus(transientCap)));
         return new Decision(dead, dead ? null : backoff(claims));
     }
 }

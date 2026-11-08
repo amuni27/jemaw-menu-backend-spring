@@ -17,6 +17,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -338,6 +339,25 @@ class JobNotificationMigrationTest extends AbstractIntegrationTest {
         assertThatThrownBy(() -> status(failed, "READ")).hasMessageContaining("notification status can't change");
         status(sent, "READ");
         for (String to : List.of("PENDING", "SENT", "FAILED")) assertThatThrownBy(() -> status(sent, to)).as(to).hasMessageContaining("notification status can't change");
+    }
+
+    /** Every status pair, from a row brought to that status by the approved path. */
+    @Test
+    void everyStatusPairIsDecidedExactlyAsApproved() {
+        String tenant = data.tenant("n-all").businessId();
+        Set<String> allowed = Set.of("PENDING>SENT", "PENDING>FAILED", "FAILED>PENDING", "SENT>READ");
+        Map<String, List<String>> path = Map.of("PENDING", List.of(), "SENT", List.of("SENT"), "FAILED", List.of("FAILED"), "READ", List.of("SENT", "READ"));
+        int n = 0;
+        for (String from : path.keySet()) {
+            for (String to : path.keySet()) {
+                if (from.equals(to)) continue;
+                String id = notice(tenant, "K", "pair" + n++, "IN_APP");
+                path.get(from).forEach(s -> status(id, s));
+                if (allowed.contains(from + ">" + to)) assertThatCode(() -> status(id, to)).as(from + ">" + to).doesNotThrowAnyException();
+                else assertThatThrownBy(() -> status(id, to)).as(from + ">" + to).hasMessageContaining("notification status can't change");
+            }
+        }
+        assertThat(n).isEqualTo(12);
     }
 
     @Test

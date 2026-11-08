@@ -49,10 +49,16 @@ class JobPolicyTest {
     }
 
     @Test
-    void transientFailuresIgnoreTheClaimLimitBeforeTheCap() {
-        JobFailurePolicy.Decision d = JobFailurePolicy.decide(TRANSIENT, 40, T, T.plus(CAP).minusNanos(1), CAP);
-        assertThat(d.dead()).isFalse();
-        assertThat(d.retryAfter()).isEqualTo(Duration.ofHours(6));
+    void transientFailuresStopAtTheEighthClaimEvenBeforeTheCap() {
+        JobFailurePolicy.Decision seventh = JobFailurePolicy.decide(TRANSIENT, 7, T, T.plusSeconds(1), CAP);
+        assertThat(seventh.dead()).isFalse();
+        assertThat(seventh.retryAfter()).isEqualTo(Duration.ofHours(6));
+        assertThat(JobFailurePolicy.decide(TRANSIENT, 8, T, T.plusSeconds(1), CAP).dead()).isTrue();
+    }
+
+    @Test
+    void transientFailuresRetryUntilJustBeforeTheCap() {
+        assertThat(JobFailurePolicy.decide(TRANSIENT, 3, T, T.plus(CAP).minusNanos(1), CAP).dead()).isFalse();
     }
 
     @Test
@@ -61,8 +67,18 @@ class JobPolicyTest {
     }
 
     @Test
-    void withoutACapTransientFailuresKeepRetrying() {
-        assertThat(JobFailurePolicy.decide(TRANSIENT, 500, T, T.plus(Duration.ofDays(400)), null).dead()).isFalse();
+    void capsFollowTheApprovedPolicy() {
+        assertThat(JobFailurePolicy.transientCap("refund.execute", null)).isEqualTo(Duration.ofHours(72));
+        assertThat(JobFailurePolicy.transientCap("refund.execute", Duration.ofHours(1))).as("financial is fixed").isEqualTo(Duration.ofHours(72));
+        assertThat(JobFailurePolicy.transientCap("notification.send", null)).isEqualTo(Duration.ofHours(24));
+        assertThat(JobFailurePolicy.transientCap("notification.send", Duration.ofHours(48))).as("a handler may declare its own").isEqualTo(Duration.ofHours(48));
+    }
+
+    @Test
+    void theDefaultNonFinancialCapEndsExactlyAtTwentyFourHours() {
+        Duration cap = JobFailurePolicy.transientCap("t", null);
+        assertThat(JobFailurePolicy.decide(TRANSIENT, 2, T, T.plus(cap).minusNanos(1), cap).dead()).isFalse();
+        assertThat(JobFailurePolicy.decide(TRANSIENT, 2, T, T.plus(cap), cap).dead()).isTrue();
     }
 
     @Test

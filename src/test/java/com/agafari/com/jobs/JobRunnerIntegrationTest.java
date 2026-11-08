@@ -5,6 +5,9 @@ import com.agafari.com.support.AbstractIntegrationTest;
 import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.ApplicationContext;
@@ -42,6 +45,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 /** AGF SUB-R2-08 (MT-03): enqueue, claim, lease, fencing, limits, pause and retention on real PostgreSQL. */
+@ExtendWith(OutputCaptureExtension.class)
 class JobRunnerIntegrationTest extends AbstractIntegrationTest {
 
     public record Pay(String id, int n) {
@@ -372,27 +376,124 @@ class JobRunnerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void transientFailuresOutliveTheClaimLimitUntilTheCap() throws Exception {
-        JobRunner r = runner(handler("refund.test", null, null, p -> { throw new TransientJobException("timeout", null); }));
-        enqueue("refund.test", "k", new Pay("x", 1));
-        for (int i = 1; i <= 12; i++) {
+    void eightTransientFailuresEndDeadAndThereIsNoNinthClaim() throws Exception {
+        AtomicInteger runs = new AtomicInteger();
+        JobRunner r = runner(handler("t.eight", null, null, p -> { runs.incrementAndGet(); throw new TransientJobException("timeout", null); }));
+        enqueue("t.eight", "k", new Pay("x", 1));
+        for (int i = 1; i <= 7; i++) {
             drain(r.pollOnce());
-            assertThat(row("refund.test", "k")).as("claim " + i).containsEntry("status", "PENDING").containsEntry("last_error_kind", "TRANSIENT");
+            assertThat(row("t.eight", "k")).as("claim " + i).containsEntry("status", "PENDING").containsEntry("claims", i);
             due();
         }
-        jdbc.update("update job set first_attempt_at = now() - interval '72 hours 1 second' where key = 'k'");
         drain(r.pollOnce());
-        assertThat(row("refund.test", "k")).containsEntry("status", "DEAD").containsEntry("claims", 13);
+        Map<String, Object> job = row("t.eight", "k");
+        assertThat(job).containsEntry("status", "DEAD").containsEntry("claims", 8).containsEntry("last_error_kind", "TRANSIENT");
+        assertThat(job.get("last_error")).isNotNull();
+        assertThat(job.get("finished_at")).isNotNull();
+        due();
+        assertThat(drain(r.pollOnce())).isZero();
+        assertThat(runs.get()).isEqualTo(8);
     }
 
     @Test
-    void aNonFinancialJobWithoutADeclaredCapIsNotTimeLimited() throws Exception {
-        JobRunner r = runner(handler("t.nocap", null, null, p -> { throw new TransientJobException("timeout", null); }));
-        enqueue("t.nocap", "k", new Pay("x", 1));
+    void aSuccessfulEighthExecutionFinishesDone() throws Exception {
+        AtomicInteger runs = new AtomicInteger();
+        JobRunner r = runner(handler("t.last", null, null, p -> { if (runs.incrementAndGet() < 8) throw new TransientJobException("timeout", null); }));
+        enqueue("t.last", "k", new Pay("x", 1));
+        for (int i = 0; i < 8; i++) {
+            drain(r.pollOnce());
+            due();
+        }
+        assertThat(row("t.last", "k")).containsEntry("status", "DONE").containsEntry("claims", 8).containsEntry("last_error", null);
+    }
+
+    @Test
+    void aPendingJobAtTheCeilingIsNeverRunAndEndsDeadKeepingItsError() throws Exception {
+        AtomicInteger runs = new AtomicInteger();
+        JobRunner r = runner(handler("t.ceil", null, null, p -> runs.incrementAndGet()));
+        enqueue("t.ceil", "k", new Pay("x", 1));
+        jdbc.update("update job set claims = 8, last_error = 'the real error', last_error_kind = 'TRANSIENT' where key = 'k'");
+        assertThat(drain(r.pollOnce())).isZero();
+        assertThat(runs.get()).isZero();
+        assertThat(row("t.ceil", "k")).containsEntry("status", "DEAD").containsEntry("claims", 8).containsEntry("last_error", "the real error");
+    }
+
+    @Test
+    void aDeadJobIsNeverResurrected() throws Exception {
+        JobRunner r = runner(handler("t.dead", null, null, p -> { throw new PermanentJobException("no", null); }));
+        enqueue("t.dead", "k", new Pay("x", 1));
+        jdbc.update("update job set claims = 7 where key = 'k'");
         drain(r.pollOnce());
-        jdbc.update("update job set first_attempt_at = now() - interval '400 days', run_at = now() where key = 'k'");
+        Map<String, Object> dead = row("t.dead", "k");
+        assertThat(dead).containsEntry("status", "DEAD");
+        enqueue("t.dead", "k", new Pay("x", 1));
+        jdbc.update("update job set run_at = now() where key = 'k'");
+        assertThat(drain(r.pollOnce())).isZero();
+        assertThat(r.prune()).isZero();
+        assertThat(row("t.dead", "k")).isEqualTo(dead);
+    }
+
+    @Test
+    void theFinancialCapEndsARetryAtSeventyTwoHoursNotBefore() throws Exception {
+        JobRunner r = runner(handler("refund.test", null, null, p -> { throw new TransientJobException("timeout", null); }));
+        enqueue("refund.test", "k", new Pay("x", 1));
         drain(r.pollOnce());
-        assertThat(row("t.nocap", "k")).containsEntry("status", "PENDING");
+        jdbc.update("update job set first_attempt_at = now() - interval '71 hours 59 minutes', run_at = now() where key = 'k'");
+        drain(r.pollOnce());
+        assertThat(row("refund.test", "k")).containsEntry("status", "PENDING").containsEntry("claims", 2);
+        jdbc.update("update job set first_attempt_at = now() - interval '72 hours 1 second', run_at = now() where key = 'k'");
+        drain(r.pollOnce());
+        assertThat(row("refund.test", "k")).containsEntry("status", "DEAD").containsEntry("claims", 3).containsEntry("last_error_kind", "TRANSIENT");
+    }
+
+    @Test
+    void aNonFinancialJobEndsAtTwentyFourHoursByDefault() throws Exception {
+        JobRunner r = runner(handler("t.day", null, null, p -> { throw new TransientJobException("timeout", null); }));
+        enqueue("t.day", "k", new Pay("x", 1));
+        drain(r.pollOnce());
+        jdbc.update("update job set first_attempt_at = now() - interval '23 hours 59 minutes', run_at = now() where key = 'k'");
+        drain(r.pollOnce());
+        assertThat(row("t.day", "k")).containsEntry("status", "PENDING");
+        jdbc.update("update job set first_attempt_at = now() - interval '24 hours 1 second', run_at = now() where key = 'k'");
+        drain(r.pollOnce());
+        assertThat(row("t.day", "k")).containsEntry("status", "DEAD").containsEntry("claims", 3);
+    }
+
+    @Test
+    void aHandlerMayDeclareALongerNonFinancialCap() throws Exception {
+        JobRunner r = runner(handler("t.long-cap", null, Duration.ofHours(48), p -> { throw new TransientJobException("timeout", null); }));
+        enqueue("t.long-cap", "k", new Pay("x", 1));
+        drain(r.pollOnce());
+        jdbc.update("update job set first_attempt_at = now() - interval '25 hours', run_at = now() where key = 'k'");
+        drain(r.pollOnce());
+        assertThat(row("t.long-cap", "k")).containsEntry("status", "PENDING");
+    }
+
+    @Test
+    void aDeadFromAnExecutionIsDurableAndLogged(CapturedOutput output) throws Exception {
+        JobRunner r = runner(handler("t.log1", null, null, p -> { throw new PermanentJobException("boom", null); }));
+        enqueue("t.log1", "k", new Pay("x", 1));
+        jdbc.update("update job set claims = 7 where key = 'k'");
+        drain(r.pollOnce());
+        Map<String, Object> job = row("t.log1", "k");
+        assertThat(job).containsEntry("status", "DEAD").containsEntry("last_error_kind", "PERMANENT");
+        assertThat((String) job.get("last_error")).contains("boom");
+        assertThat(output.getOut()).contains("event=job.dead").contains("type=t.log1");
+    }
+
+    @Test
+    void aDeadFromALostWorkerIsDurableAndLogged(CapturedOutput output) throws Exception {
+        JobRunner r = runner(handler("t.log2", null, null, p -> { throw new Error("worker killed"); }));
+        enqueue("t.log2", "k", new Pay("x", 1));
+        jdbc.update("update job set claims = 7 where key = 'k'");
+        drain(r.pollOnce());
+        expireLeases();
+        drain(r.pollOnce());
+        Map<String, Object> job = row("t.log2", "k");
+        assertThat(job).containsEntry("status", "DEAD").containsEntry("claims", 8);
+        assertThat((String) job.get("last_error")).contains("worker lost");
+        assertThat(job.get("finished_at")).isNotNull();
+        assertThat(output.getOut()).contains("event=job.dead").contains("type=t.log2");
     }
 
     @Test
@@ -428,19 +529,17 @@ class JobRunnerIntegrationTest extends AbstractIntegrationTest {
         JobHandler<Pay> failing = handler("t.stripe", "STRIPE", null, p -> { throw new TransientJobException("503", null); });
         AtomicInteger other = new AtomicInteger();
         JobRunner r = runner(failing, handler("t.chapa", "CHAPA", null, p -> other.incrementAndGet()));
-        enqueue("t.stripe", "k", new Pay("x", 1));
-        for (int i = 1; i <= 9; i++) {
+        for (int i = 1; i <= 10; i++) { // separate jobs: one job can fail at most eight times
+            assertThat(r.isPaused("STRIPE")).as("before " + i).isFalse();
+            enqueue("t.stripe", "k" + i, new Pay("x", 1));
             drain(r.pollOnce());
-            due();
-            assertThat(r.isPaused("STRIPE")).as("after " + i).isFalse();
         }
-        drain(r.pollOnce());
-        due();
         assertThat(r.isPaused("STRIPE")).isTrue();
+        enqueue("t.stripe", "later", new Pay("x", 1));
         enqueue("t.chapa", "c", new Pay("x", 1));
         assertThat(drain(r.pollOnce())).as("only the other provider runs").isEqualTo(1);
         assertThat(other.get()).isEqualTo(1);
-        assertThat(row("t.stripe", "k")).containsEntry("claims", 10);
+        assertThat(row("t.stripe", "later")).containsEntry("claims", 0);
         now.set(now.get().plus(Duration.ofMinutes(5)).minusNanos(1));
         assertThat(r.isPaused("STRIPE")).isTrue();
         now.set(now.get().plusNanos(1));
@@ -471,10 +570,11 @@ class JobRunnerIntegrationTest extends AbstractIntegrationTest {
         finished("notification.send", "recent", "DONE", "29 days");
         finished("notification.send", "dead", "DEAD", "400 days");
         finished("refund.execute", "r", "DONE", "400 days");
+        finished("refund.execute", "rd", "DEAD", "400 days");
         finished("checkout.create", "c", "DONE", "400 days");
         finished("inbox.process", "i", "DONE", "400 days");
         assertThat(runner().prune()).isEqualTo(1);
-        assertThat(jdbc.queryForList("select key from job order by key", String.class)).containsExactly("c", "dead", "i", "r", "recent");
+        assertThat(jdbc.queryForList("select key from job order by key", String.class)).containsExactly("c", "dead", "i", "r", "rd", "recent");
     }
 
     // ---- locks, guard, flag

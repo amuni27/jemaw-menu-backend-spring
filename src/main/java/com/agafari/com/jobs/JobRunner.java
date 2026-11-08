@@ -80,13 +80,13 @@ public class JobRunner {
         String types = handlers.values().stream().filter(h -> h.provider() == null || !isPaused(h.provider())).map(JobHandler::type).collect(Collectors.joining(","));
         if (capacity <= 0 || types.isEmpty()) return List.of();
         List<Map<String, Object>> claimed = jdbc.queryForList("""
-                with due as (select id from job where status = 'PENDING' and run_at <= now() and type = any (string_to_array(?, ','))
+                with due as (select id from job where status = 'PENDING' and run_at <= now() and claims < ? and type = any (string_to_array(?, ','))
                              order by run_at for update skip locked limit ?)
                 update job j set status = 'RUNNING', claims = claims + 1, claim_token = gen_random_uuid()::text, lease_until = now() + interval '10 minutes',
                                  first_attempt_at = coalesce(first_attempt_at, now())
                 from due where j.id = due.id
                 returning j.id, j.type, j.payload::text as payload, j.claims, j.claim_token, j.first_attempt_at
-                """, types, capacity);
+                """, JobFailurePolicy.MAX_CLAIMS, types, capacity);
         List<Future<?>> started = new ArrayList<>();
         for (Map<String, Object> row : claimed) {
             inFlight.incrementAndGet();
@@ -122,11 +122,12 @@ public class JobRunner {
 
     private void recoverExpiredLeases() {
         List<Map<String, Object>> dead = jdbc.queryForList("""
-                update job set status = 'DEAD', finished_at = now(), claim_token = null, lease_until = null, last_error = ?
-                where status = 'RUNNING' and lease_until < now() and claims >= ? returning id, type
-                """, WORKER_LOST, JobFailurePolicy.MAX_CLAIMS);
+                update job set status = 'DEAD', finished_at = now(), claim_token = null, lease_until = null,
+                               last_error = case when status = 'RUNNING' then ? else coalesce(last_error, ?) end
+                where claims >= ? and (status = 'PENDING' or (status = 'RUNNING' and lease_until < now())) returning id, type
+                """, WORKER_LOST, WORKER_LOST, JobFailurePolicy.MAX_CLAIMS);
         dead.forEach(d -> log.error("event=job.dead id={} type={} reason=claims_exhausted", d.get("id"), d.get("type")));
-        jdbc.update("update job set status = 'PENDING', claim_token = null, lease_until = null, last_error = ? where status = 'RUNNING' and lease_until < now()", WORKER_LOST);
+        jdbc.update("update job set status = 'PENDING', claim_token = null, lease_until = null, last_error = ? where status = 'RUNNING' and lease_until < now() and claims < ?", WORKER_LOST, JobFailurePolicy.MAX_CLAIMS);
     }
 
     /** An Error (a killed worker) deliberately escapes: nothing is recorded and the lease expires. */
@@ -154,7 +155,7 @@ public class JobRunner {
         String type = (String) row.get("type");
         JobFailurePolicy.Kind kind = JobFailurePolicy.classify(e);
         trackProvider(handler, kind);
-        Duration cap = JobFailurePolicy.isFinancial(type) ? JobFailurePolicy.FINANCIAL_TRANSIENT_CAP : handler.transientCap();
+        Duration cap = JobFailurePolicy.transientCap(type, handler.transientCap());
         Instant now = jdbc.queryForObject("select now()", Timestamp.class).toInstant();
         int claims = ((Number) row.get("claims")).intValue();
         JobFailurePolicy.Decision decision = JobFailurePolicy.decide(kind, claims, ((Timestamp) row.get("first_attempt_at")).toInstant(), now, cap);

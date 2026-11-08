@@ -1,5 +1,7 @@
 package com.agafari.com.service;
 
+import com.agafari.com.subscription.Actor;
+import com.agafari.com.subscription.SubscriptionLifecycle;
 import com.agafari.com.dto.request.SubscriptionActivationRequest;
 import com.agafari.com.dto.response.SubscriptionActivationResponse;
 import com.agafari.com.exception.FieldValidationException;
@@ -52,12 +54,14 @@ public class SelfServiceActivationService {
     private final GrandfatheringService grandfathering;
     private final AdminAuditService audit;
     private final TransactionTemplate transaction;
+    private final SubscriptionLifecycle lifecycle;
     private final Clock clock = Clock.systemUTC();
 
     public SelfServiceActivationService(PlanRequestService planRequests, BusinessSubscriptionRepository subscriptions, PlanRequestRepository requests,
                                         MonetizationConfigRepository configs, SubscriptionPlanRepository plans, MonetizationLocks locks,
                                         TrialExpirer trialExpirer, GrandfatheringService grandfathering, AdminAuditService audit,
-                                        PlatformTransactionManager transactionManager) {
+                                        PlatformTransactionManager transactionManager, SubscriptionLifecycle lifecycle) {
+        this.lifecycle = lifecycle;
         this.planRequests = planRequests;
         this.subscriptions = subscriptions;
         this.requests = requests;
@@ -128,7 +132,7 @@ public class SelfServiceActivationService {
             throw SelfServiceRefusedException.requestChanged(); // the confirmed request was resolved meanwhile
         }
 
-        BusinessSubscription saved = subscriptions.saveAndFlush(BusinessSubscription.owner(businessId, plan.getCode(), config.getVersion(), now, ownerId));
+        BusinessSubscription saved = lifecycle.startOwnerFree(businessId, plan.getCode(), config.getVersion(), now, new Actor(ownerId)); // AGF SUB-R2-02
         audit.success(ACTIVATED, ownerId, actor, TARGET, saved.getId(), saved.getPlanCode() + " config=" + config.getVersion() + " source=OWNER"
                 + (withdrawn == null ? "" : " withdrawn request " + withdrawn));
         return response(saved, true, withdrawn);

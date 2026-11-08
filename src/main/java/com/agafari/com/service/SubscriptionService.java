@@ -1,5 +1,8 @@
 package com.agafari.com.service;
 
+import com.agafari.com.subscription.Actor;
+import com.agafari.com.subscription.ManualRecord;
+import com.agafari.com.subscription.SubscriptionLifecycle;
 import com.agafari.com.dto.request.SubscriptionCreateRequest;
 import com.agafari.com.dto.request.SubscriptionUpdateRequest;
 import com.agafari.com.dto.request.TransitionDateRequest;
@@ -89,13 +92,16 @@ public class SubscriptionService {
     private final MonetizationClock monetizationClock;
     private final TrialIntentRepository trialIntents;
     private final GrandfatheringService grandfathering;
+    private final SubscriptionLifecycle lifecycle;
     private final Clock clock = Clock.systemUTC();
 
     public SubscriptionService(BusinessSubscriptionRepository subscriptions, SubscriptionPlanRepository plans,
                                MonetizationConfigRepository configs, BusinessRepository businesses, UserRepository users,
                                EntitlementService entitlements, AdminAuditService audit, PlatformTransactionManager transactionManager,
                                PlanRequestRepository planRequests, MonetizationLocks locks, TrialExpirer trialExpirer,
-                               MonetizationClock monetizationClock, TrialIntentRepository trialIntents, GrandfatheringService grandfathering) {
+                               MonetizationClock monetizationClock, TrialIntentRepository trialIntents, GrandfatheringService grandfathering,
+                               SubscriptionLifecycle lifecycle) {
+        this.lifecycle = lifecycle;
         this.grandfathering = grandfathering;
         this.trialIntents = trialIntents;
         this.planRequests = planRequests;
@@ -213,7 +219,7 @@ public class SubscriptionService {
      */
     BusinessSubscription recordWithinTransaction(String businessId, String planCode, int configVersion, Instant periodEnd, Instant now,
                                                  String adminId, String actor) {
-        BusinessSubscription saved = subscriptions.saveAndFlush(BusinessSubscription.manual(businessId, planCode, configVersion, periodEnd, now, adminId));
+        BusinessSubscription saved = lifecycle.recordManual(businessId, new ManualRecord(planCode, configVersion, periodEnd, now), new Actor(adminId)); // AGF SUB-R2-02
         audit.success(CREATED, adminId, actor, TARGET, saved.getId(), saved.getPlanCode() + " " + saved.getStatus()
                 + " source=" + saved.getSource() + " config=" + saved.getConfigVersion() + " periodEnd=" + saved.getPeriodEnd());
         return saved;

@@ -2,11 +2,14 @@ package com.agafari.com.service;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * AGF E4-M4 (proposal §16): transaction-scoped locks that serialize monetization writes. Always taken in this order:
@@ -30,6 +33,8 @@ public class MonetizationLocks {
     private final JdbcTemplate jdbc;
     private final DataSource dataSource;
     private volatile Boolean postgres;
+    private final Object heldKey = new Object(); // per-transaction record of the locks taken (AGF SUB-R2-02)
+    private static final String CONFIG_HELD = "\u0000config"; // can't collide with a restaurant id
 
     public MonetizationLocks(JdbcTemplate jdbc, DataSource dataSource) {
         this.jdbc = jdbc;
@@ -37,11 +42,17 @@ public class MonetizationLocks {
     }
 
     public void configExclusive() {
-        if (enabled()) jdbc.execute("select pg_advisory_xact_lock(" + CONFIG_LOCK_KEY + ")");
+        if (enabled()) {
+            jdbc.execute("select pg_advisory_xact_lock(" + CONFIG_LOCK_KEY + ")");
+            markHeld(CONFIG_HELD);
+        }
     }
 
     public void configShared() {
-        if (enabled()) jdbc.execute("select pg_advisory_xact_lock_shared(" + CONFIG_LOCK_KEY + ")");
+        if (enabled()) {
+            jdbc.execute("select pg_advisory_xact_lock_shared(" + CONFIG_LOCK_KEY + ")");
+            markHeld(CONFIG_HELD);
+        }
     }
 
     /** AGF E4-M5: true if this transaction now runs the trial expiry job; false if another instance already does. */
@@ -51,7 +62,10 @@ public class MonetizationLocks {
     }
 
     public void restaurant(String businessId) {
-        if (enabled()) jdbc.queryForList("select id from business where id = ? for no key update", String.class, businessId);
+        if (enabled()) {
+            jdbc.queryForList("select id from business where id = ? for no key update", String.class, businessId);
+            markHeld(businessId);
+        }
     }
 
     /**
@@ -60,6 +74,53 @@ public class MonetizationLocks {
      */
     public void markAdminAdModeration() {
         if (enabled()) jdbc.queryForObject("select set_config('agafari.ad_actor', 'ADMIN', true)", String.class);
+    }
+
+    /**
+     * AGF SUB-R2-02: refuses (IllegalStateException) unless this transaction took a configuration lock and this restaurant's
+     * lock through this class. Called by the single subscription writer before every write. The H2 demo takes no locks, so
+     * there is nothing to check there.
+     */
+    public void assertHeld(String businessId) {
+        if (!enabled()) return;
+        Set<String> held = heldInThisTransaction();
+        if (!held.contains(CONFIG_HELD)) throw new IllegalStateException("The monetization configuration lock must be held");
+        if (!held.contains(businessId)) throw new IllegalStateException("The restaurant lock must be held");
+    }
+
+    @SuppressWarnings("unchecked")
+    private Set<String> heldInThisTransaction() {
+        Set<String> held = (Set<String>) TransactionSynchronizationManager.getResource(heldKey);
+        return held == null ? Set.of() : held;
+    }
+
+    /** Remembers a lock for this transaction only; the record is dropped when it completes and hidden while it is suspended. */
+    @SuppressWarnings("unchecked")
+    private void markHeld(String lock) {
+        Set<String> held = (Set<String>) TransactionSynchronizationManager.getResource(heldKey);
+        if (held == null) {
+            if (!TransactionSynchronizationManager.isSynchronizationActive()) return; // not recorded: assertHeld then refuses
+            Set<String> created = new HashSet<>();
+            TransactionSynchronizationManager.bindResource(heldKey, created);
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void suspend() {
+                    TransactionSynchronizationManager.unbindResourceIfPossible(heldKey);
+                }
+
+                @Override
+                public void resume() {
+                    TransactionSynchronizationManager.bindResource(heldKey, created);
+                }
+
+                @Override
+                public void afterCompletion(int status) {
+                    TransactionSynchronizationManager.unbindResourceIfPossible(heldKey);
+                }
+            });
+            held = created;
+        }
+        held.add(lock);
     }
 
     private boolean enabled() {

@@ -34,6 +34,7 @@ import com.agafari.com.jpa.repository.UserRepository;
 import com.agafari.com.security.AdminAuditService;
 import com.agafari.com.security.EmailVerificationService;
 import com.agafari.com.security.LogMasking;
+import com.agafari.com.billing.Market;
 import com.agafari.com.subscription.SubscriptionLifecycle;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -90,6 +91,7 @@ public class PlanRequestService {
     private volatile boolean ownerPlansVisible;
     private volatile boolean selfServiceEnabled;
     private final SubscriptionLifecycle lifecycle;
+    private final PlanPriceService planPrices;
 
     public PlanRequestService(PlanRequestRepository requests, BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs,
                               SubscriptionPlanRepository plans, BusinessRepository businesses, UserRepository users,
@@ -97,7 +99,8 @@ public class PlanRequestService {
                               TrialExpirer trialExpirer, MonetizationClock monetizationClock, PlatformTransactionManager transactionManager,
                               @Value("${app.monetization.owner-plans-visible:false}") boolean ownerPlansVisible,
                               GrandfatheringService grandfathering, EmailVerificationService emailVerification,
-                              @Value("${app.monetization.self-service-enabled:false}") boolean selfServiceEnabled, SubscriptionLifecycle lifecycle) {
+                              @Value("${app.monetization.self-service-enabled:false}") boolean selfServiceEnabled, SubscriptionLifecycle lifecycle, PlanPriceService planPrices) {
+        this.planPrices = planPrices;
         this.lifecycle = lifecycle;
         this.grandfathering = grandfathering;
         this.emailVerification = emailVerification;
@@ -172,7 +175,16 @@ public class PlanRequestService {
         OwnerPlanView.SelfService selfService = !selfServiceEnabled ? null : new OwnerPlanView.SelfService(
                 setting2 && currentRow == null && eligible.stream().anyMatch(p -> !p.paid()), verificationRequired(businessId));
         return new OwnerPlanView(true, config.getSetting().name(), config.getVersion(), eligible, current, pending,
-                setting2 && currentRow == null && pending == null, trial != null, true, trial, endedPlan, selfService);
+                setting2 && currentRow == null && pending == null, trial != null, true, trial, endedPlan, selfService, priceView(businessId, config, now));
+    }
+
+    /** AGF SUB-R3-02: null (absent from the response) unless prices are visible in the market of this restaurant's stored country. */
+    private List<OwnerPlanView.Price> priceView(String businessId, MonetizationConfig config, Instant now) {
+        if (!planPrices.isVisibleAnywhere()) return null;
+        Market market = businesses.findById(businessId).flatMap(b -> Market.fromCountry(b.getCountry())).filter(planPrices::isVisible).orElse(null);
+        if (market == null) return null;
+        return planPrices.currentPrices(market, config.models().stream().map(Enum::name).toList(), now).stream()
+                .map(p -> new OwnerPlanView.Price(p.getId(), p.getPlanCode(), p.getInterval(), p.getCurrency(), p.getAmountMinor())).toList();
     }
 
     public static final String OWNER_LABEL = "Started by you";

@@ -13,10 +13,10 @@ import java.util.List;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record OwnerPlanView(boolean visible, String setting, Integer configVersion, List<Plan> plans, Subscription current,
                             PlanRequestSummary pendingRequest, Boolean canRequest, Boolean trialAvailable, Boolean featuresUnaffected,
-                            Trial trial, EndedPlan endedPlan, SelfService selfService) {
+                            Trial trial, EndedPlan endedPlan, SelfService selfService, List<Price> prices) {
 
     public static OwnerPlanView hidden() {
-        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null, null, null);
+        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -42,6 +42,10 @@ public record OwnerPlanView(boolean visible, String setting, Integer configVersi
     /** AGF E4-M5: the restaurant's trial in its effective state only (the owner never sees the persisted status). */
     /** AGF E4-M5: {@code timeZone} is the restaurant's, in which the end date is shown (Option A). */
     public record Trial(Instant startedAt, Instant endsAt, long daysLeft, String effectiveStatus, String timeZone) {
+    }
+
+    /** AGF SUB-R3-02: only with {@code prices-visible} on for the restaurant's market. {@code id} is what a later checkout names. */
+    public record Price(String id, String planCode, String interval, String currency, long amountMinor) {
     }
 
     public record Plan(String code, String model, String adSource, boolean paid) {

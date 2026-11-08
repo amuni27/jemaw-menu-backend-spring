@@ -4,6 +4,7 @@ import com.agafari.com.billing.Market;
 import com.agafari.com.billing.Money;
 import com.agafari.com.billing.PriceAvailability;
 import com.agafari.com.billing.PriceInterval;
+import com.agafari.com.config.BillingFlags;
 import com.agafari.com.dto.request.PlanPriceCreateRequest;
 import com.agafari.com.dto.response.PlanPriceResponse;
 import com.agafari.com.exception.FieldValidationException;
@@ -23,6 +24,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -44,9 +46,13 @@ public class PlanPriceService implements PriceAvailability {
     private final MonetizationClock clock;
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
+    private volatile boolean usVisible;
+    private volatile boolean etVisible;
 
     public PlanPriceService(PlanPriceRepository prices, SubscriptionPlanRepository plans, MonetizationConfigRepository configs, AdminAuditService audit,
-                            MonetizationClock clock, JdbcTemplate jdbc, PlatformTransactionManager transactions) {
+                            MonetizationClock clock, JdbcTemplate jdbc, PlatformTransactionManager transactions, BillingFlags flags) {
+        this.usVisible = flags.us().pricesVisible();
+        this.etVisible = flags.et().pricesVisible();
         this.prices = prices;
         this.plans = plans;
         this.configs = configs;
@@ -54,6 +60,28 @@ public class PlanPriceService implements PriceAvailability {
         this.clock = clock;
         this.jdbc = jdbc;
         this.transaction = new TransactionTemplate(transactions);
+    }
+
+    /** Tests only: the flags themselves come from configuration. */
+    public void setPricesVisible(Market market, boolean visible) {
+        if (market == Market.US) usVisible = visible;
+        else etVisible = visible;
+    }
+
+    public boolean isVisible(Market market) {
+        return market == Market.US ? usVisible : etVisible;
+    }
+
+    public boolean isVisibleAnywhere() {
+        return usVisible || etVisible;
+    }
+
+    /** AGF SUB-R3-02: the newest active version in effect, per plan and interval, for these plans in this market. */
+    public List<PlanPrice> currentPrices(Market market, List<String> planCodes, Instant now) {
+        if (planCodes.isEmpty()) return List.of();
+        Map<String, PlanPrice> newest = new LinkedHashMap<>();
+        prices.findInEffect(market.name(), planCodes, now).forEach(p -> newest.putIfAbsent(p.getPlanCode() + "|" + p.getInterval(), p));
+        return List.copyOf(newest.values());
     }
 
     public List<PlanPriceResponse> list() {

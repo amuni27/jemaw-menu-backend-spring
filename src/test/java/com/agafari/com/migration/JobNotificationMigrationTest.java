@@ -367,6 +367,58 @@ class JobNotificationMigrationTest extends AbstractIntegrationTest {
         assertThatThrownBy(() -> status(id, "READ")).hasMessageContaining("only an in-app notice");
     }
 
+    private Map<String, Object> notificationRow(String id) {
+        return jdbc.queryForMap("select channel, status from notification where id = ?", id);
+    }
+
+    @Test
+    void anEmailCantBeInsertedAsRead() {
+        String tenant = data.tenant("n-ins").businessId();
+        assertThatThrownBy(() -> jdbc.update("insert into notification (id, business_id, kind, key, channel, kind_class, status) values (?, ?, 'K', '1', 'EMAIL', 'ESSENTIAL', 'READ')", unique(), tenant))
+                .hasMessageContaining("ck_notification_email_not_read");
+        assertThat(jdbc.queryForObject("select count(*) from notification where business_id = ?", Integer.class, tenant)).isZero();
+    }
+
+    @Test
+    void aChannelCantChangeAfterInsertion() {
+        String tenant = data.tenant("n-chan").businessId();
+        String mail = notice(tenant, "K", "m", "EMAIL");
+        String app = notice(tenant, "K", "a", "IN_APP");
+        assertThatThrownBy(() -> jdbc.update("update notification set channel = 'IN_APP' where id = ?", mail)).hasMessageContaining("notification channel can't be changed");
+        assertThatThrownBy(() -> jdbc.update("update notification set channel = 'EMAIL' where id = ?", app)).hasMessageContaining("notification channel can't be changed");
+        assertThat(notificationRow(mail)).containsEntry("channel", "EMAIL");
+        assertThat(notificationRow(app)).containsEntry("channel", "IN_APP");
+    }
+
+    @Test
+    void aCombinedChannelAndStatusUpdateCantReachRead() {
+        String id = notice(data.tenant("n-combo").businessId(), "K", "1", "EMAIL");
+        status(id, "SENT");
+        assertThatThrownBy(() -> jdbc.update("update notification set channel = 'IN_APP', status = 'READ' where id = ?", id)).hasMessageContaining("notification channel can't be changed");
+        assertThat(notificationRow(id)).containsEntry("channel", "EMAIL").containsEntry("status", "SENT");
+    }
+
+    @Test
+    void anEmailFollowsTheApprovedDeliveryPaths() {
+        String tenant = data.tenant("n-mail-ok").businessId();
+        String sent = notice(tenant, "K", "s", "EMAIL");
+        status(sent, "SENT");
+        String retried = notice(tenant, "K", "r", "EMAIL");
+        status(retried, "FAILED");
+        status(retried, "PENDING");
+        status(retried, "SENT");
+        assertThat(notificationRow(sent)).containsEntry("status", "SENT");
+        assertThat(notificationRow(retried)).containsEntry("status", "SENT");
+    }
+
+    @Test
+    void anInAppNoticeCanBeRead() {
+        String id = notice(data.tenant("n-read").businessId(), "K", "1", "IN_APP");
+        status(id, "SENT");
+        status(id, "READ");
+        assertThat(notificationRow(id)).containsEntry("channel", "IN_APP").containsEntry("status", "READ");
+    }
+
     @Test
     void channelsKeepIndependentDeliveryState() {
         String tenant = data.tenant("n-ind").businessId();

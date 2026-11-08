@@ -48,11 +48,13 @@ create table notification (
     constraint ck_notification_channel check (channel in ('IN_APP', 'EMAIL')),
     constraint ck_notification_kind_class check (kind_class in ('PAYMENT_REQUEST', 'ESSENTIAL')),
     constraint ck_notification_status check (status in ('PENDING', 'SENT', 'FAILED', 'READ')),
+    constraint ck_notification_email_not_read check (not (channel = 'EMAIL' and status = 'READ')),
     constraint ck_notification_attempts check (attempts >= 0)
 );
 
 create function notification_status_guard() returns trigger language plpgsql as $$
 begin
+    if new.channel is distinct from old.channel then raise exception 'notification channel can''t be changed'; end if;
     if new.status is distinct from old.status then
         if new.status = 'READ' and new.channel <> 'IN_APP' then raise exception 'only an in-app notice can be read'; end if;
         if not ((old.status = 'PENDING' and new.status in ('SENT', 'FAILED'))

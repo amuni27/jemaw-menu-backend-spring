@@ -2,6 +2,7 @@ package com.agafari.com.service;
 
 import com.agafari.com.enums.MonetizationModel;
 import com.agafari.com.security.LogMasking;
+import com.agafari.com.config.BillingFlags;
 import com.agafari.com.dto.response.ScheduledChangeResponse;
 import com.agafari.com.exception.FieldValidationException;
 import com.agafari.com.exception.MonetizationNotConfiguredException;
@@ -22,7 +23,6 @@ import com.agafari.com.subscription.SubscriptionLifecycle;
 import com.agafari.com.subscription.SubscriptionSource;
 import com.agafari.com.subscription.TransitionReason;
 import com.agafari.com.subscription.TransitionRules;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -68,7 +68,7 @@ public class ScheduledChangeService {
     public ScheduledChangeService(JdbcTemplate jdbc, ScheduledChangeRepository changes, BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs,
                                   SubscriptionPlanRepository plans, SubscriptionLifecycle lifecycle, MonetizationLocks locks, AdminAuditService audit,
                                   EffectiveStateEvaluator evaluator, MonetizationClock clock, PlatformTransactionManager transactions,
-                                  @Value("${app.billing.billing-enabled:false}") boolean billingEnabled) {
+                                  BillingFlags flags) {
         this.jdbc = jdbc;
         this.changes = changes;
         this.subscriptions = subscriptions;
@@ -80,7 +80,7 @@ public class ScheduledChangeService {
         this.evaluator = evaluator;
         this.clock = clock;
         this.transaction = new TransactionTemplate(transactions);
-        this.billingEnabled = billingEnabled;
+        this.billingEnabled = flags.billingEnabledInAnyMarket();
     }
 
     public boolean isBillingEnabled() {

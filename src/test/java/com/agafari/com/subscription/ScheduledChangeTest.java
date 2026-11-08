@@ -44,6 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -523,6 +524,244 @@ class ScheduledChangeTest extends AbstractIntegrationTest {
     void aManualRowCantBeCancelledBecauseTheTransitionTableDoesNotAllowIt() {
         manual();
         assertThatThrownBy(this::cancel).isInstanceOf(ScheduledChangeRefusedException.class);
+    }
+
+    // ---- an admin period change invalidates the pending change (P2)
+
+    private int patchPeriod(Instant to, int rowVersion) throws Exception {
+        return mockMvc.perform(patch("/api/admin/businesses/{id}/subscription", owner.businessId()).header("Authorization", data.adminBearer(admin))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"periodEnd\":\"" + to + "\",\"rowVersion\":" + rowVersion + "}")).andReturn().getResponse().getStatus();
+    }
+
+    private Map<String, Object> audit(String action, String target) {
+        return jdbc.queryForMap("select actor_user_id, detail from admin_audit_event where action = ? and target_id = ?", action, target);
+    }
+
+    private Instant effectiveAt(String id) {
+        return jdbc.queryForObject("select effective_at from scheduled_change where id = ?", Timestamp.class, id).toInstant();
+    }
+
+    @Test
+    void anAdminExtensionInvalidatesThePendingChange() throws Exception {
+        String id = manual();
+        ScheduledChangeResponse r = downgrade();
+        assertThat(patchPeriod(days(30), 0)).isEqualTo(200);
+        assertThat(changeStatus(r.id())).isEqualTo("CANCELLED");
+        assertThat(effectiveAt(r.id())).as("never shifted").isEqualTo(end);
+        Map<String, Object> entry = audit("SCHEDULED_CHANGE_INVALIDATED", r.id());
+        assertThat(entry).containsEntry("actor_user_id", admin.getId());
+        assertThat((String) entry.get("detail")).contains("period_end_changed").contains(end.toString());
+        assertThat(sub(id)).containsEntry("status", "ACTIVE").containsEntry("row_version", 1);
+        assertThat(jdbc.queryForObject("select count(*) from admin_audit_event where action = 'SUBSCRIPTION_UPDATED' and target_id = ?", Integer.class, id)).isEqualTo(1);
+    }
+
+    @Test
+    void anAdminShorteningInvalidatesThePendingChange() throws Exception {
+        manual();
+        ScheduledChangeResponse r = downgrade();
+        assertThat(patchPeriod(days(2), 0)).isEqualTo(200);
+        assertThat(changeStatus(r.id())).isEqualTo("CANCELLED");
+    }
+
+    @Test
+    void anInvalidatedChangeIsNeverExecutedOrReadAsApplied() throws Exception {
+        String id = manual();
+        ScheduledChangeResponse r = downgrade();
+        patchPeriod(days(30), 0);
+        afterEnd();
+        entitlements.setEnabled(true);
+        assertThat(entitlements.forBusiness(owner.businessId()).planCode()).isEqualTo("MODEL_4");
+        assertThat(service.apply(r.id())).isFalse();
+        assertThat(job.enqueueDue()).isZero();
+        assertThat(sub(id)).containsEntry("status", "ACTIVE");
+        assertThat(subscriptions()).isEqualTo(1);
+    }
+
+    @Test
+    void aPeriodChangeAlsoInvalidatesAChangeAlreadyDue() throws Exception {
+        String id = manual();
+        ScheduledChangeResponse r = downgrade();
+        clock.setOffset(Duration.ofDays(6));
+        assertThat(patchPeriod(days(30), 0)).isEqualTo(200);
+        assertThat(changeStatus(r.id())).isEqualTo("CANCELLED");
+        assertThat(service.apply(r.id())).isFalse();
+        assertThat(sub(id)).containsEntry("status", "ACTIVE");
+    }
+
+    @Test
+    void theOwnerCanSubmitAFreshRequestForTheNewDate() throws Exception {
+        manual();
+        downgrade();
+        Instant moved = days(30);
+        patchPeriod(moved, 0);
+        ScheduledChangeResponse fresh = downgrade();
+        assertThat(fresh.status()).isEqualTo("PENDING");
+        assertThat(fresh.effectiveAt()).isEqualTo(moved);
+        assertThat(open()).isEqualTo(1);
+    }
+
+    @Test
+    void anUnchangedPeriodEndLeavesThePendingChangeAlone() throws Exception {
+        manual();
+        ScheduledChangeResponse r = downgrade();
+        assertThat(patchPeriod(end, 0)).isEqualTo(200);
+        assertThat(changeStatus(r.id())).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("select count(*) from admin_audit_event where action = 'SCHEDULED_CHANGE_INVALIDATED'", Integer.class)).isZero();
+    }
+
+    @Test
+    void anotherRestaurantsChangeIsLeftAlone() throws Exception {
+        manual();
+        downgrade();
+        Tenant other = owner;
+        owner = data.tenant("sc-other");
+        ownerId = owner.owner().getId();
+        manual();
+        ScheduledChangeResponse theirs = downgrade();
+        owner = other;
+        assertThat(patchPeriod(days(30), 0)).isEqualTo(200);
+        assertThat(changeStatus(theirs.id())).isEqualTo("PENDING");
+    }
+
+    @Test
+    void thePeriodChangeAndTheInvalidationCommitTogether() throws Exception {
+        String id = manual();
+        ScheduledChangeResponse r = downgrade();
+        jdbc.execute("create function refuse_sc_update() returns trigger language plpgsql as $$ begin raise exception 'forced failure'; end $$");
+        jdbc.execute("create trigger refuse_sc_update before update on scheduled_change for each row execute function refuse_sc_update()");
+        try {
+            int status = -1;
+            try {
+                status = patchPeriod(days(30), 0);
+            } catch (Exception expected) {
+                // an unhandled database error
+            }
+            assertThat(status).isNotEqualTo(200);
+        } finally {
+            jdbc.execute("drop trigger refuse_sc_update on scheduled_change");
+            jdbc.execute("drop function refuse_sc_update()");
+        }
+        assertThat(changeStatus(r.id())).isEqualTo("PENDING");
+        assertThat(((Timestamp) jdbc.queryForObject("select period_end from business_subscription where id = ?", Timestamp.class, id)).toInstant()).isEqualTo(end);
+        assertThat(sub(id)).containsEntry("row_version", 0);
+    }
+
+    private <T> List<Future<T>> race(java.util.concurrent.Callable<T> a, java.util.concurrent.Callable<T> b) {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CyclicBarrier barrier = new CyclicBarrier(2);
+        List<Future<T>> f = new ArrayList<>();
+        f.add(pool.submit(() -> { barrier.await(10, TimeUnit.SECONDS); return a.call(); }));
+        f.add(pool.submit(() -> { barrier.await(10, TimeUnit.SECONDS); return b.call(); }));
+        pool.shutdown();
+        return f;
+    }
+
+    @Test
+    void anAdminEditRacingTheJobHasOneConsistentOutcome() throws Exception {
+        for (int round = 0; round < 10; round++) {
+            clock.reset();
+            owner = data.tenant("sc-race-" + round);
+            ownerId = owner.owner().getId();
+            end = days(5);
+            String id = manual();
+            jdbc.update("update business_subscription set row_version = 3 where id = ?", id);
+            ScheduledChangeResponse r = downgrade();
+            afterEnd();
+            Instant moved = days(30);
+            List<Future<Object>> f = race(() -> patchPeriod(moved, 3), () -> service.apply(r.id()));
+            int status = (Integer) f.get(0).get(30, TimeUnit.SECONDS);
+            boolean applied = (Boolean) f.get(1).get(30, TimeUnit.SECONDS);
+            if (status == 200) {
+                assertThat(applied).as("round " + round).isFalse();
+                assertThat(changeStatus(r.id())).as("round " + round).isEqualTo("CANCELLED");
+                assertThat(subscriptions()).as("round " + round).isEqualTo(1);
+            } else {
+                assertThat(status).as("round " + round).isIn(404, 409);
+                assertThat(applied).as("round " + round).isTrue();
+                assertThat(changeStatus(r.id())).as("round " + round).isEqualTo("APPLIED");
+                assertThat(sub(id)).as("round " + round).containsEntry("status", "EXPIRED");
+            }
+        }
+    }
+
+    @Test
+    void anOwnerRequestRacingAnAdminEditNeverLeavesAStaleDate() throws Exception {
+        for (int round = 0; round < 10; round++) {
+            owner = data.tenant("sc-owner-race-" + round);
+            ownerId = owner.owner().getId();
+            end = days(5);
+            manual();
+            Instant moved = days(30);
+            List<Future<Object>> f = race(() -> patchPeriod(moved, 0), this::downgrade);
+            assertThat((Integer) f.get(0).get(30, TimeUnit.SECONDS)).isEqualTo(200);
+            f.get(1).get(30, TimeUnit.SECONDS);
+            List<Timestamp> pending = jdbc.queryForList("select effective_at from scheduled_change where business_id = ? and status = 'PENDING'", Timestamp.class, owner.businessId());
+            assertThat(pending).as("a pending change is never left on the old date, round " + round).allMatch(t -> t.toInstant().equals(moved));
+        }
+    }
+
+    // ---- Free with Ads disabled at execution (P3)
+
+    private void disableFree() {
+        jdbc.update("insert into monetization_config (version, setting, model_2_enabled, model_3_enabled, model_4_enabled, effective_from, created_at, created_by_user_id) values (2, 'SETTING_2', false, false, true, now(), now(), ?)", admin.getId());
+    }
+
+    @Test
+    void aDowngradeToADisabledPlanIsNotActivated() {
+        String id = manual();
+        ScheduledChangeResponse r = downgrade();
+        disableFree();
+        afterEnd();
+        assertThat(service.apply(r.id())).isFalse();
+        assertThat(changeStatus(r.id())).isEqualTo("FAILED");
+        assertThat((String) audit("SCHEDULED_CHANGE_FAILED", r.id()).get("detail")).contains("target_plan_disabled");
+        assertThat(sub(id)).containsEntry("status", "ACTIVE").containsEntry("row_version", 0);
+        assertThat(subscriptions()).isEqualTo(1);
+    }
+
+    @Test
+    void aDisabledTargetIsNotReadAsApplied() {
+        manual();
+        downgrade();
+        disableFree();
+        afterEnd();
+        entitlements.setEnabled(true);
+        assertThat(entitlements.forBusiness(owner.businessId()).planCode()).isEqualTo("MODEL_4");
+    }
+
+    @Test
+    void aDisabledTargetDoesNotHoldBackPeriodEndPersistence() {
+        String id = manual();
+        downgrade();
+        disableFree();
+        evaluator.setPeriodEndEnabled(true);
+        afterEnd();
+        new org.springframework.transaction.support.TransactionTemplate(transactions).executeWithoutResult(s -> {
+            locks.configShared();
+            locks.restaurant(owner.businessId());
+            lifecycle.materialize(owner.businessId());
+        });
+        assertThat(sub(id)).containsEntry("status", "EXPIRED").containsEntry("ended_reason", "PERIOD_END");
+    }
+
+    @Test
+    void aCancelDoesNotDependOnTheConfiguration() {
+        String id = provider();
+        ScheduledChangeResponse r = cancel();
+        disableFree();
+        afterEnd();
+        assertThat(service.apply(r.id())).isTrue();
+        assertThat(sub(id)).containsEntry("ended_reason", "CANCELLED");
+    }
+
+    @Test
+    void aRowOfTheCurrentConfigurationStillDowngrades() {
+        manual();
+        ScheduledChangeResponse r = downgrade();
+        jdbc.update("insert into monetization_config (version, setting, model_2_enabled, model_3_enabled, model_4_enabled, effective_from, created_at, created_by_user_id) values (2, 'SETTING_2', true, false, true, now(), now(), ?)", admin.getId());
+        afterEnd();
+        assertThat(service.apply(r.id())).isTrue();
+        assertThat(jdbc.queryForObject("select config_version from business_subscription where business_id = ? and status <> 'EXPIRED'", Integer.class, owner.businessId())).isEqualTo(2);
     }
 
     // ---- API and flag

@@ -46,7 +46,9 @@ class ScheduledChangeBoundaryTest {
     @BeforeEach
     void setUp() {
         MonetizationConfigRepository configs = mock(MonetizationConfigRepository.class);
-        when(configs.findTopByOrderByVersionDesc()).thenReturn(Optional.of(mock(MonetizationConfig.class)));
+        MonetizationConfig config = mock(MonetizationConfig.class);
+        when(config.models()).thenReturn(java.util.List.of(com.agafari.com.enums.MonetizationModel.MODEL_2));
+        when(configs.findTopByOrderByVersionDesc()).thenReturn(Optional.of(config));
         SubscriptionPlanRepository plans = mock(SubscriptionPlanRepository.class);
         SubscriptionPlan paid = plan("MODEL_4", "NONE");
         SubscriptionPlan free = plan("MODEL_2", "AGAFARI");

@@ -9,6 +9,7 @@ import com.agafari.com.jpa.repository.MonetizationConfigRepository;
 import com.agafari.com.jpa.repository.SubscriptionPlanRepository;
 import com.agafari.com.subscription.EffectiveStateEvaluator;
 import com.agafari.com.subscription.EffectiveView;
+import com.agafari.com.subscription.ScheduledChangeRules;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -81,7 +82,7 @@ public class EntitlementService {
             EffectiveView view = evaluator.view(subscription, grandfathering.effectivelyEnded(subscription, config), clock.now());
             // AGF SUB-R2-11: from effective_at, a cancellation or Free downgrade counts as applied, also before the job persists it
             ScheduledChange due = subscriptions.findDueScheduledChange(subscription.getId(), clock.now()).orElse(null);
-            if (due != null) return applied(due);
+            if (due != null && ScheduledChangeRules.stillApplies(due, config)) return applied(due);
             if (!view.entitledToPlan()) return Entitlements.unrestricted();
             SubscriptionPlan plan = plans.findById(subscription.getPlanCode()).orElseThrow();
             Entitlements.AdSource adSource = Entitlements.AdSource.valueOf(plan.getAdSource());

@@ -17,6 +17,7 @@ import com.agafari.com.jpa.repository.SubscriptionPlanRepository;
 import com.agafari.com.security.AdminAuditService;
 import com.agafari.com.subscription.EffectiveStateEvaluator;
 import com.agafari.com.subscription.LifecycleStatus;
+import com.agafari.com.subscription.ScheduledChangeRules;
 import com.agafari.com.subscription.SubscriptionLifecycle;
 import com.agafari.com.subscription.SubscriptionSource;
 import com.agafari.com.subscription.TransitionReason;
@@ -44,6 +45,7 @@ public class ScheduledChangeService {
     static final String SUPERSEDED = "SCHEDULED_CHANGE_SUPERSEDED";
     static final String CANCELLED = "SCHEDULED_CHANGE_CANCELLED";
     static final String APPLIED = "SCHEDULED_CHANGE_APPLIED";
+    static final String INVALIDATED = "SCHEDULED_CHANGE_INVALIDATED";
     static final String FAILED = "SCHEDULED_CHANGE_FAILED";
     static final String REJECTED = "SCHEDULED_CHANGE_REJECTED";
     private static final String TARGET = "SCHEDULED_CHANGE";
@@ -186,23 +188,40 @@ public class ScheduledChangeService {
             TransitionReason reason = CANCEL.equals(kind) ? TransitionReason.CANCELLED : TransitionReason.CHANGED;
             if (current == null || !current.getId().equals(change.get("from_subscription_id"))
                     || !TransitionRules.isAllowed(LifecycleStatus.of(current.getStatus()), LifecycleStatus.EXPIRED, reason, SubscriptionSource.of(current.getSource()))) {
-                finish(changeId, "FAILED", FAILED, kind);
+                finish(changeId, "FAILED", FAILED, kind + " reason=row_changed");
+                return false;
+            }
+            MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElse(null);
+            String targetPlan = (String) change.get("target_plan_code");
+            if (!ScheduledChangeRules.targetEnabled(targetPlan, config)) {
+                finish(changeId, "FAILED", FAILED, kind + " reason=target_plan_disabled target=" + targetPlan);
                 return false;
             }
             if (CANCEL.equals(kind)) {
                 lifecycle.applyScheduledCancel(current, effectiveAt, now);
             } else {
                 String requester = jdbc.queryForObject("select actor_user_id from admin_audit_event where action = ? and target_id = ?", String.class, REQUESTED, changeId);
-                int configVersion = configs.findTopByOrderByVersionDesc().orElseThrow(MonetizationNotConfiguredException::new).getVersion();
-                lifecycle.applyScheduledDowngrade(current, (String) change.get("target_plan_code"), configVersion, effectiveAt, now, requester);
+                if (config == null) throw new MonetizationNotConfiguredException();
+                lifecycle.applyScheduledDowngrade(current, targetPlan, config.getVersion(), effectiveAt, now, requester);
             }
             finish(changeId, "APPLIED", APPLIED, kind);
             return true;
         }));
     }
 
-    private void finish(String changeId, String status, String action, String kind) {
+    private void finish(String changeId, String status, String action, String detail) {
         jdbc.update("update scheduled_change set status = ? where id = ? and status = 'PENDING'", status, changeId);
-        audit.success(action, null, AdminAuditService.SYSTEM, TARGET, changeId, kind);
+        audit.success(action, null, AdminAuditService.SYSTEM, TARGET, changeId, detail);
+    }
+
+    /**
+     * An admin change of {@code period_end} ends the row's pending change, in the caller's transaction and under its locks.
+     * The change is not moved: the owner consented to the old date and can submit a fresh request.
+     */
+    public void invalidateForPeriodChange(String businessId, String subscriptionId, Instant before, Instant after, String adminId, String actor) {
+        locks.assertHeld(businessId);
+        for (Map<String, Object> change : jdbc.queryForList("update scheduled_change set status = 'CANCELLED' where from_subscription_id = ? and status = 'PENDING' returning id, kind", subscriptionId)) {
+            audit.success(INVALIDATED, adminId, actor, TARGET, (String) change.get("id"), change.get("kind") + " reason=period_end_changed periodEnd " + before + " -> " + after);
+        }
     }
 }

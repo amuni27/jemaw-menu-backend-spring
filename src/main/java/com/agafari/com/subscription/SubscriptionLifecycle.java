@@ -6,6 +6,7 @@ import com.agafari.com.jpa.repository.BusinessSubscriptionRepository;
 import com.agafari.com.security.AdminAuditService;
 import com.agafari.com.service.MonetizationClock;
 import com.agafari.com.service.MonetizationLocks;
+import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -158,7 +159,8 @@ public class SubscriptionLifecycle {
         BusinessSubscription s = subscriptions.findCurrentByBusinessId(businessId).orElse(null);
         if (s == null || s.isTrial()) return;
         Instant now = clock.now();
-        if (subscriptions.findDueScheduledChange(s.getId(), now).isPresent()) return; // AGF SUB-R2-11: the owner's change decides how this row ends
+        // AGF SUB-R2-11: a change that can still take effect decides how this row ends
+        if (subscriptions.findDueScheduledChange(s.getId(), now).filter(c -> ScheduledChangeRules.stillApplies(c, subscriptions.findLatestConfig(Limit.of(1)).stream().findFirst().orElse(null))).isPresent()) return;
         EffectiveView view = evaluator.view(s, false, now);
         LifecycleStatus stored = LifecycleStatus.of(s.getStatus());
         SubscriptionSource source = SubscriptionSource.of(s.getSource());

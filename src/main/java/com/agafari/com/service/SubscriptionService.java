@@ -97,6 +97,7 @@ public class SubscriptionService {
     private final TrialIntentRepository trialIntents;
     private final GrandfatheringService grandfathering;
     private final SubscriptionLifecycle lifecycle;
+    private final ScheduledChangeService scheduledChanges;
     private final Clock clock = Clock.systemUTC();
 
     public SubscriptionService(BusinessSubscriptionRepository subscriptions, SubscriptionPlanRepository plans,
@@ -104,7 +105,8 @@ public class SubscriptionService {
                                EntitlementService entitlements, AdminAuditService audit, PlatformTransactionManager transactionManager,
                                PlanRequestRepository planRequests, MonetizationLocks locks, TrialExpirer trialExpirer,
                                MonetizationClock monetizationClock, TrialIntentRepository trialIntents, GrandfatheringService grandfathering,
-                               SubscriptionLifecycle lifecycle) {
+                               SubscriptionLifecycle lifecycle, ScheduledChangeService scheduledChanges) {
+        this.scheduledChanges = scheduledChanges;
         this.lifecycle = lifecycle;
         this.grandfathering = grandfathering;
         this.trialIntents = trialIntents;
@@ -279,6 +281,9 @@ public class SubscriptionService {
                 if (request.periodEndDate() != null) newPeriodEnd = trialEndOf(businessId, current, LocalDate.parse(request.periodEndDate()), now);
                 BusinessSubscription saved = lifecycle.applyAdminChange(current, // AGF SUB-R2-03
                         new AdminPeriodChange(newPeriodEnd, clearTransitionDate, BusinessSubscription.EXPIRED.equals(request.status()), now), new Actor(adminId));
+                if (newPeriodEnd != null && !newPeriodEnd.equals(periodEndBefore)) { // AGF SUB-R2-11: in this transaction, under these locks
+                    scheduledChanges.invalidateForPeriodChange(businessId, saved.getId(), periodEndBefore, newPeriodEnd, adminId, actor);
+                }
                 String action = !saved.isTrial() ? UPDATED : BusinessSubscription.EXPIRED.equals(saved.getStatus()) ? TRIAL_ENDED : TRIAL_EXTENDED;
                 audit.success(action, adminId, actor, TARGET, saved.getId(), saved.getPlanCode() + " " + statusBefore + " -> "
                         + saved.getStatus() + " periodEnd " + periodEndBefore + " -> " + saved.getPeriodEnd() + " source=" + saved.getSource() + transitionNote);

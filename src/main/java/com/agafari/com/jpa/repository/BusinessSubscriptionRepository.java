@@ -1,6 +1,7 @@
 package com.agafari.com.jpa.repository;
 
 import com.agafari.com.jpa.entity.BusinessSubscription;
+import com.agafari.com.jpa.entity.MonetizationConfig;
 import com.agafari.com.jpa.entity.ScheduledChange;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.domain.Limit;
@@ -30,6 +31,9 @@ public interface BusinessSubscriptionRepository extends Repository<BusinessSubsc
     /** AGF SUB-R2-11: the pending change of this row whose time has come (at most one per restaurant). */
     @Query("select c from ScheduledChange c where c.fromSubscriptionId = :subscriptionId and c.status = 'PENDING' and c.effectiveAt <= :now")
     Optional<ScheduledChange> findDueScheduledChange(String subscriptionId, Instant now);
+
+    @Query("select c from MonetizationConfig c order by c.version desc")
+    List<MonetizationConfig> findLatestConfig(Limit limit);
 
     /** AGF SUB-R2-10: current non-trial rows with a period end, in id order; whether one is due is decided by EffectiveState. */
     @Query("select s from BusinessSubscription s where s.status <> 'EXPIRED' and s.source <> 'TRIAL' and s.periodEnd is not null and s.id > :after order by s.id")

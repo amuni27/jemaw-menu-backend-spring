@@ -148,6 +148,12 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(HttpStatus.CONFLICT, code, e.getMessage()));
     }
 
+    // AGF SUB-R2-03 (R-4)
+    @ExceptionHandler(ProviderPeriodManagedByBillingException.class)
+    public ResponseEntity<ApiError> providerPeriod(ProviderPeriodManagedByBillingException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(HttpStatus.CONFLICT, ProviderPeriodManagedByBillingException.CODE, e.getMessage()));
+    }
+
     // AGF E4-M7
     @ExceptionHandler({AdVersionConflictException.class, AdArchivedException.class})
     public ResponseEntity<ApiError> adConflict(RuntimeException e) {

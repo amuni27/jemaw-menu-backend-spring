@@ -1,6 +1,8 @@
 package com.agafari.com.service;
 
+import com.agafari.com.exception.ProviderPeriodManagedByBillingException;
 import com.agafari.com.subscription.Actor;
+import com.agafari.com.subscription.AdminPeriodChange;
 import com.agafari.com.subscription.ManualRecord;
 import com.agafari.com.subscription.SubscriptionLifecycle;
 import com.agafari.com.dto.request.SubscriptionCreateRequest;
@@ -238,9 +240,12 @@ public class SubscriptionService {
                 BusinessSubscription current = subscriptions.findCurrentByBusinessId(businessId)
                         .orElseThrow(() -> new NotFoundException("No current subscription"));
                 if (!current.getRowVersion().equals(request.rowVersion())) throw new SubscriptionVersionConflictException();
+                if (request.periodEnd() != null || request.periodEndDate() != null) lifecycle.requireAdminPeriodEditable(current); // AGF SUB-R2-03 (R-4)
                 String statusBefore = current.getStatus();
                 Instant periodEndBefore = current.getPeriodEnd();
                 String transitionNote = "";
+                Instant newPeriodEnd = request.periodEnd();
+                boolean clearTransitionDate = false;
                 if (request.periodEnd() != null) {
                     MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElse(null);
                     // E4-M6 Q11: while grandfathered, an existing end date can be extended but never shortened
@@ -250,13 +255,12 @@ public class SubscriptionService {
                     // E4-M6 Q12 (D-M6-2): a period end on an open-ended subscription becomes authoritative and clears any transition date
                     if (periodEndBefore == null && current.getTransitionDate() != null) {
                         transitionNote = " transitionDate " + current.getTransitionDate() + " -> cleared";
-                        current.changeTransitionDate(null, now, adminId);
+                        clearTransitionDate = true;
                     }
-                    current.changePeriodEnd(request.periodEnd(), now, adminId);
                 }
-                if (request.periodEndDate() != null) current.changePeriodEnd(trialEndOf(businessId, current, LocalDate.parse(request.periodEndDate()), now), now, adminId);
-                if (BusinessSubscription.EXPIRED.equals(request.status())) current.end(now, adminId);
-                BusinessSubscription saved = subscriptions.saveAndFlush(current);
+                if (request.periodEndDate() != null) newPeriodEnd = trialEndOf(businessId, current, LocalDate.parse(request.periodEndDate()), now);
+                BusinessSubscription saved = lifecycle.applyAdminChange(current, // AGF SUB-R2-03
+                        new AdminPeriodChange(newPeriodEnd, clearTransitionDate, BusinessSubscription.EXPIRED.equals(request.status()), now), new Actor(adminId));
                 String action = !saved.isTrial() ? UPDATED : BusinessSubscription.EXPIRED.equals(saved.getStatus()) ? TRIAL_ENDED : TRIAL_EXTENDED;
                 audit.success(action, adminId, actor, TARGET, saved.getId(), saved.getPlanCode() + " " + statusBefore + " -> "
                         + saved.getStatus() + " periodEnd " + periodEndBefore + " -> " + saved.getPeriodEnd() + " source=" + saved.getSource() + transitionNote);
@@ -357,16 +361,16 @@ public class SubscriptionService {
                     throw new FieldValidationException(Map.of("transitionDate", "Only a grandfathered subscription can get a transition date"));
                 }
                 Instant before = current.getTransitionDate();
+                Instant newTransitionDate = null;
                 if (set) {
                     ZoneId zone = ZoneId.of(businesses.findById(businessId).orElseThrow(() -> new NotFoundException("Restaurant not found")).getTimeZone());
                     Instant end = chosen.plusDays(1).atStartOfDay(zone).toInstant();
                     if (!end.isAfter(now)) throw new FieldValidationException(Map.of("transitionDate", "Choose a date in the future"));
-                    current.changeTransitionDate(end, now, adminId);
-                } else {
-                    if (before == null) throw new FieldValidationException(Map.of("transitionDate", "There is no transition date to clear"));
-                    current.changeTransitionDate(null, now, adminId);
+                    newTransitionDate = end;
+                } else if (before == null) {
+                    throw new FieldValidationException(Map.of("transitionDate", "There is no transition date to clear"));
                 }
-                BusinessSubscription saved = subscriptions.saveAndFlush(current);
+                BusinessSubscription saved = lifecycle.changeTransitionDate(current, newTransitionDate, now, new Actor(adminId)); // AGF SUB-R2-03
                 audit.success(set ? GrandfatheringService.TRANSITION_SET : GrandfatheringService.TRANSITION_CLEARED, adminId, actor, TARGET, saved.getId(),
                         GrandfatheringService.record(config.getVersion(), set ? saved.getTransitionDate() : before));
                 return response(saved, config);
@@ -404,6 +408,7 @@ public class SubscriptionService {
         if (e instanceof SubscriptionExistsException) return "exists";
         if (e instanceof PlanRequestPendingException) return "request_pending";
         if (e instanceof TrialEndedException) return "trial_ended";
+        if (e instanceof ProviderPeriodManagedByBillingException) return "provider_period"; // AGF SUB-R2-03
         return null;
     }
 

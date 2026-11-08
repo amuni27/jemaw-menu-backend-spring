@@ -1,5 +1,6 @@
 package com.agafari.com.subscription;
 
+import com.agafari.com.exception.ProviderPeriodManagedByBillingException;
 import com.agafari.com.jpa.entity.BusinessSubscription;
 import com.agafari.com.jpa.repository.BusinessSubscriptionRepository;
 import com.agafari.com.service.MonetizationLocks;
@@ -37,6 +38,37 @@ public class SubscriptionLifecycle {
         TransitionRules.require(null, LifecycleStatus.ACTIVE, TransitionReason.ADMIN_RECORD, SubscriptionSource.MANUAL);
         return subscriptions.saveAndFlush(BusinessSubscription.manual(businessId, record.planCode(), record.configVersion(), record.periodEnd(),
                 record.now(), admin.userId()));
+    }
+
+    /** R-4: a PROVIDER billing period moves only with verified financial evidence, never by a Super Admin edit. */
+    public void requireAdminPeriodEditable(BusinessSubscription current) {
+        if (SubscriptionSource.of(current.getSource()) == SubscriptionSource.PROVIDER) throw new ProviderPeriodManagedByBillingException();
+    }
+
+    /**
+     * AGF SUB-R2-03: one Super Admin change to the current row, saved once (the row version moves by one even when a
+     * single request changes the period and ends the subscription). The caller holds the locks and has validated the request.
+     */
+    public BusinessSubscription applyAdminChange(BusinessSubscription current, AdminPeriodChange change, Actor admin) {
+        locks.assertHeld(current.getBusinessId());
+        LifecycleStatus status = LifecycleStatus.of(current.getStatus());
+        SubscriptionSource source = SubscriptionSource.of(current.getSource());
+        if (change.periodEnd() != null) {
+            requireAdminPeriodEditable(current);
+            TransitionRules.require(status, status, TransitionReason.ADMIN_PERIOD_CHANGE, source);
+        }
+        if (change.end()) TransitionRules.require(status, LifecycleStatus.EXPIRED, TransitionReason.ADMIN, source);
+        if (change.clearTransitionDate()) current.changeTransitionDate(null, change.now(), admin.userId());
+        if (change.periodEnd() != null) current.changePeriodEnd(change.periodEnd(), change.now(), admin.userId());
+        if (change.end()) current.end(change.now(), admin.userId());
+        return subscriptions.saveAndFlush(current);
+    }
+
+    /** AGF SUB-R2-03: sets ({@code transitionDate} not null) or clears the transition date of a current row. */
+    public BusinessSubscription changeTransitionDate(BusinessSubscription current, Instant transitionDate, Instant now, Actor admin) {
+        locks.assertHeld(current.getBusinessId());
+        current.changeTransitionDate(transitionDate, now, admin.userId());
+        return subscriptions.saveAndFlush(current);
     }
 
     /** Persists the effective expiry of the current row before a new one is created. A no-op until SUB-R2-07. */

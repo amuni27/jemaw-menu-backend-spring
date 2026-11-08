@@ -48,7 +48,8 @@ public final class FlywayBaselineGuard {
             "trial_intent", // V16: AGF E4-M5 recovery
             "agafari_ad", "ad_impression_daily", // V17: AGF E4-M7
             "restaurant_ad", // V18: AGF E4-M8
-            "scheduled_change"); // V20: AGF SUB-R2-06
+            "scheduled_change", // V20: AGF SUB-R2-06
+            "job", "notification"); // V21: AGF SUB-R2-08
     public static final List<String> LATER_MIGRATION_FUNCTIONS =
             List.of("special_business_matches_dish", "category_special_business_matches_category",
                     "admin_audit_event_append_only", // V11: AGF E4-M1

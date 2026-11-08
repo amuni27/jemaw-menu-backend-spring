@@ -120,7 +120,7 @@ class LifecycleMigrationTest extends AbstractIntegrationTest {
         seedDev("s-stored-gf", "f", "GRANDFATHERED", "MANUAL", "MODEL_3", "null", "null");
         List<Map<String, Object>> before = devRows();
 
-        assertThat(flyway(DEV, null).migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(flyway(DEV, "20").migrate().migrationsExecuted).isEqualTo(1);
 
         assertThat(devRows()).isEqualTo(before);
         assertThat(jdbc.queryForList("select distinct price_id, current_period_start, grace_days, past_due_since, open_ended, provider, provider_subscription_ref, ended_reason, replaced_by_id from " + DEV + ".business_subscription"))
@@ -129,17 +129,17 @@ class LifecycleMigrationTest extends AbstractIntegrationTest {
                     assertThat(row.entrySet().stream().filter(e -> !e.getKey().equals("open_ended")).map(Map.Entry::getValue)).containsOnlyNulls();
                 });
         assertThat(history(DEV)).endsWith("19", "20");
-        flyway(DEV, null).validate();
+        flyway(DEV, "20").validate();
     }
 
     @Test
     void aFreshDatabaseReachesV20AndAgreesWithTheUpgradedSchema() throws Exception {
         legacyDatabaseAtV19();
-        flyway(DEV, null).migrate();
+        flyway(DEV, "20").migrate();
         jdbc.execute("create schema " + FRESH);
-        Flyway.configure().dataSource(dataSource).schemas(FRESH).locations("classpath:db/migration").load().migrate();
+        Flyway.configure().dataSource(dataSource).schemas(FRESH).locations("classpath:db/migration").target(MigrationVersion.fromVersion("20")).load().migrate();
         assertThat(history(FRESH)).hasSize(20).endsWith("20");
-        Flyway.configure().dataSource(dataSource).schemas(FRESH).locations("classpath:db/migration").load().validate();
+        Flyway.configure().dataSource(dataSource).schemas(FRESH).locations("classpath:db/migration").target(MigrationVersion.fromVersion("20")).load().validate();
         String columns = "select column_name, data_type, is_nullable, column_default from information_schema.columns where table_schema = ? and table_name = ? order by column_name";
         for (String table : List.of("business_subscription", "scheduled_change")) {
             assertThat(jdbc.queryForList(columns, FRESH, table)).as(table).isNotEmpty().isEqualTo(jdbc.queryForList(columns, DEV, table));
@@ -151,9 +151,9 @@ class LifecycleMigrationTest extends AbstractIntegrationTest {
         legacyDatabaseAtV19();
         seedConfigDev();
         seedDev("s-manual", "a", "ACTIVE", "MANUAL", "MODEL_4", "now() + interval '30 days'", "null");
-        flyway(DEV, null).migrate();
+        flyway(DEV, "20").migrate();
         List<Map<String, Object>> after = devRows();
-        assertThat(flyway(DEV, null).migrate().migrationsExecuted).isZero();
+        assertThat(flyway(DEV, "20").migrate().migrationsExecuted).isZero();
         assertThat(devRows()).isEqualTo(after);
         assertThat(history(DEV)).endsWith("19", "20").doesNotHaveDuplicates();
     }
@@ -164,7 +164,7 @@ class LifecycleMigrationTest extends AbstractIntegrationTest {
         seedConfigDev();
         seedDev("s-provider", "p", "ACTIVE", "PROVIDER", "MODEL_4", "now() + interval '30 days'", "null");
         List<Map<String, Object>> before = devRows();
-        assertThatThrownBy(() -> flyway(DEV, null).migrate()).hasMessageContaining("PROVIDER");
+        assertThatThrownBy(() -> flyway(DEV, "20").migrate()).hasMessageContaining("PROVIDER");
         assertThat(devRows()).isEqualTo(before);
         assertThat(jdbc.queryForObject("select count(*) from information_schema.columns where table_schema = ? and table_name = 'business_subscription' and column_name = 'ended_reason'", Integer.class, DEV)).isZero();
         assertThat(jdbc.queryForObject("select count(*) from information_schema.tables where table_schema = ? and table_name = 'scheduled_change'", Integer.class, DEV)).isZero();

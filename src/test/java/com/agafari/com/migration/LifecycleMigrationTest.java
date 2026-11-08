@@ -243,10 +243,18 @@ class LifecycleMigrationTest extends AbstractIntegrationTest {
         assertThatThrownBy(() -> jdbc.update("update business_subscription set past_due_since = now() where id = ?", active)).hasMessageContaining("ck_business_subscription_past_due");
     }
 
+    /** A fixture row, not a price: price_id references plan_price since V22. */
+    private String fixturePrice() {
+        String id = UUID.randomUUID().toString();
+        jdbc.update("insert into plan_price (id, plan_code, market, currency, billing_interval, amount_minor, version, valid_from) values (?, 'MODEL_4', 'US', 'USD', 'MONTH', 1000, (select count(*) + 1 from plan_price), now())", id);
+        return id;
+    }
+
     @Test
     void billingReferencesCantChangeOnceSet() {
         for (String column : List.of("price_id", "provider", "provider_subscription_ref")) {
-            String id = row("ACTIVE", "MANUAL", "MODEL_4", column, "'first-" + UUID.randomUUID().toString().substring(0, 8) + "'");
+            String value = column.equals("price_id") ? fixturePrice() : "first-" + UUID.randomUUID().toString().substring(0, 8); // V22: price_id is a foreign key
+            String id = row("ACTIVE", "MANUAL", "MODEL_4", column, "'" + value + "'");
             assertThatThrownBy(() -> jdbc.update("update business_subscription set " + column + " = 'second' where id = ?", id)).as(column).hasMessageContaining("can't be changed");
         }
         String graced = row("ACTIVE", "MANUAL", "MODEL_4", "grace_days", "7");
@@ -256,7 +264,7 @@ class LifecycleMigrationTest extends AbstractIntegrationTest {
     @Test
     void billingReferencesCanBeSetTheFirstTime() {
         String id = row("ACTIVE", "MANUAL", "MODEL_4", null, null);
-        jdbc.update("update business_subscription set price_id = 'p', provider = 'x', grace_days = 7 where id = ?", id);
+        jdbc.update("update business_subscription set price_id = ?, provider = 'x', grace_days = 7 where id = ?", fixturePrice(), id);
         assertThat(jdbc.queryForObject("select grace_days from business_subscription where id = ?", Integer.class, id)).isEqualTo(7);
     }
 

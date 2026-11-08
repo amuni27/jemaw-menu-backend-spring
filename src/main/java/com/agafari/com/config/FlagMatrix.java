@@ -24,7 +24,7 @@ public final class FlagMatrix {
     }
 
     private static void market(String name, MarketFlags m, BillingFlags flags, FlagFacts facts, List<String> found) {
-        if (m.pricesVisible() && !facts.pricesAvailable()) found.add("prices-visible (" + name + ") requires an active price for every enabled paid model");
+        if (m.pricesVisible() && !facts.pricesAvailableIn(name)) found.add("prices-visible (" + name + ") requires an active price for every enabled paid model");
         if (m.billingEnabled()) {
             String flag = "billing-enabled (" + name + ") requires ";
             if (!m.pricesVisible()) found.add(flag + "prices-visible");

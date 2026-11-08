@@ -135,6 +135,13 @@ class FlagMatrixTest {
     }
 
     @Test
+    void pricesAreCheckedPerMarket() {
+        FlagFacts onlyUs = new FlagFacts(true, true, false, false, false, false, false);
+        assertThat(check(new BillingFlags(false, false, false, prices(), OFF), onlyUs)).isEmpty();
+        assertThat(check(new BillingFlags(false, false, false, OFF, prices()), onlyUs)).singleElement().asString().contains("ET");
+    }
+
+    @Test
     void marketsAreCheckedIndependently() {
         BillingFlags et = new BillingFlags(false, false, false, OFF, prices());
         assertThat(check(et, TODAY)).singleElement().asString().contains("ET");

@@ -81,6 +81,14 @@ class FlagMatrixStartupTest {
     }
 
     @Test
+    void pricesVisibleFollowsRealAvailabilityPerMarket() throws Exception {
+        com.agafari.com.billing.PriceAvailability onlyUs = market -> market == com.agafari.com.billing.Market.US;
+        ApplicationContextRunner withPrices = postgres().withBean(com.agafari.com.billing.PriceAvailability.class, () -> onlyUs);
+        starts(withPrices, "app.billing.us.prices-visible=true");
+        refused(withPrices, "ET", "app.billing.et.prices-visible=true");
+    }
+
+    @Test
     void billingIsRefused() throws Exception {
         refused(postgres(), "PD-9", "app.billing.us.billing-enabled=true");
         refused(h2(), "PostgreSQL", "app.billing.et.billing-enabled=true");

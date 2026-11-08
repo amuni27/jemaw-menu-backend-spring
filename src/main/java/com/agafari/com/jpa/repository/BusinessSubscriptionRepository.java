@@ -2,6 +2,9 @@ package com.agafari.com.jpa.repository;
 
 import com.agafari.com.jpa.entity.BusinessSubscription;
 import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.domain.Limit;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 
@@ -22,6 +25,14 @@ public interface BusinessSubscriptionRepository extends Repository<BusinessSubsc
     List<BusinessSubscription> findCurrentByBusinessIds(Collection<String> businessIds);
 
     List<BusinessSubscription> findByBusinessIdOrderByCreatedAtDesc(String businessId);
+
+    /** AGF SUB-R2-10: current non-trial rows with a period end, in id order; whether one is due is decided by EffectiveState. */
+    @Query("select s from BusinessSubscription s where s.status <> 'EXPIRED' and s.source <> 'TRIAL' and s.periodEnd is not null and s.id > :after order by s.id")
+    List<BusinessSubscription> findPeriodEndCandidates(String after, Limit limit);
+
+    /** AGF SUB-R2-10: the pre-switch report: current MANUAL rows with a past or missing period end. */
+    @Query("select s from BusinessSubscription s where s.status <> 'EXPIRED' and s.source = 'MANUAL' and (s.periodEnd is null or s.periodEnd <= :now) order by s.createdAt, s.id")
+    Page<BusinessSubscription> findManualPeriodEndReport(Instant now, Pageable pageable);
 
     /** AGF E4-M5: trials whose period end has passed but which are still persisted as TRIAL. */
     @Query("select s from BusinessSubscription s where s.status = 'TRIAL' and s.periodEnd <= :now order by s.periodEnd")

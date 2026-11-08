@@ -17,6 +17,7 @@ import com.agafari.com.dto.response.SubscriptionPlanResponse;
 import com.agafari.com.dto.response.SubscriptionResponse;
 import com.agafari.com.dto.response.TrialIntentSummary;
 import com.agafari.com.enums.MonetizationModel;
+import com.agafari.com.dto.response.PeriodEndReportPage;
 import com.agafari.com.exception.ConfigVersionConflictException;
 import com.agafari.com.exception.FieldValidationException;
 import com.agafari.com.exception.MonetizationNotConfiguredException;
@@ -161,6 +162,16 @@ public class SubscriptionService {
                     shown ? status : null, shown ? s.getPlanCode() : null, shown && grandfathering.assess(s, config).grandfathered());
         }).toList();
         return new AdminBusinessPage(items, page, size, total);
+    }
+
+    /** AGF SUB-R2-10: read-only; lists rows whatever the state of period-end-enabled, so they can be reviewed before it is switched on. */
+    public PeriodEndReportPage periodEndReport(int page, int size) {
+        Page<BusinessSubscription> result = subscriptions.findManualPeriodEndReport(monetizationClock.now(), PageRequest.of(page, size));
+        Map<String, String> names = businesses.findAllById(result.getContent().stream().map(BusinessSubscription::getBusinessId).toList())
+                .stream().collect(Collectors.toMap(Business::getId, Business::getName));
+        List<PeriodEndReportPage.Item> items = result.getContent().stream().map(s -> new PeriodEndReportPage.Item(s.getId(), s.getBusinessId(), names.get(s.getBusinessId()), s.getPlanCode(),
+                s.getStatus(), s.getPeriodEnd(), s.getPeriodEnd() == null ? "MISSING" : "PAST", s.isOpenEnded(), s.getRowVersion())).toList();
+        return new PeriodEndReportPage(items, page, size, result.getTotalElements());
     }
 
     public BusinessSubscriptionView view(String businessId) {

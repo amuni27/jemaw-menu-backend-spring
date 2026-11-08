@@ -13,6 +13,7 @@ import com.agafari.com.service.SubscriptionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import com.agafari.com.dto.response.PeriodEndReportPage;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -53,6 +54,15 @@ public class AdminSubscriptionController {
             throw new BadRequestException("page must be 0 or more and size between 1 and " + MAX_PAGE_SIZE);
         }
         return ResponseEntity.ok(service.businesses(query, page, size, grandfathered));
+    }
+
+    /** AGF SUB-R2-10: read-only. */
+    @GetMapping("/subscriptions/period-end-report")
+    public ResponseEntity<PeriodEndReportPage> periodEndReport(@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        if (page < 0 || size < 1 || size > MAX_PAGE_SIZE) {
+            throw new BadRequestException("page must be 0 or more and size between 1 and " + MAX_PAGE_SIZE);
+        }
+        return ResponseEntity.ok(service.periodEndReport(page, size));
     }
 
     @GetMapping("/businesses/{businessId}/subscription")

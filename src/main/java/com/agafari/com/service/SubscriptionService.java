@@ -3,6 +3,7 @@ package com.agafari.com.service;
 import com.agafari.com.exception.ProviderPeriodManagedByBillingException;
 import com.agafari.com.subscription.Actor;
 import com.agafari.com.subscription.AdminPeriodChange;
+import com.agafari.com.subscription.IllegalTransitionException;
 import com.agafari.com.subscription.ManualRecord;
 import com.agafari.com.subscription.SubscriptionLifecycle;
 import com.agafari.com.dto.request.SubscriptionCreateRequest;
@@ -409,6 +410,7 @@ public class SubscriptionService {
         if (e instanceof PlanRequestPendingException) return "request_pending";
         if (e instanceof TrialEndedException) return "trial_ended";
         if (e instanceof ProviderPeriodManagedByBillingException) return "provider_period"; // AGF SUB-R2-03
+        if (e instanceof IllegalTransitionException) return "transition_not_allowed"; // AGF SUB-R2-03
         return null;
     }
 

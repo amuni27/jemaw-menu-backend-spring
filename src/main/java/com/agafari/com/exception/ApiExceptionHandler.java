@@ -1,5 +1,6 @@
 package com.agafari.com.exception;
 
+import com.agafari.com.subscription.IllegalTransitionException;
 import com.agafari.com.security.AppUserDetails;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -152,6 +153,13 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ProviderPeriodManagedByBillingException.class)
     public ResponseEntity<ApiError> providerPeriod(ProviderPeriodManagedByBillingException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(HttpStatus.CONFLICT, ProviderPeriodManagedByBillingException.CODE, e.getMessage()));
+    }
+
+    // AGF SUB-R2-03: a change the transition table doesn't permit (the exception's own message stays in the logs)
+    @ExceptionHandler(IllegalTransitionException.class)
+    public ResponseEntity<ApiError> illegalTransition(IllegalTransitionException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiError.of(HttpStatus.CONFLICT, IllegalTransitionException.CODE, "This subscription can't be changed this way."));
     }
 
     // AGF E4-M7

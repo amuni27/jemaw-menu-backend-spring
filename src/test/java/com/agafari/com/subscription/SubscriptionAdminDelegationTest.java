@@ -349,6 +349,41 @@ class SubscriptionAdminDelegationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.code").value("SUBSCRIPTION_VERSION_CONFLICT"));
     }
 
+    // ---- a stored GRANDFATHERED row: the accepted transition table has no period change for it
+
+    private void assertTransitionRefused(ResultActions result, String id, Instant before) throws Exception {
+        result.andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("SUBSCRIPTION_TRANSITION_NOT_ALLOWED"))
+                .andExpect(jsonPath("$.message").value("This subscription can't be changed this way."));
+        Map<String, Object> row = subscription(id);
+        assertThat(row).containsEntry("status", "GRANDFATHERED").containsEntry("row_version", 0).containsEntry("updated_by_user_id", admin.getId());
+        assertThat(instant(row.get("period_end"))).isEqualTo(before);
+        assertThat(row.get("ended_at")).isNull();
+        assertSingleAudit("SUBSCRIPTION_CHANGE_REJECTED", "FAILURE", null, "transition_not_allowed");
+    }
+
+    @Test
+    void aStoredGrandfatheredPeriodEditIsAConflictNotAServerError() throws Exception {
+        Instant before = days(30);
+        String id = row("MANUAL", "GRANDFATHERED", "MODEL_4", before, null);
+        assertTransitionRefused(periodEnd(days(60)), id, before);
+    }
+
+    @Test
+    void aStoredGrandfatheredPeriodEditWithAnEndIsRefusedWhole() throws Exception {
+        Instant before = days(30);
+        String id = row("MANUAL", "GRANDFATHERED", "MODEL_4", before, null);
+        assertTransitionRefused(change("{\"periodEnd\":\"" + days(60) + "\",\"status\":\"EXPIRED\",\"rowVersion\":0}"), id, before);
+    }
+
+    @Test
+    void aStoredGrandfatheredRowCanStillBeEnded() throws Exception {
+        Instant before = days(30);
+        String id = row("MANUAL", "GRANDFATHERED", "MODEL_4", before, null);
+        change("{\"status\":\"EXPIRED\",\"rowVersion\":0}").andExpect(status().isOk());
+        assertThat(subscription(id)).containsEntry("status", "EXPIRED").containsEntry("row_version", 1);
+        assertSingleAudit("SUBSCRIPTION_UPDATED", "SUCCESS", id, "MODEL_4 GRANDFATHERED -> EXPIRED periodEnd " + before + " -> " + before + " source=MANUAL");
+    }
+
     // ---- lock ownership per transaction and restaurant
 
     private TransactionTemplate tx() {

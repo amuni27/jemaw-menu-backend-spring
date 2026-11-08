@@ -23,6 +23,7 @@ import com.agafari.com.subscription.SubscriptionLifecycle;
 import com.agafari.com.subscription.SubscriptionSource;
 import com.agafari.com.subscription.TransitionReason;
 import com.agafari.com.subscription.TransitionRules;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -38,6 +39,7 @@ import java.util.UUID;
  * AGF SUB-R2-11 (TA §4.4): records an owner's cancellation or downgrade to Free with Ads, at the end of the current
  * period. Intent only: nothing changes before {@code effective_at}. Paid targets belong to a later story.
  */
+@Slf4j
 @Service
 public class ScheduledChangeService {
 
@@ -220,8 +222,14 @@ public class ScheduledChangeService {
      */
     public void invalidateForPeriodChange(String businessId, String subscriptionId, Instant before, Instant after, String adminId, String actor) {
         locks.assertHeld(businessId);
-        for (Map<String, Object> change : jdbc.queryForList("update scheduled_change set status = 'CANCELLED' where from_subscription_id = ? and status = 'PENDING' returning id, kind", subscriptionId)) {
-            audit.success(INVALIDATED, adminId, actor, TARGET, (String) change.get("id"), change.get("kind") + " reason=period_end_changed periodEnd " + before + " -> " + after);
+        for (Map<String, Object> change : jdbc.queryForList("select id, kind from scheduled_change where from_subscription_id = ? and status = 'PENDING'", subscriptionId)) {
+            String id = (String) change.get("id");
+            // By id and still PENDING: a row that changed after the select is left alone and isn't reported as invalidated
+            if (jdbc.update("update scheduled_change set status = 'CANCELLED' where id = ? and status = 'PENDING'", id) != 1) {
+                log.warn("event=scheduled_change.invalidate_skipped id={}", id);
+                continue;
+            }
+            audit.success(INVALIDATED, adminId, actor, TARGET, id, change.get("kind") + " reason=period_end_changed periodEnd " + before + " -> " + after);
         }
     }
 }

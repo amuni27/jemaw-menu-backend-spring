@@ -29,7 +29,7 @@ public interface BusinessSubscriptionRepository extends Repository<BusinessSubsc
 
     /** AGF E4-M5: the idempotent expiry used by the job and by expire-on-touch; 1 if this call expired it, else 0. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query(value = "update business_subscription set status = 'EXPIRED', ended_at = period_end, updated_at = :now, "
+    @Query(value = "update business_subscription set status = 'EXPIRED', ended_at = period_end, ended_reason = 'TRIAL_END', updated_at = :now, "
             + "updated_by_user_id = 'system', row_version = row_version + 1 "
             + "where id = :id and status = 'TRIAL' and period_end <= :now", nativeQuery = true)
     int expireIfDue(String id, Instant now);
@@ -44,7 +44,7 @@ public interface BusinessSubscriptionRepository extends Repository<BusinessSubsc
 
     /** AGF E4-M6: ends a grandfathered subscription at its approved end instant; 1 if this call ended it (idempotent). */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query(value = "update business_subscription set status = 'EXPIRED', ended_at = :endedAt, updated_at = :now, updated_by_user_id = 'system', "
+    @Query(value = "update business_subscription set status = 'EXPIRED', ended_at = :endedAt, ended_reason = 'GRANDFATHERED_END', updated_at = :now, updated_by_user_id = 'system', "
             + "row_version = row_version + 1 where id = :id and status <> 'EXPIRED' and row_version = :rowVersion", nativeQuery = true)
     int endGrandfathered(String id, Instant endedAt, Instant now, int rowVersion);
 

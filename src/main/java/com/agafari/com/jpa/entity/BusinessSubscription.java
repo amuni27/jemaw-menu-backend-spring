@@ -64,6 +64,34 @@ public class BusinessSubscription {
     @Column(name = "ended_at")
     private Instant endedAt;
 
+    // AGF SUB-R2-06: Flyway V20 lifecycle columns
+    @Column(name = "price_id", length = 36)
+    private String priceId;
+
+    @Column(name = "current_period_start")
+    private Instant currentPeriodStart;
+
+    @Column(name = "grace_days")
+    private Integer graceDays;
+
+    @Column(name = "past_due_since")
+    private Instant pastDueSince;
+
+    @Column(name = "open_ended", nullable = false)
+    private boolean openEnded;
+
+    @Column(name = "provider", length = 32)
+    private String provider;
+
+    @Column(name = "provider_subscription_ref")
+    private String providerSubscriptionRef;
+
+    @Column(name = "ended_reason", length = 32)
+    private String endedReason;
+
+    @Column(name = "replaced_by_id", length = 36)
+    private String replacedById;
+
     @Version
     @Column(name = "row_version", nullable = false)
     private Integer rowVersion;
@@ -126,6 +154,12 @@ public class BusinessSubscription {
         touch(now, adminId);
     }
 
+    /** AGF SUB-R2-06: why this row ended and its successor, if any. Set with the end itself: an ended row is frozen. */
+    public void recordEnding(String endedReason, String replacedById) {
+        this.endedReason = endedReason;
+        this.replacedById = replacedById;
+    }
+
     public boolean isCurrent() {
         return !EXPIRED.equals(status);
     }
@@ -134,6 +168,7 @@ public class BusinessSubscription {
     public void end(Instant now, String adminId) {
         status = EXPIRED;
         endedAt = now;
+        pastDueSince = null; // AGF SUB-R2-06: set only while PAST_DUE (DB check)
         touch(now, adminId);
     }
 

@@ -73,10 +73,14 @@ class SubscriptionAdminDelegationTest extends AbstractIntegrationTest {
 
     private String row(String source, String status, String plan, Instant periodEnd, Instant transition) {
         String id = UUID.randomUUID().toString();
+        // V20 refuses PROVIDER rows until verified payments exist; these tests need one to prove the application refuses it too.
+        boolean provider = "PROVIDER".equals(source);
+        if (provider) jdbc.execute("alter table business_subscription disable trigger business_subscription_refuse_provider");
         jdbc.update("insert into business_subscription (id, business_id, plan_code, status, config_version, period_end, transition_date, source, created_at, "
                         + "created_by_user_id, updated_at, updated_by_user_id, row_version) values (?, ?, ?, ?, 1, ?, ?, ?, now() - interval '1 day', ?, now() - interval '1 day', ?, 0)",
                 id, owner.businessId(), plan, status, periodEnd == null ? null : Timestamp.from(periodEnd), transition == null ? null : Timestamp.from(transition),
                 source, admin.getId(), admin.getId());
+        if (provider) jdbc.execute("alter table business_subscription enable trigger business_subscription_refuse_provider");
         return id;
     }
 

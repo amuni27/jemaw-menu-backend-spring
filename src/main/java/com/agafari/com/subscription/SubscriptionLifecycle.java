@@ -60,7 +60,10 @@ public class SubscriptionLifecycle {
         if (change.end()) TransitionRules.require(status, LifecycleStatus.EXPIRED, TransitionReason.ADMIN, source);
         if (change.clearTransitionDate()) current.changeTransitionDate(null, change.now(), admin.userId());
         if (change.periodEnd() != null) current.changePeriodEnd(change.periodEnd(), change.now(), admin.userId());
-        if (change.end()) current.end(change.now(), admin.userId());
+        if (change.end()) {
+            current.end(change.now(), admin.userId());
+            current.recordEnding(TransitionReason.ADMIN.name(), null);
+        }
         return subscriptions.saveAndFlush(current);
     }
 
@@ -87,9 +90,15 @@ public class SubscriptionLifecycle {
         locks.assertHeld(trial.getBusinessId());
         TransitionRules.requireReplacement(LifecycleStatus.of(trial.getStatus()), SubscriptionSource.of(trial.getSource()), TransitionReason.CONVERTED,
                 TransitionReason.ADMIN_RECORD, SubscriptionSource.MANUAL);
+        // The link must go in with the end (an ended row is frozen), so the successor's id is known before it is saved.
+        BusinessSubscription next = BusinessSubscription.manual(trial.getBusinessId(), successor.planCode(), successor.configVersion(), successor.periodEnd(),
+                successor.now(), admin.userId());
         trial.endTrial(trialEndedAt, successor.now(), admin.userId());
+        trial.recordEnding(TransitionReason.CONVERTED.name(), next.getId());
         subscriptions.saveAndFlush(trial);
-        return recordManual(trial.getBusinessId(), successor, admin);
+        materialize(trial.getBusinessId());
+        TransitionRules.require(null, LifecycleStatus.ACTIVE, TransitionReason.ADMIN_RECORD, SubscriptionSource.MANUAL);
+        return subscriptions.saveAndFlush(next);
     }
 
     /** AGF SUB-R2-04: the existing idempotent trial expiry; true if this call expired it. Needs only the restaurant lock, as before. */

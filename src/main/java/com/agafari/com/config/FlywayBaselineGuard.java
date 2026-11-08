@@ -50,7 +50,8 @@ public final class FlywayBaselineGuard {
             "restaurant_ad", // V18: AGF E4-M8
             "scheduled_change", // V20: AGF SUB-R2-06
             "job", "notification", // V21: AGF SUB-R2-08
-            "plan_price"); // V22: AGF SUB-R3-01
+            "plan_price", // V22: AGF SUB-R3-01
+            "billing_account", "checkout_session", "provider_event"); // V23.1: AGF SUB-R4-01
     public static final List<String> LATER_MIGRATION_FUNCTIONS =
             List.of("special_business_matches_dish", "category_special_business_matches_category",
                     "admin_audit_event_append_only", // V11: AGF E4-M1
@@ -62,7 +63,8 @@ public final class FlywayBaselineGuard {
                     "restaurant_ad_guard", // V18: AGF E4-M8
                     "business_subscription_refuse_provider", // V20: AGF SUB-R2-06
                     "notification_status_guard", // V21: AGF SUB-R2-08
-                    "plan_price_append_only"); // V22: AGF SUB-R3-01
+                    "plan_price_append_only", // V22: AGF SUB-R3-01
+                    "billing_account_guard"); // V23.1: AGF SUB-R4-01
 
     private FlywayBaselineGuard() {
     }

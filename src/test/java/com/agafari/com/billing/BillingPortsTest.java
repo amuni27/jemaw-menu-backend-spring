@@ -218,6 +218,25 @@ class BillingPortsTest {
     }
 
     @Test
+    void aShellExposesItsDelegatesProviderAndClient() {
+        FakeProviderClient client = new FakeProviderClient();
+        BillingStrategy et = new EtBillingStrategy(new FakeStrategy(Market.ET, "FAKE_ET", client));
+        assertThat(et.provider()).isEqualTo("FAKE_ET");
+        assertThat(et.client()).isSameAs(client);
+    }
+
+    @Test
+    void checkoutServiceTouchesNothingWithBillingOff() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        com.agafari.com.config.BillingFlags flags = new com.agafari.com.config.BillingFlags(false, false, false,
+                new com.agafari.com.config.BillingFlags.MarketFlags(false, false, false, false), new com.agafari.com.config.BillingFlags.MarketFlags(false, false, false, false));
+        CheckoutService service = new CheckoutService(jdbc, null, null, null, null, null, null, null, null, mock(org.springframework.transaction.PlatformTransactionManager.class), flags);
+        assertThatThrownBy(() -> service.create("b", "o", "p", "k")).isInstanceOf(com.agafari.com.exception.NotFoundException.class);
+        assertThatThrownBy(() -> service.get("b", "c")).isInstanceOf(com.agafari.com.exception.NotFoundException.class);
+        org.mockito.Mockito.verifyNoInteractions(jdbc);
+    }
+
+    @Test
     void aShellNeedsADelegate() {
         assertThatThrownBy(() -> new EtBillingStrategy(null)).isInstanceOf(IllegalArgumentException.class);
     }

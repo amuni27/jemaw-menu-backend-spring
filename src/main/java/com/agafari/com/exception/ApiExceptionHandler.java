@@ -191,6 +191,11 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(e.status()).body(ApiError.of(e.status(), e.code(), e.getMessage()));
     }
 
+    @ExceptionHandler(CheckoutRefusedException.class)
+    public ResponseEntity<ApiError> checkoutRefused(CheckoutRefusedException e) {
+        return ResponseEntity.status(e.status()).body(ApiError.of(e.status(), e.code(), e.getMessage()));
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> conf(ConflictException e) {
         return domain(HttpStatus.CONFLICT, e);

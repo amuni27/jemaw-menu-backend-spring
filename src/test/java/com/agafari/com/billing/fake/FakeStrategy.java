@@ -10,6 +10,7 @@ import com.agafari.com.billing.port.CheckoutRequest;
 import com.agafari.com.billing.port.CheckoutSession;
 import com.agafari.com.billing.port.CurrentState;
 import com.agafari.com.billing.port.LifecycleCommand;
+import com.agafari.com.billing.port.PaymentProviderClient;
 import com.agafari.com.billing.port.ProviderSessionRequest;
 import com.agafari.com.billing.port.ScheduledChangeEffects;
 import com.agafari.com.billing.port.ScheduledChangeView;
@@ -18,7 +19,11 @@ import com.agafari.com.billing.port.VerifiedEvent;
 import java.util.List;
 
 /** AGF SUB-R4-04: a strategy for tests. Its amount is a fixture, not a price; it holds no market policy. */
-public record FakeStrategy(Market market) implements BillingStrategy {
+public record FakeStrategy(Market market, String provider, PaymentProviderClient client) implements BillingStrategy {
+
+    public FakeStrategy(Market market) {
+        this(market, "FAKE", new FakeProviderClient());
+    }
 
     @Override
     public CheckoutPlan planCheckout(CheckoutRequest request, CurrentState state) {

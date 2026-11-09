@@ -9,6 +9,12 @@ public interface BillingStrategy {
 
     Market market();
 
+    /** AGF SUB-R4-05: the provider's identity for billing_account and checkout_session; never taken from a request. */
+    String provider();
+
+    /** AGF SUB-R4-05: the guarded client this market's checkouts use. */
+    PaymentProviderClient client();
+
     CheckoutPlan planCheckout(CheckoutRequest request, CurrentState state);
 
     ProviderSessionRequest sessionRequest(CheckoutSession session);

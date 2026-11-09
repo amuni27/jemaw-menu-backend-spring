@@ -6,6 +6,7 @@ import com.agafari.com.billing.port.CheckoutRequest;
 import com.agafari.com.billing.port.CheckoutSession;
 import com.agafari.com.billing.port.CurrentState;
 import com.agafari.com.billing.port.LifecycleCommand;
+import com.agafari.com.billing.port.PaymentProviderClient;
 import com.agafari.com.billing.port.ProviderSessionRequest;
 import com.agafari.com.billing.port.ScheduledChangeEffects;
 import com.agafari.com.billing.port.ScheduledChangeView;
@@ -28,6 +29,16 @@ abstract class DelegatingBillingStrategy implements BillingStrategy {
     @Override
     public final Market market() {
         return market;
+    }
+
+    @Override
+    public final String provider() {
+        return delegate.provider();
+    }
+
+    @Override
+    public final PaymentProviderClient client() {
+        return delegate.client();
     }
 
     @Override

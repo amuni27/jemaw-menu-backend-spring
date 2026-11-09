@@ -17,6 +17,8 @@ import com.agafari.com.billing.port.RefundSubmission;
 import com.agafari.com.billing.port.SignatureVerifier;
 import com.agafari.com.billing.port.VerifiedPayment;
 
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
@@ -64,6 +66,9 @@ public final class FakeProviderClient extends GuardedProviderClient {
     private ProviderCapabilities capabilities = ALL;
     private int delayedFetches = 1;
     private int laggedLookups = 1;
+    private volatile Runnable onCreate = () -> { };
+    private volatile boolean createRanInTransaction;
+    private final java.util.concurrent.atomic.AtomicInteger createCalls = new java.util.concurrent.atomic.AtomicInteger();
     private int nextSession;
     private int nextRefund;
     private final Map<String, ProviderSession> sessions = new HashMap<>();
@@ -99,6 +104,31 @@ public final class FakeProviderClient extends GuardedProviderClient {
         return this;
     }
 
+    /** AGF SUB-R4-05: runs at the start of the next creates, outside the fake's own state, to hold or observe a call. */
+    public FakeProviderClient onCreate(Runnable value) {
+        onCreate = value;
+        return this;
+    }
+
+    public int createCalls() {
+        return createCalls.get();
+    }
+
+    public boolean createRanInTransaction() {
+        return createRanInTransaction;
+    }
+
+    public synchronized void reset() {
+        script = Script.SUCCESS;
+        capabilities = ALL;
+        onCreate = () -> { };
+        createRanInTransaction = false;
+        createCalls.set(0);
+        nextSession = 0;
+        sessions.clear();
+        timedOut.clear();
+    }
+
     public int refundsCreated() {
         return nextRefund;
     }
@@ -114,6 +144,15 @@ public final class FakeProviderClient extends GuardedProviderClient {
 
     @Override
     protected ProviderSession doCreateSession(ProviderSessionRequest request, String key) {
+        createCalls.incrementAndGet();
+        if (TransactionSynchronizationManager.isActualTransactionActive()) createRanInTransaction = true;
+        onCreate.run();
+        synchronized (this) {
+            return createLocked(key);
+        }
+    }
+
+    private ProviderSession createLocked(String key) {
         if (script == Script.DECLINE) throw new ProviderRejectedException("declined");
         ProviderSession session = capabilities.idempotentCreate() ? sessions.get(key) : null;
         if (session == null) {

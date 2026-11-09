@@ -144,7 +144,7 @@ class JobNotificationMigrationTest extends AbstractIntegrationTest {
         assertThat(sql).doesNotContain("subscription_period", "subscription_price", "billing_", "payment_ledger", "legacy_publish_right", "migration_run", "refund_request");
         assertThat(sql.split("references ")).as("the only foreign key target is business").hasSize(2);
         assertThat(sql.split("references ")[1]).startsWith("business");
-        assertThat(jdbc.queryForObject("select count(*) from flyway_schema_history where version::numeric > 23.2", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from flyway_schema_history where version::numeric > 23.3", Integer.class)).isZero();
     }
 
     // ---- job constraints

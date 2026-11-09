@@ -45,7 +45,7 @@ class PeriodEndBoundaryTest {
 
     @BeforeEach
     void setUp() {
-        lifecycle = new SubscriptionLifecycle(repository, mock(MonetizationLocks.class), evaluator, clock, mock(AdminAuditService.class));
+        lifecycle = new SubscriptionLifecycle(repository, mock(MonetizationLocks.class), evaluator, clock, mock(AdminAuditService.class), null);
         job = new PeriodEndJob(repository, evaluator, clock, queue, lifecycle, mock(MonetizationLocks.class), mock(GrandfatheringService.class), mock(PlatformTransactionManager.class));
         when(repository.findPeriodEndCandidates(eq(""), any(Limit.class))).thenReturn(List.of(row));
         when(repository.findCurrentByBusinessId("b1")).thenReturn(Optional.of(row));

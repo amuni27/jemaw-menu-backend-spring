@@ -178,6 +178,6 @@ class ArchitectureBoundaryTest {
             assertThat(write || read).as("%s is neither a known read nor a detected write", m).isTrue();
         }
         assertThat(Arrays.stream(BusinessSubscriptionRepository.class.getDeclaredMethods()).filter(m -> m.isAnnotationPresent(Modifying.class)).map(Method::getName))
-                .containsExactlyInAnyOrder("expireIfDue", "endGrandfathered");
+                .containsExactlyInAnyOrder("expireIfDue", "endGrandfathered", "insertPeriod");
     }
 }

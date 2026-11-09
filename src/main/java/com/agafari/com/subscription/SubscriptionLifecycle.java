@@ -22,20 +22,26 @@ public class SubscriptionLifecycle {
 
     static final String PERIOD_ENDED = "SUBSCRIPTION_PERIOD_ENDED";
     static final String PAST_DUE = "SUBSCRIPTION_PAST_DUE";
+    static final String PAID_ACTIVATED = "SUBSCRIPTION_PAID_ACTIVATED";
+    static final String RENEWED = "SUBSCRIPTION_RENEWED";
+    static final String PAID_REPLACED = "SUBSCRIPTION_PAID_REPLACED";
+    private static final String TARGET = "BUSINESS_SUBSCRIPTION";
 
     private final BusinessSubscriptionRepository subscriptions;
     private final MonetizationLocks locks;
     private final EffectiveStateEvaluator evaluator;
     private final MonetizationClock clock;
     private final AdminAuditService audit;
+    private final EvidenceValidator evidence;
 
     public SubscriptionLifecycle(BusinessSubscriptionRepository subscriptions, MonetizationLocks locks, EffectiveStateEvaluator evaluator,
-                                 MonetizationClock clock, AdminAuditService audit) {
+                                 MonetizationClock clock, AdminAuditService audit, EvidenceValidator evidence) {
         this.subscriptions = subscriptions;
         this.locks = locks;
         this.evaluator = evaluator;
         this.clock = clock;
         this.audit = audit;
+        this.evidence = evidence;
     }
 
     public BusinessSubscription startOwnerFree(String businessId, String planCode, int configVersion, Instant now, Actor owner) {
@@ -112,6 +118,77 @@ public class SubscriptionLifecycle {
         materialize(trial.getBusinessId());
         TransitionRules.require(null, LifecycleStatus.ACTIVE, TransitionReason.ADMIN_RECORD, SubscriptionSource.MANUAL);
         return subscriptions.saveAndFlush(next);
+    }
+
+    /** AGF SUB-R4-09: a paid activation. Repeating it with the same evidence returns the same row. */
+    public BusinessSubscription activatePaid(String businessId, PaidActivation a) {
+        locks.assertHeld(businessId);
+        materialize(businessId);
+        EvidenceValidator.Result result = evidence.validate(new EvidenceValidator.Claim(a.evidence(), businessId, a.planCode(), a.provider(), a.periodStart(), a.periodEnd(), null));
+        if (result.alreadyAppliedTo() != null) return subscriptions.findById(result.alreadyAppliedTo()).orElseThrow();
+        if (subscriptions.findCurrentByBusinessId(businessId).isPresent()) throw new ExpectedSubscriptionChangedException();
+        TransitionRules.require(null, LifecycleStatus.ACTIVE, TransitionReason.VERIFIED_PAYMENT, SubscriptionSource.PROVIDER);
+        BusinessSubscription saved = subscriptions.saveAndFlush(providerRow(businessId, a));
+        consume(saved, a.periodStart(), a.periodEnd(), a.evidence());
+        audit.success(PAID_ACTIVATED, null, AdminAuditService.SYSTEM, TARGET, saved.getId(), "plan=" + saved.getPlanCode());
+        return saved;
+    }
+
+    /** AGF SUB-R4-09: a verified renewal. PD-3 is open, so a period can only start where the current one ends. */
+    public BusinessSubscription renew(String subscriptionId, PeriodExtension e) {
+        BusinessSubscription s = subscriptions.findById(subscriptionId).orElseThrow(() -> new IllegalStateException("No such subscription"));
+        locks.assertHeld(s.getBusinessId());
+        materialize(s.getBusinessId());
+        EvidenceValidator.Result result = evidence.validate(new EvidenceValidator.Claim(e.evidence(), s.getBusinessId(), s.getPlanCode(), s.getProvider(), e.periodStart(), e.periodEnd(), subscriptionId));
+        if (result.alreadyAppliedTo() != null) return s;
+        LifecycleStatus status = LifecycleStatus.of(s.getStatus());
+        TransitionRules.require(status, LifecycleStatus.ACTIVE, TransitionReason.VERIFIED_RENEWAL, SubscriptionSource.of(s.getSource()));
+        if (!e.periodStart().equals(s.getPeriodEnd())) throw new EvidenceInvalidException(EvidenceInvalidException.Code.PERIOD_MISMATCH);
+        s.renewPeriod(e.periodStart(), e.periodEnd(), e.now(), AdminAuditService.SYSTEM);
+        BusinessSubscription saved = subscriptions.saveAndFlush(s);
+        consume(saved, e.periodStart(), e.periodEnd(), e.evidence());
+        audit.success(RENEWED, null, AdminAuditService.SYSTEM, TARGET, saved.getId(), status + " -> ACTIVE");
+        return saved;
+    }
+
+    /** AGF SUB-R4-09: a verified renewal failure. Repeating it changes nothing. */
+    public BusinessSubscription markPastDue(String subscriptionId, Instant since, Instant now) {
+        BusinessSubscription s = subscriptions.findById(subscriptionId).orElseThrow(() -> new IllegalStateException("No such subscription"));
+        locks.assertHeld(s.getBusinessId());
+        if (LifecycleStatus.of(s.getStatus()) == LifecycleStatus.PAST_DUE) return s;
+        TransitionRules.require(LifecycleStatus.of(s.getStatus()), LifecycleStatus.PAST_DUE, TransitionReason.RENEWAL_FAILED, SubscriptionSource.of(s.getSource()));
+        s.markPastDue(since, now, AdminAuditService.SYSTEM);
+        BusinessSubscription saved = subscriptions.saveAndFlush(s);
+        audit.success(PAST_DUE, null, AdminAuditService.SYSTEM, TARGET, saved.getId(), "ACTIVE -> PAST_DUE");
+        return saved;
+    }
+
+    /** AGF SUB-R4-09 (DD §4.1): end + a new paid row. Everything is checked first, so a refused replacement leaves the current row untouched. */
+    public BusinessSubscription replacePaid(String businessId, String expectedCurrentId, PaidActivation a, TransitionReason ending) {
+        locks.assertHeld(businessId);
+        materialize(businessId);
+        EvidenceValidator.Result result = evidence.validate(new EvidenceValidator.Claim(a.evidence(), businessId, a.planCode(), a.provider(), a.periodStart(), a.periodEnd(), null));
+        if (result.alreadyAppliedTo() != null) return subscriptions.findById(result.alreadyAppliedTo()).orElseThrow();
+        BusinessSubscription current = subscriptions.findCurrentByBusinessId(businessId).orElse(null);
+        if (current == null || !current.getId().equals(expectedCurrentId)) throw new ExpectedSubscriptionChangedException();
+        TransitionRules.requireReplacement(LifecycleStatus.of(current.getStatus()), SubscriptionSource.of(current.getSource()), ending, TransitionReason.VERIFIED_PAYMENT, SubscriptionSource.PROVIDER);
+        BusinessSubscription next = providerRow(businessId, a);
+        current.endAtEffectiveTime(a.now(), ending.name(), a.now(), AdminAuditService.SYSTEM);
+        current.recordEnding(ending.name(), next.getId());
+        subscriptions.saveAndFlush(current);
+        BusinessSubscription saved = subscriptions.saveAndFlush(next);
+        consume(saved, a.periodStart(), a.periodEnd(), a.evidence());
+        audit.success(PAID_REPLACED, null, AdminAuditService.SYSTEM, TARGET, saved.getId(), "replaced=" + current.getId() + " reason=" + ending);
+        return saved;
+    }
+
+    private static BusinessSubscription providerRow(String businessId, PaidActivation a) {
+        return BusinessSubscription.provider(businessId, a.planCode(), a.configVersion(), a.priceId(), a.provider(), a.providerSubscriptionRef(), a.graceDays(), a.periodStart(), a.periodEnd(), a.now(), AdminAuditService.SYSTEM);
+    }
+
+    private void consume(BusinessSubscription s, Instant start, Instant end, com.agafari.com.billing.VerifiedPaymentRef ref) {
+        locks.assertHeld(s.getBusinessId());
+        subscriptions.insertPeriod(java.util.UUID.randomUUID().toString(), s.getId(), s.getBusinessId(), start, end, ref.invoiceId(), ref.paymentId());
     }
 
     /** AGF SUB-R2-04: the existing idempotent trial expiry; true if this call expired it. Needs only the restaurant lock, as before. */

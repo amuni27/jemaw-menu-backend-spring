@@ -40,7 +40,7 @@ class SubscriptionLifecycleAdminTest {
         repository = mock(BusinessSubscriptionRepository.class);
         locks = mock(MonetizationLocks.class);
         when(repository.saveAndFlush(any())).thenAnswer(i -> i.getArgument(0));
-        lifecycle = new SubscriptionLifecycle(repository, locks, new EffectiveStateEvaluator(false), null, null);
+        lifecycle = new SubscriptionLifecycle(repository, locks, new EffectiveStateEvaluator(false), null, null, null);
     }
 
     private static BusinessSubscription manual() {

@@ -132,6 +132,28 @@ public class BusinessSubscription {
         return s;
     }
 
+    /** AGF SUB-R4-09: a paid subscription; only {@code SubscriptionLifecycle} creates one, with verified evidence. */
+    public static BusinessSubscription provider(String businessId, String planCode, int configVersion, String priceId, String provider, String providerSubscriptionRef, Integer graceDays,
+                                                Instant periodStart, Instant periodEnd, Instant now, String actor) {
+        BusinessSubscription s = manual(businessId, planCode, configVersion, periodEnd, now, actor);
+        s.source = "PROVIDER";
+        s.priceId = priceId;
+        s.provider = provider;
+        s.providerSubscriptionRef = providerSubscriptionRef;
+        s.graceDays = graceDays;
+        s.currentPeriodStart = periodStart;
+        return s;
+    }
+
+    /** AGF SUB-R4-09: one more paid period; the row is ACTIVE again. */
+    public void renewPeriod(Instant periodStart, Instant periodEnd, Instant now, String actor) {
+        status = ACTIVE;
+        currentPeriodStart = periodStart;
+        this.periodEnd = periodEnd;
+        pastDueSince = null;
+        touch(now, actor);
+    }
+
     public boolean isTrial() {
         return TRIAL.equals(source);
     }

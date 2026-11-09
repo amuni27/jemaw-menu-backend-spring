@@ -62,6 +62,12 @@ public interface BusinessSubscriptionRepository extends Repository<BusinessSubsc
 
     Optional<BusinessSubscription> findById(String id);
 
+    /** AGF SUB-R4-09: consumes one verified payment and invoice; guarded by V23.2. */
+    @Modifying(flushAutomatically = true)
+    @Query(value = "insert into subscription_period (id, subscription_id, business_id, period_start, period_end, invoice_id, payment_id) "
+            + "values (:id, :subscriptionId, :businessId, :periodStart, :periodEnd, :invoiceId, :paymentId)", nativeQuery = true)
+    int insertPeriod(String id, String subscriptionId, String businessId, Instant periodStart, Instant periodEnd, String invoiceId, String paymentId);
+
     /** AGF E4-M6: ends a grandfathered subscription at its approved end instant; 1 if this call ended it (idempotent). */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(value = "update business_subscription set status = 'EXPIRED', ended_at = :endedAt, ended_reason = 'GRANDFATHERED_END', updated_at = :now, updated_by_user_id = 'system', "

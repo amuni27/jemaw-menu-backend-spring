@@ -82,9 +82,9 @@ class EndedReasonPersistenceTest extends AbstractIntegrationTest {
     void anAdminEndOfAPastDueRowClearsPastDueSince() throws Exception {
         config(jdbc, 1, "SETTING_2", true, true, true, admin.getId());
         // Only a PROVIDER row can be PAST_DUE (TransitionRules); V20 refuses new ones, so the fixture lifts the refusal for this insert.
-        jdbc.execute("alter table business_subscription disable trigger business_subscription_refuse_provider");
+        // AGF SUB-R4-02: a fixture row has no payment evidence, so the commit check stays off for this test; the per-test reset restores it.
+        jdbc.execute("alter table business_subscription disable trigger provider_row_has_evidence");
         String id = row("PROVIDER", "ACTIVE", "MODEL_4", days(30));
-        jdbc.execute("alter table business_subscription enable trigger business_subscription_refuse_provider");
         pastDue(id);
         mockMvc.perform(patch("/api/admin/businesses/{id}/subscription", owner.businessId()).header("Authorization", data.adminBearer(admin))
                 .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"EXPIRED\",\"rowVersion\":0}")).andExpect(status().isOk());

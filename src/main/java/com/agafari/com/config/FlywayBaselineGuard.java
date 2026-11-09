@@ -51,7 +51,8 @@ public final class FlywayBaselineGuard {
             "scheduled_change", // V20: AGF SUB-R2-06
             "job", "notification", // V21: AGF SUB-R2-08
             "plan_price", // V22: AGF SUB-R3-01
-            "billing_account", "checkout_session", "provider_event"); // V23.1: AGF SUB-R4-01
+            "billing_account", "checkout_session", "provider_event", // V23.1: AGF SUB-R4-01
+            "billing_invoice", "payment", "subscription_period"); // V23.2: AGF SUB-R4-02
     public static final List<String> LATER_MIGRATION_FUNCTIONS =
             List.of("special_business_matches_dish", "category_special_business_matches_category",
                     "admin_audit_event_append_only", // V11: AGF E4-M1
@@ -64,7 +65,8 @@ public final class FlywayBaselineGuard {
                     "business_subscription_refuse_provider", // V20: AGF SUB-R2-06
                     "notification_status_guard", // V21: AGF SUB-R2-08
                     "plan_price_append_only", // V22: AGF SUB-R3-01
-                    "billing_account_guard"); // V23.1: AGF SUB-R4-01
+                    "billing_account_guard", // V23.1: AGF SUB-R4-01
+                    "payment_append_only", "billing_invoice_guard", "subscription_period_guard", "provider_row_has_evidence"); // V23.2: AGF SUB-R4-02
 
     private FlywayBaselineGuard() {
     }

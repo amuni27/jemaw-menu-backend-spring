@@ -88,10 +88,10 @@ class EffectiveStateReadTimeTest extends AbstractIntegrationTest {
     private String row(String businessId, String source, String status, String plan, Instant end, Integer grace) {
         String id = UUID.randomUUID().toString();
         boolean provider = "PROVIDER".equals(source);
-        if (provider) jdbc.execute("alter table business_subscription disable trigger business_subscription_refuse_provider");
+        // AGF SUB-R4-02: a fixture row has no payment evidence, so the commit check stays off for this test; the per-test reset restores it.
+        if (provider) jdbc.execute("alter table business_subscription disable trigger provider_row_has_evidence");
         jdbc.update("insert into business_subscription (id, business_id, plan_code, status, config_version, period_end, source, created_at, created_by_user_id, updated_at, updated_by_user_id, grace_days, row_version) "
                 + "values (?, ?, ?, ?, 1, ?, ?, now(), ?, now(), ?, ?, 0)", id, businessId, plan, status, end == null ? null : Timestamp.from(end), source, admin.getId(), admin.getId(), grace);
-        if (provider) jdbc.execute("alter table business_subscription enable trigger business_subscription_refuse_provider");
         return id;
     }
 

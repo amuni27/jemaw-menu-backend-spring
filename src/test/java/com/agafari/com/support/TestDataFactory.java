@@ -203,7 +203,8 @@ public class TestDataFactory {
     /** Removes all rows so every test starts from an empty database, except the seeded menu types (reference data). */
     public void deleteAll() {
         jdbc.execute("TRUNCATE TABLE menu_item, category, menu, business_hours, business, users CASCADE");
-        jdbc.execute("TRUNCATE TABLE provider_event, checkout_session, billing_account, job, notification, scheduled_change, restaurant_ad, ad_impression_daily, agafari_ad, trial_intent, plan_request, business_subscription, plan_price, admin_audit_event, monetization_config"); // AGF E4-M1..M5: table-level resets (the row triggers block UPDATE/DELETE only); the seeded plans stay
+        jdbc.execute("alter table business_subscription enable trigger provider_row_has_evidence"); // AGF SUB-R4-02: PROVIDER fixtures turn it off for one test
+        jdbc.execute("TRUNCATE TABLE subscription_period, payment, billing_invoice, provider_event, checkout_session, billing_account, job, notification, scheduled_change, restaurant_ad, ad_impression_daily, agafari_ad, trial_intent, plan_request, business_subscription, plan_price, admin_audit_event, monetization_config"); // AGF E4-M1..M5: table-level resets (the row triggers block UPDATE/DELETE only); the seeded plans stay
         // AGF-S1-09: the seeded menu types (Flyway V2, ids 'mt-…') are reference data; only test-created types go
         jdbc.execute("DELETE FROM menu_type WHERE id NOT LIKE 'mt-%'");
     }

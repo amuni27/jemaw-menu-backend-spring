@@ -219,12 +219,6 @@ class PaidLifecycleTest extends AbstractIntegrationTest {
 
     static Stream<Case> evidenceCases() {
         return Stream.of(
-                new Case("payment pending", m("status", "'PENDING'"), m(), Code.NOT_VERIFIED, true),
-                new Case("payment failed", m("status", "'FAILED'"), m(), Code.NOT_VERIFIED, true),
-                new Case("SUCCEEDED but unverified", m("verified_at", "null", "verification", "null"), m(), Code.NOT_VERIFIED, true),
-                new Case("no verified_at", m("verified_at", "null"), m(), Code.NOT_VERIFIED, true),
-                new Case("no verification", m("verification", "null"), m(), Code.NOT_VERIFIED, true),
-                new Case("unknown verification", m("verification", "'TRUST_ME'"), m(), Code.NOT_VERIFIED, true),
                 new Case("a refund", m("kind", "'REFUND'"), m(), Code.NOT_VERIFIED, true),
                 new Case("a chargeback", m("kind", "'CHARGEBACK'"), m(), Code.NOT_VERIFIED, true),
                 new Case("invoice open", m(), m("status", "'OPEN'"), Code.NOT_VERIFIED, true),
@@ -249,6 +243,41 @@ class PaidLifecycleTest extends AbstractIntegrationTest {
             default -> v;
         }));
         return r;
+    }
+
+    /** AGF V23.4: charges that can no longer exist. PostgreSQL checks constraints in name order. */
+    static Stream<Arguments> invalidChargeRecords() {
+        String charge = "ck_payment_charge_verified", success = "ck_payment_success_evidence";
+        return Stream.of(
+                Arguments.of("payment pending", m("status", "'PENDING'"), charge),
+                Arguments.of("payment failed", m("status", "'FAILED'"), charge),
+                Arguments.of("SUCCEEDED but unverified", m("verified_at", "null", "verification", "null"), charge),
+                Arguments.of("no verified_at", m("verified_at", "null"), success),
+                Arguments.of("no verification", m("verification", "null"), charge),
+                Arguments.of("unknown verification", m("verification", "'TRUST_ME'"), charge));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidChargeRecords")
+    void anInvalidChargeIsRefusedAtInsert(String name, Map<String, String> onPayment, String constraint) {
+        assertThatThrownBy(() -> evidence(onPayment, m())).hasMessageContaining(constraint);
+        assertThat(subscriptionsOf(owner)).isZero();
+        assertThat(periods()).isZero();
+    }
+
+    /** The application check stays a separate layer: with V23.4's constraints removed inside a rolled-back transaction, it still refuses. */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidChargeRecords")
+    void theValidatorStillRefusesAnInvalidChargeOnItsOwn(String name, Map<String, String> onPayment, String constraint) {
+        new TransactionTemplate(transactions).executeWithoutResult(s -> {
+            jdbc.execute("alter table payment drop constraint ck_payment_success_evidence, drop constraint ck_payment_charge_verified");
+            Ev e = evidence(onPayment, m());
+            refused(() -> activate(owner, activation(e)), Code.NOT_VERIFIED);
+            assertThat(subscriptionsOf(owner)).isZero();
+            assertThat(periods()).isZero();
+            s.setRollbackOnly();
+        });
+        assertThat(jdbc.queryForObject("select count(*) from pg_constraint where conname in ('ck_payment_success_evidence', 'ck_payment_charge_verified')", Integer.class)).isEqualTo(2);
     }
 
     @ParameterizedTest(name = "{0}")
@@ -572,7 +601,7 @@ class PaidLifecycleTest extends AbstractIntegrationTest {
     void aReplacementWithBadEvidenceLeavesTheCurrentRowUntouched() {
         String old = manual();
         Map<String, Object> before = jdbc.queryForMap("select * from business_subscription where id = ?", old);
-        Ev bad = evidence(m("status", "'PENDING'"), m());
+        Ev bad = evidence(m("kind", "'REFUND'"), m()); // AGF V23.4: a PENDING charge can no longer exist; this one can, and is still not evidence
         refused(() -> replace(old, bad, START, END, TransitionReason.CHANGED), Code.NOT_VERIFIED);
         assertThat(jdbc.queryForMap("select * from business_subscription where id = ?", old)).isEqualTo(before);
         assertThat(subscriptionsOf(owner)).isEqualTo(1);

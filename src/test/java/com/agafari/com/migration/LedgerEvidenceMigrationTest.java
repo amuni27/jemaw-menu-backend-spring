@@ -238,12 +238,6 @@ class LedgerEvidenceMigrationTest extends AbstractIntegrationTest {
         String amount = "amount and currency";
         String period = "period doesn't match";
         return Stream.of(
-                Arguments.of("pending", m("status", "'PENDING'"), m(), m(), notVerified),
-                Arguments.of("failed", m("status", "'FAILED'"), m(), m(), notVerified),
-                Arguments.of("SUCCEEDED but never verified", m("verified_at", "null", "verification", "null"), m(), m(), notVerified),
-                Arguments.of("no verified_at", m("verified_at", "null"), m(), m(), notVerified),
-                Arguments.of("no verification", m("verification", "null"), m(), m(), notVerified),
-                Arguments.of("unknown verification", m("verification", "'TRUST_ME'"), m(), m(), notVerified),
                 Arguments.of("refund", m("kind", "'REFUND'"), m(), m(), notVerified),
                 Arguments.of("chargeback", m("kind", "'CHARGEBACK'"), m(), m(), notVerified),
                 Arguments.of("open invoice", m(), m("status", "'OPEN'"), m(), "invoice is not paid"),
@@ -286,6 +280,39 @@ class LedgerEvidenceMigrationTest extends AbstractIntegrationTest {
             String i = invoice(t, bind(onInvoice));
             period(t, s, i, payment(t, i, bind(onPayment)), bind(onPeriod));
         })).hasMessageContaining(message);
+    }
+
+    /** AGF V23.4: these charges can no longer exist, so the row itself is refused. PostgreSQL checks constraints in name order. */
+    static Stream<Arguments> invalidChargeRecords() {
+        String charge = "ck_payment_charge_verified", success = "ck_payment_success_evidence";
+        return Stream.of(
+                Arguments.of("pending", m("status", "'PENDING'"), charge),
+                Arguments.of("failed", m("status", "'FAILED'"), charge),
+                Arguments.of("SUCCEEDED but never verified", m("verified_at", "null", "verification", "null"), charge),
+                Arguments.of("no verified_at", m("verified_at", "null"), success),
+                Arguments.of("no verification", m("verification", "null"), charge),
+                Arguments.of("unknown verification", m("verification", "'TRUST_ME'"), charge));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidChargeRecords")
+    void anInvalidChargeIsRefusedAtInsert(String name, Map<String, String> onPayment, String constraint) {
+        int before = jdbc.queryForObject("select count(*) from payment", Integer.class);
+        assertThatThrownBy(() -> tx(t -> payment(t, invoice(t, m()), onPayment))).hasMessageContaining(constraint);
+        assertThat(jdbc.queryForObject("select count(*) from payment", Integer.class)).isEqualTo(before);
+    }
+
+    /** The period guard stays a separate layer: with V23.4's constraints removed inside a rolled-back transaction, it still refuses. */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidChargeRecords")
+    void thePeriodGuardStillRefusesAnInvalidChargeOnItsOwn(String name, Map<String, String> onPayment, String constraint) {
+        assertThatThrownBy(() -> tx(t -> {
+            t.execute("alter table payment drop constraint ck_payment_success_evidence, drop constraint ck_payment_charge_verified");
+            String s = subscription(t, m());
+            String i = invoice(t, m());
+            period(t, s, i, payment(t, i, onPayment), m());
+        })).hasMessageContaining("payment is not verified evidence");
+        assertThat(jdbc.queryForObject("select count(*) from pg_constraint where conname in ('ck_payment_success_evidence', 'ck_payment_charge_verified')", Integer.class)).isEqualTo(2);
     }
 
     @Test
@@ -594,7 +621,8 @@ class LedgerEvidenceMigrationTest extends AbstractIntegrationTest {
     @ParameterizedTest
     @ValueSource(strings = {"PENDING", "SUCCEEDED", "FAILED"})
     void everyApprovedPaymentStatusIsAllowed(String status) {
-        assertThatCode(() -> payment(jdbc, null, m("invoice_id", "null", "status", lit(status)))).doesNotThrowAnyException();
+        // AGF V23.4: a CHARGE can only be SUCCEEDED; the status list itself is unchanged and is still open to the other kinds
+        assertThatCode(() -> payment(jdbc, null, m("invoice_id", "null", "kind", "'REFUND'", "status", lit(status)))).doesNotThrowAnyException();
     }
 
     @ParameterizedTest
@@ -606,7 +634,7 @@ class LedgerEvidenceMigrationTest extends AbstractIntegrationTest {
     @Test
     void paymentChecksRefuseBadValues() {
         Map<String, String> none = m("invoice_id", "null");
-        assertThatThrownBy(() -> payment(jdbc, null, with(none, "status", "'REFUNDED'"))).hasMessageContaining("ck_payment_status");
+        assertThatThrownBy(() -> payment(jdbc, null, with(with(none, "kind", "'REFUND'"), "status", "'REFUNDED'"))).hasMessageContaining("ck_payment_status"); // AGF V23.4: on a CHARGE, its rule reports first
         assertThatThrownBy(() -> payment(jdbc, null, with(none, "kind", "'OTHER'"))).hasMessageContaining("ck_payment_kind");
         assertThatThrownBy(() -> payment(jdbc, null, with(none, "amount_minor", "0"))).hasMessageContaining("ck_payment_amount");
         assertThatThrownBy(() -> payment(jdbc, null, with(none, "currency", "'EUR'"))).hasMessageContaining("ck_payment_currency");

@@ -56,6 +56,7 @@ class FinancialSchemaMigrationTest extends AbstractIntegrationTest {
 
     @Autowired private DataSource dataSource;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private org.springframework.transaction.PlatformTransactionManager transactions;
 
     private User admin;
     private Tenant owner;
@@ -445,8 +446,33 @@ class FinancialSchemaMigrationTest extends AbstractIntegrationTest {
     }
 
     static Stream<Arguments> notAVerifiedCharge() {
-        return Stream.of(Arguments.of("pending", m("status", "'PENDING'")), Arguments.of("failed", m("status", "'FAILED'")), Arguments.of("no verified_at", m("verified_at", "null")),
-                Arguments.of("no verification", m("verification", "null")), Arguments.of("a refund", m("kind", "'REFUND'")), Arguments.of("a chargeback", m("kind", "'CHARGEBACK'")));
+        return Stream.of(Arguments.of("a refund", m("kind", "'REFUND'")), Arguments.of("a chargeback", m("kind", "'CHARGEBACK'")));
+    }
+
+    /** AGF V23.4: these charges can no longer exist. PostgreSQL checks constraints in name order. */
+    static Stream<Arguments> invalidChargeRecords() {
+        String charge = "ck_payment_charge_verified", success = "ck_payment_success_evidence";
+        return Stream.of(Arguments.of("pending", m("status", "'PENDING'"), charge), Arguments.of("failed", m("status", "'FAILED'"), charge),
+                Arguments.of("no verified_at", m("verified_at", "null"), success), Arguments.of("no verification", m("verification", "null"), charge));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidChargeRecords")
+    void anInvalidChargeIsRefusedBeforeARefundCanReferToIt(String name, Map<String, String> onPayment, String constraint) {
+        assertThatThrownBy(() -> payment(owner.businessId(), onPayment)).hasMessageContaining(constraint);
+    }
+
+    /** The refund guard stays a separate layer: with V23.4's constraints removed inside a rolled-back transaction, it still refuses. */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidChargeRecords")
+    void theRefundGuardStillRefusesAnInvalidChargeOnItsOwn(String name, Map<String, String> onPayment, String constraint) {
+        new org.springframework.transaction.support.TransactionTemplate(transactions).executeWithoutResult(s -> {
+            jdbc.execute("alter table payment drop constraint ck_payment_success_evidence, drop constraint ck_payment_charge_verified");
+            String p = payment(owner.businessId(), onPayment);
+            assertThatThrownBy(() -> refund(m("payment_id", lit(p)))).hasMessageContaining("a refund needs a verified charge");
+            s.setRollbackOnly();
+        });
+        assertThat(jdbc.queryForObject("select count(*) from pg_constraint where conname in ('ck_payment_success_evidence', 'ck_payment_charge_verified')", Integer.class)).isEqualTo(2);
     }
 
     @ParameterizedTest(name = "{0}")

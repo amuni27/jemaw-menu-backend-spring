@@ -32,6 +32,7 @@ import com.agafari.com.jpa.repository.PlanPriceRepository;
 import com.agafari.com.jpa.repository.PlanRequestRepository;
 import com.agafari.com.service.MonetizationClock;
 import com.agafari.com.service.MonetizationLocks;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -57,18 +58,19 @@ import java.util.UUID;
  * AGF SUB-R4-05 (BD-14, DD §7.2): reserve, call the provider outside any transaction, record. The class is deliberately not
  * transactional. With {@code billing-enabled} off nothing here touches the database, so the H2 demo is unaffected.
  */
+@Slf4j
 @Service
 public class CheckoutService {
 
     private static final Duration QUOTE_LIFETIME = Duration.ofHours(24); // PD-2
     private static final Duration BACKSTOP_DELAY = Duration.ofMinutes(2);
     private static final int MAX_KEY_LENGTH = 255;
-    private static final String COLUMNS = "id, business_id, price_id, kind, status, provider_session_url, expires_at, created_at, expected_amount_minor, expected_currency, request_hash";
+    private static final String COLUMNS = "id, business_id, price_id, kind, status, provider_session_url, expires_at, created_at, expected_amount_minor, expected_currency, request_hash, provider_session_ref, row_version";
 
     public record Outcome(HttpStatus status, CheckoutResponse checkout) {
     }
 
-    record Row(String id, String businessId, String priceId, CheckoutKind kind, String status, String url, Instant expiresAt, Instant createdAt, Money expected, String requestHash) {
+    record Row(String id, String businessId, String priceId, CheckoutKind kind, String status, String url, Instant expiresAt, Instant createdAt, Money expected, String requestHash, String ref, int rowVersion) {
     }
 
     record Reservation(Row row, boolean fresh, BillingStrategy strategy) {
@@ -76,7 +78,7 @@ public class CheckoutService {
 
     private static final RowMapper<Row> MAPPER = (rs, n) -> new Row(rs.getString("id"), rs.getString("business_id"), rs.getString("price_id"), CheckoutKind.valueOf(rs.getString("kind")),
             rs.getString("status"), rs.getString("provider_session_url"), rs.getTimestamp("expires_at").toInstant(), rs.getTimestamp("created_at").toInstant(),
-            new Money(rs.getLong("expected_amount_minor"), Currency.valueOf(rs.getString("expected_currency"))), rs.getString("request_hash"));
+            new Money(rs.getLong("expected_amount_minor"), Currency.valueOf(rs.getString("expected_currency"))), rs.getString("request_hash"), rs.getString("provider_session_ref"), rs.getInt("row_version"));
 
     private final JdbcTemplate jdbc;
     private final BillingStrategyRegistry registry;
@@ -88,11 +90,12 @@ public class CheckoutService {
     private final JobQueue jobs;
     private final MonetizationClock clock;
     private final TransactionTemplate transaction;
+    private final CheckoutCancellation cancellation;
     private final Set<Market> enabled = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public CheckoutService(JdbcTemplate jdbc, BillingStrategyRegistry registry, MonetizationLocks locks, PlanPriceRepository prices, MonetizationConfigRepository configs,
                            BusinessSubscriptionRepository subscriptions, PlanRequestRepository planRequests, JobQueue jobs, MonetizationClock clock,
-                           PlatformTransactionManager transactions, BillingFlags flags) {
+                           PlatformTransactionManager transactions, BillingFlags flags, CheckoutCancellation cancellation) {
         this.jdbc = jdbc;
         this.registry = registry;
         this.locks = locks;
@@ -103,6 +106,7 @@ public class CheckoutService {
         this.jobs = jobs;
         this.clock = clock;
         this.transaction = new TransactionTemplate(transactions);
+        this.cancellation = cancellation;
         if (flags.us().billingEnabled()) enabled.add(Market.US);
         if (flags.et().billingEnabled()) enabled.add(Market.ET);
     }
@@ -114,6 +118,10 @@ public class CheckoutService {
     }
 
     public Outcome create(String businessId, String ownerId, String priceId, String idempotencyKey) {
+        return create(businessId, ownerId, priceId, idempotencyKey, null, null);
+    }
+
+    public Outcome create(String businessId, String ownerId, String priceId, String idempotencyKey, String replaceCheckoutId, Integer replaceRowVersion) {
         requireAnyMarketEnabled();
         if (priceId == null || priceId.isBlank()) throw new FieldValidationException(Map.of("priceId", "A price is required"));
         if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > MAX_KEY_LENGTH) {
@@ -121,7 +129,7 @@ public class CheckoutService {
         }
         Market market = enabledMarketOf(businessId);
         BillingStrategy strategy = registry.forMarket(market);
-        Reservation reservation = reserve(businessId, ownerId, priceId, idempotencyKey, market, strategy);
+        Reservation reservation = reserve(businessId, ownerId, priceId, idempotencyKey, market, strategy, replaceCheckoutId, replaceRowVersion);
         if (!reservation.fresh()) return existing(reservation.row());
         return callProvider(reservation);
     }
@@ -147,18 +155,22 @@ public class CheckoutService {
 
     /** TX-A. If the database rejects what the locks should have prevented, the outcome is still a clean one. */
     Reservation reserve(String businessId, String ownerId, String priceId, String key, Market market, BillingStrategy strategy) {
+        return reserve(businessId, ownerId, priceId, key, market, strategy, null, null);
+    }
+
+    Reservation reserve(String businessId, String ownerId, String priceId, String key, Market market, BillingStrategy strategy, String replaceId, Integer replaceVersion) {
         try {
-            return transaction.execute(s -> reserveLocked(businessId, ownerId, priceId, key, market, strategy));
+            return transaction.execute(s -> reserveLocked(businessId, ownerId, priceId, key, market, strategy, replaceId, replaceVersion));
         } catch (DuplicateKeyException e) {
             if (e.getMessage() != null && e.getMessage().contains("uk_checkout_session_idempotency")) {
-                return transaction.execute(s -> reserveLocked(businessId, ownerId, priceId, key, market, strategy));
+                return transaction.execute(s -> reserveLocked(businessId, ownerId, priceId, key, market, strategy, replaceId, replaceVersion));
             }
             if (e.getMessage() != null && e.getMessage().contains("uk_checkout_session_active")) throw active();
             throw e;
         }
     }
 
-    private Reservation reserveLocked(String businessId, String ownerId, String priceId, String key, Market market, BillingStrategy strategy) {
+    private Reservation reserveLocked(String businessId, String ownerId, String priceId, String key, Market market, BillingStrategy strategy, String replaceId, Integer replaceVersion) {
         locks.configShared();
         locks.restaurant(businessId);
         Instant now = clock.now();
@@ -183,8 +195,13 @@ public class CheckoutService {
 
         List<Row> active = jdbc.query("select " + COLUMNS + " from checkout_session where business_id = ? and status in ('CREATING', 'OPEN')", MAPPER, businessId);
         if (!active.isEmpty()) {
-            if (active.get(0).priceId().equals(priceId)) return new Reservation(active.get(0), false, strategy);
-            throw active();
+            Row current2 = active.get(0);
+            if (current2.priceId().equals(priceId)) return new Reservation(current2, false, strategy);
+            if (replaceId == null && replaceVersion == null) throw active();
+            if (!current2.id().equals(replaceId) || replaceVersion == null || current2.rowVersion() != replaceVersion) {
+                throw new CheckoutRefusedException(HttpStatus.CONFLICT, CheckoutRefusedException.VERSION_CONFLICT, "Your checkout changed. Please review it and try again.");
+            }
+            cancellation.request(current2.id(), current2.ref(), CheckoutCancellation.OWNER_REPLACED);
         }
 
         jdbc.update("insert into billing_account (id, business_id, market, provider) values (?, ?, ?, ?) on conflict (business_id, provider) do nothing",
@@ -198,7 +215,7 @@ public class CheckoutService {
                 id, businessId, ownerId, priceId, config.getId(), plan.kind().name(), plan.replacesSubscriptionId(), strategy.provider(), key, hash,
                 Timestamp.from(expiresAt), expected.minor(), expected.currency().name(), Timestamp.from(now));
         jobs.enqueue(CheckoutCreateHandler.TYPE, id, new CheckoutCreatePayload(id), BACKSTOP_DELAY);
-        return new Reservation(new Row(id, businessId, priceId, plan.kind(), "CREATING", null, expiresAt, now, expected, hash), true, strategy);
+        return new Reservation(new Row(id, businessId, priceId, plan.kind(), "CREATING", null, expiresAt, now, expected, hash, null, 0), true, strategy);
     }
 
     private static CheckoutRefusedException active() {
@@ -255,7 +272,9 @@ public class CheckoutService {
             locks.restaurant(row.businessId());
             int opened = jdbc.update("update checkout_session set status = 'OPEN', provider_session_ref = ?, provider_session_url = ?, row_version = row_version + 1 where id = ? and status = 'CREATING'",
                     session.providerSessionRef(), session.url(), row.id());
-            if (opened == 0) jdbc.update("update checkout_session set provider_session_ref = ? where id = ? and status = 'CANCEL_REQUESTED' and provider_session_ref is null", session.providerSessionRef(), row.id());
+            if (opened == 0 && jdbc.update("update checkout_session set provider_session_ref = ? where id = ? and status = 'CANCEL_REQUESTED' and provider_session_ref is null", session.providerSessionRef(), row.id()) == 1) {
+                cancellation.enqueueExpiry(row.id());
+            }
             return load(row.id());
         });
     }
@@ -272,6 +291,45 @@ public class CheckoutService {
             jdbc.update("update checkout_session set status = 'CREATE_FAILED', cancel_requested_at = ?, cancelled_reason = ?, row_version = row_version + 1 where id = ? and status = 'CREATING'",
                     Timestamp.from(clock.now()), reason, row.id());
         });
+    }
+
+    /** AGF SUB-R4-06: one transaction under the locks; the provider is asked later, by the job. */
+    public CheckoutResponse cancel(String businessId, String id) {
+        requireAnyMarketEnabled();
+        enabledMarketOf(businessId);
+        return response(transaction.execute(s -> {
+            locks.configShared();
+            locks.restaurant(businessId);
+            List<Row> rows = jdbc.query("select " + COLUMNS + " from checkout_session where id = ? and business_id = ?", MAPPER, id, businessId);
+            if (rows.isEmpty()) throw new NotFoundException("Checkout not found");
+            Row row = rows.get(0);
+            if ("CANCEL_REQUESTED".equals(row.status())) return row;
+            if (!"CREATING".equals(row.status()) && !"OPEN".equals(row.status())) {
+                throw new CheckoutRefusedException(HttpStatus.CONFLICT, CheckoutRefusedException.NOT_CANCELLABLE, "This checkout has already finished.");
+            }
+            cancellation.request(row.id(), row.ref(), CheckoutCancellation.OWNER_CANCELLED);
+            return load(row.id());
+        }));
+    }
+
+    /**
+     * The {@code checkout.expire} job. Ends on success, on a final answer, or at {@code expires_at}. It never changes the
+     * checkout: {@code CANCELLED} comes from reconciliation (SUB-R4-14), and a payment that beat the cancel goes to the matrix.
+     */
+    void expire(String checkoutId) {
+        ProviderCallGuard.assertNoTransaction();
+        Row row = load(checkoutId);
+        if (row == null || !"CANCEL_REQUESTED".equals(row.status()) || row.ref() == null) return;
+        if (!clock.now().isBefore(row.expiresAt())) return;
+        BillingStrategy strategy = registry.forBusiness(row.businessId());
+        if (!strategy.client().capabilities().sessionExpire()) return; // TA §6.2: relies on expires_at and Agafari-side refusal
+        try {
+            strategy.client().expireSession(row.ref(), "checkout-expire:" + row.id());
+        } catch (ProviderRejectedException e) {
+            log.warn("event=billing.checkout_expire_refused checkoutId={}", row.id());
+        } catch (ProviderTimeoutException e) {
+            throw new TransientJobException("The provider timed out expiring a checkout", e);
+        }
     }
 
     /** The {@code checkout.create} backstop. Capabilities are read here, outside any transaction (PO decision, SUB-R4-04 D1). */
@@ -303,6 +361,6 @@ public class CheckoutService {
     }
 
     private static CheckoutResponse response(Row row) {
-        return new CheckoutResponse(row.id(), row.status(), "OPEN".equals(row.status()) ? row.url() : null, row.expiresAt());
+        return new CheckoutResponse(row.id(), row.status(), "OPEN".equals(row.status()) ? row.url() : null, row.expiresAt(), row.rowVersion());
     }
 }

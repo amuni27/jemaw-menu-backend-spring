@@ -23,6 +23,17 @@ class CheckoutIndexIsLastLineTest extends CheckoutTestBase {
         assertThat(results).allMatch(s -> s == 201 || s == 200 || s == 202 || s == 409);
     }
 
+    @Test
+    void cancellationTakesTheConfigurationLockBeforeTheRestaurantLock() throws Exception {
+        httpStatus(owner, "k", price);
+        String id = (String) only().get("id");
+        org.mockito.Mockito.clearInvocations(locks);
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/billing/checkouts/{id}/cancel", id).header("Authorization", data.bearer(owner)));
+        var order = org.mockito.Mockito.inOrder(locks);
+        order.verify(locks).configShared();
+        order.verify(locks).restaurant(owner.businessId());
+    }
+
     private String otherOrSame(int i) {
         return i % 2 == 0 ? price : otherPrice;
     }

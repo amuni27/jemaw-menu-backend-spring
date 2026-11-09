@@ -41,6 +41,11 @@ public class MonetizationLocks {
         this.dataSource = dataSource;
     }
 
+    /** AGF SUB-R4-06: the H2 demo has no billing tables, so billing work on a shared path checks this first. */
+    public boolean onPostgres() {
+        return enabled();
+    }
+
     public void configExclusive() {
         if (enabled()) {
             jdbc.execute("select pg_advisory_xact_lock(" + CONFIG_LOCK_KEY + ")");

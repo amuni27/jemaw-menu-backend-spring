@@ -1,5 +1,6 @@
 package com.agafari.com.service;
 
+import com.agafari.com.billing.CheckoutCancellation;
 import com.agafari.com.dto.request.MonetizationConfigRequest;
 import com.agafari.com.dto.response.MonetizationConfigHistoryPage;
 import com.agafari.com.dto.response.MonetizationConfigResponse;
@@ -44,13 +45,16 @@ public class MonetizationConfigService {
     private final TransactionTemplate transaction;
     private final MonetizationLocks locks;
     private final Clock clock = Clock.systemUTC();
+    private final CheckoutCancellation checkoutCancellation;
 
     public MonetizationConfigService(MonetizationConfigRepository configs, UserRepository users, AdminAuditService audit,
-                                     PlatformTransactionManager transactionManager, MonetizationLocks locks) {
+                                     PlatformTransactionManager transactionManager, MonetizationLocks locks,
+                                     CheckoutCancellation checkoutCancellation) {
         this.configs = configs;
         this.users = users;
         this.audit = audit;
         this.locks = locks;
+        this.checkoutCancellation = checkoutCancellation;
         this.transaction = new TransactionTemplate(transactionManager); // the version and its audit row commit together
     }
 
@@ -97,6 +101,7 @@ public class MonetizationConfigService {
 
         MonetizationConfig saved = configs.saveAndFlush(new MonetizationConfig(currentVersion + 1, change.setting(),
                 EnumSet.copyOf(change.models()), clock.instant(), adminId));
+        checkoutCancellation.requestForConfiguration(change.models().stream().map(Enum::name).toList(), current != null && current.getSetting() != change.setting());
         audit.success(CHANGED, adminId, actor, TARGET, String.valueOf(saved.getVersion()),
                 saved.describe() + " (was " + (current == null ? "not configured" : current.describe()) + ")");
         return response(saved);

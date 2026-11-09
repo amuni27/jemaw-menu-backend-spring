@@ -30,8 +30,15 @@ public class CheckoutController {
     @PostMapping
     public ResponseEntity<CheckoutResponse> create(@RequestBody(required = false) CheckoutCreateRequest request,
                                                    @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
-        CheckoutService.Outcome outcome = checkouts.create(currentUser.businessId(), currentUser.userId(), request == null ? null : request.priceId(), idempotencyKey);
+        CheckoutService.Outcome outcome = checkouts.create(currentUser.businessId(), currentUser.userId(), request == null ? null : request.priceId(), idempotencyKey,
+                request == null ? null : request.replaceCheckoutId(), request == null ? null : request.replaceRowVersion());
         return ResponseEntity.status(outcome.status()).body(outcome.checkout());
+    }
+
+    /** AGF SUB-R4-06: requests cancellation; a repeat is a no-op. The provider is asked later, by a job. */
+    @PostMapping("/{id}/cancel")
+    public ResponseEntity<CheckoutResponse> cancel(@PathVariable String id) {
+        return ResponseEntity.ok(checkouts.cancel(currentUser.businessId(), id));
     }
 
     /** For the return page. It only reads: the browser redirect never activates anything. */

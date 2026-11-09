@@ -47,6 +47,7 @@ import java.util.Set;
  *   <li>{@link Script#DUPLICATE}: a listing returns every record twice.</li>
  *   <li>{@link Script#OUT_OF_ORDER}: a listing returns records newest first.</li>
  *   <li>{@link Script#ALREADY_COMPLETE_ON_EXPIRE}: expiring a session reports it was already paid.</li>
+ *   <li>{@link Script#EXPIRE_TIMEOUT}, {@link Script#EXPIRE_REFUSED}: expiring a session times out, or is definitely refused.</li>
  *   <li>{@link Script#LOOKUP_LAG}: {@code findRefund} finds nothing for {@code laggedLookups} calls, even when the refund exists.</li>
  * </ul>
  * Capability toggles ({@link #capabilities(ProviderCapabilities)}): without idempotent create or refund a repeated key creates
@@ -54,7 +55,7 @@ import java.util.Set;
  */
 public final class FakeProviderClient extends GuardedProviderClient {
 
-    public enum Script { SUCCESS, DECLINE, DELAY, TIMEOUT_AFTER_ACCEPT, DUPLICATE, OUT_OF_ORDER, ALREADY_COMPLETE_ON_EXPIRE, LOOKUP_LAG }
+    public enum Script { SUCCESS, DECLINE, DELAY, TIMEOUT_AFTER_ACCEPT, DUPLICATE, OUT_OF_ORDER, ALREADY_COMPLETE_ON_EXPIRE, LOOKUP_LAG, EXPIRE_TIMEOUT, EXPIRE_REFUSED }
 
     public static final ProviderCapabilities ALL = new ProviderCapabilities(true, true, true, Duration.ofHours(24), true);
     public static final Instant PAID_AT = Instant.parse("2030-01-01T00:00:00Z");
@@ -68,6 +69,9 @@ public final class FakeProviderClient extends GuardedProviderClient {
     private int laggedLookups = 1;
     private volatile Runnable onCreate = () -> { };
     private volatile boolean createRanInTransaction;
+    private volatile boolean expireRanInTransaction;
+    private volatile String lastExpireKey;
+    private final java.util.concurrent.atomic.AtomicInteger expireCalls = new java.util.concurrent.atomic.AtomicInteger();
     private final java.util.concurrent.atomic.AtomicInteger createCalls = new java.util.concurrent.atomic.AtomicInteger();
     private int nextSession;
     private int nextRefund;
@@ -110,6 +114,18 @@ public final class FakeProviderClient extends GuardedProviderClient {
         return this;
     }
 
+    public int expireCalls() {
+        return expireCalls.get();
+    }
+
+    public String lastExpireKey() {
+        return lastExpireKey;
+    }
+
+    public boolean expireRanInTransaction() {
+        return expireRanInTransaction;
+    }
+
     public int createCalls() {
         return createCalls.get();
     }
@@ -124,6 +140,9 @@ public final class FakeProviderClient extends GuardedProviderClient {
         onCreate = () -> { };
         createRanInTransaction = false;
         createCalls.set(0);
+        expireCalls.set(0);
+        lastExpireKey = null;
+        expireRanInTransaction = false;
         nextSession = 0;
         sessions.clear();
         timedOut.clear();
@@ -166,6 +185,11 @@ public final class FakeProviderClient extends GuardedProviderClient {
     @Override
     protected ExpireResult doExpireSession(String ref, String key) {
         if (!capabilities.sessionExpire()) throw new UnsupportedOperationException("session expiry isn't confirmed");
+        expireCalls.incrementAndGet();
+        lastExpireKey = key;
+        if (TransactionSynchronizationManager.isActualTransactionActive()) expireRanInTransaction = true;
+        if (script == Script.EXPIRE_TIMEOUT) throw new ProviderTimeoutException("timed out");
+        if (script == Script.EXPIRE_REFUSED) throw new ProviderRejectedException("refused");
         return script == Script.ALREADY_COMPLETE_ON_EXPIRE ? ExpireResult.ALREADY_COMPLETE : ExpireResult.EXPIRED;
     }
 

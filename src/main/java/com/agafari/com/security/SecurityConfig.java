@@ -47,7 +47,8 @@ public class SecurityConfig {
                                 "/api/demo/**", // only exists in -Pdemo builds (local demo outbox)
                                 "/actuator/**",
                                 "/venue/**",
-                                "/venue/items/**"
+                                "/venue/items/**",
+                                "/api/billing/webhooks/**" // AGF SUB-R4-07: authenticated by the provider's signature; 404 while billing is off
                         ).permitAll()
 
                         // owner APIs: restaurant owners only (AGF-S1-06); tenant ownership is checked in the services

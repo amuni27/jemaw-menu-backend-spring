@@ -32,6 +32,11 @@ public class BillingStrategyRegistry {
         return strategy;
     }
 
+    /** AGF SUB-R4-07: the strategy whose provider has this name; never trusted beyond choosing whose signature to check. */
+    public java.util.Optional<BillingStrategy> forProvider(String provider) {
+        return strategies.values().stream().filter(s -> s.provider().equals(provider)).findFirst();
+    }
+
     public BillingStrategy forBusiness(String businessId) {
         List<String> markets = jdbc.queryForList("select distinct market from billing_account where business_id = ?", String.class, businessId);
         if (markets.isEmpty()) throw new IllegalStateException("The restaurant has no billing account");

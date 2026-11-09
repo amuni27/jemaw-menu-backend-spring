@@ -96,6 +96,11 @@ public class AuthRateLimiter {
         checkAndCount("verify_email_ip", "verify-email-ip:" + ip, props.verifyEmailPerIp(), maskIp(ip));
     }
 
+    /** AGF SUB-R4-07: provider webhooks per IP, a bucket of their own. */
+    public void countWebhook(String ip) {
+        checkAndCount("webhook_ip", "webhook-ip:" + ip, props.webhookPerIp(), maskIp(ip));
+    }
+
     // ------------------------------------------------------------------ test support
 
     /** Clears all counters (tests). */

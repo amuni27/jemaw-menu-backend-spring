@@ -21,6 +21,7 @@ public record RateLimitProperties(
         Rule verifyEmailResendPerUser, // AGF-S2-22: successful resends only
         Rule verifyEmailResendPerIp,
         Rule verifyEmailPerIp,
+        Rule webhookPerIp, // AGF SUB-R4-07: its own bucket; legitimate providers send bursts
         int maxTrackedKeys
 ) {
     /** At most {@code limit} events per {@code window}. */

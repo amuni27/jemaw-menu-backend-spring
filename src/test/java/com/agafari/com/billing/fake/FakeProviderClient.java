@@ -14,10 +14,15 @@ import com.agafari.com.billing.port.ProviderSessionRequest;
 import com.agafari.com.billing.port.ProviderTimeoutException;
 import com.agafari.com.billing.port.RecordType;
 import com.agafari.com.billing.port.RefundSubmission;
+import com.agafari.com.billing.port.InboundEvent;
+import com.agafari.com.billing.port.RotatingSignatureVerifier;
 import com.agafari.com.billing.port.SignatureVerifier;
 import com.agafari.com.billing.port.VerifiedPayment;
 
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -69,6 +74,8 @@ public final class FakeProviderClient extends GuardedProviderClient {
     private int laggedLookups = 1;
     private volatile Runnable onCreate = () -> { };
     private volatile boolean createRanInTransaction;
+    private volatile String currentSecret = SECRET;
+    private volatile String previousSecret;
     private volatile boolean expireRanInTransaction;
     private volatile String lastExpireKey;
     private final java.util.concurrent.atomic.AtomicInteger expireCalls = new java.util.concurrent.atomic.AtomicInteger();
@@ -126,6 +133,10 @@ public final class FakeProviderClient extends GuardedProviderClient {
         return expireRanInTransaction;
     }
 
+    public int verifyCalls() {
+        return fetches.values().stream().mapToInt(Integer::intValue).sum();
+    }
+
     public int createCalls() {
         return createCalls.get();
     }
@@ -139,6 +150,9 @@ public final class FakeProviderClient extends GuardedProviderClient {
         capabilities = ALL;
         onCreate = () -> { };
         createRanInTransaction = false;
+        currentSecret = SECRET;
+        previousSecret = null;
+        fetches.clear();
         createCalls.set(0);
         expireCalls.set(0);
         lastExpireKey = null;
@@ -237,13 +251,40 @@ public final class FakeProviderClient extends GuardedProviderClient {
 
     @Override
     protected SignatureVerifier doSignatureVerifier() {
-        return (headers, body) -> sign(body).equals(headers.get(SIGNATURE_HEADER));
+        return new RotatingSignatureVerifier(new HmacVerifier(currentSecret), previousSecret == null ? null : new HmacVerifier(previousSecret));
+    }
+
+    public FakeProviderClient secrets(String current, String previous) {
+        currentSecret = current;
+        previousSecret = previous;
+        return this;
+    }
+
+    private record HmacVerifier(String secret) implements SignatureVerifier {
+        @Override
+        public boolean verify(Map<String, String> headers, byte[] body) {
+            return sign(body, secret).equals(headers.get(SIGNATURE_HEADER));
+        }
+
+        @Override
+        public InboundEvent identify(byte[] body) {
+            try {
+                JsonNode node = new ObjectMapper().readTree(body);
+                return new InboundEvent(node.path("id").asString(""), node.path("type").asString(""));
+            } catch (JacksonException e) {
+                throw new IllegalArgumentException("Not JSON", e);
+            }
+        }
     }
 
     public static String sign(byte[] body) {
+        return sign(body, SECRET);
+    }
+
+    public static String sign(byte[] body, String secret) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             return HexFormat.of().formatHex(mac.doFinal(body));
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException(e);

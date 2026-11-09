@@ -123,6 +123,9 @@ app:
     verify-email-per-ip:          # verification-link submissions from one client IP
       limit: 10
       window: 15m
+    webhook-per-ip:               # provider webhooks from one client IP (AGF SUB-R4-07)
+      limit: 600
+      window: 1m
     max-tracked-keys: 100000    # memory bound for the counters
 
 

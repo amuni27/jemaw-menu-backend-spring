@@ -6,4 +6,11 @@ import java.util.Map;
 public interface SignatureVerifier {
 
     boolean verify(Map<String, String> headers, byte[] rawBody);
+
+    /**
+     * AGF SUB-R4-07: the event's identity, read only after {@link #verify} succeeded.
+     *
+     * @throws IllegalArgumentException if a signed body isn't a well-formed event
+     */
+    InboundEvent identify(byte[] rawBody);
 }

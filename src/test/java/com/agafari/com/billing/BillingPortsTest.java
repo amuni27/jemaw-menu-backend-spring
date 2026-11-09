@@ -246,6 +246,23 @@ class BillingPortsTest {
     }
 
     @Test
+    void theRegistryFindsAStrategyByProviderOnly() {
+        FakeStrategy et = new FakeStrategy(Market.ET, "A", new FakeProviderClient()), us = new FakeStrategy(Market.US, "B", new FakeProviderClient());
+        BillingStrategyRegistry r = registry(mock(JdbcTemplate.class), et, us);
+        assertThat(r.forProvider("A")).containsSame(et);
+        assertThat(r.forProvider("B")).containsSame(us);
+        assertThat(r.forProvider("C")).isEmpty();
+    }
+
+    @Test
+    void anInboundEventNeedsAnIdentity() {
+        assertThatThrownBy(() -> new com.agafari.com.billing.port.InboundEvent(" ", "t")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new com.agafari.com.billing.port.InboundEvent("x".repeat(256), "t")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new com.agafari.com.billing.port.InboundEvent("e", "t".repeat(129))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new com.agafari.com.billing.port.InboundEvent("e", null)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void aShellNeedsADelegate() {
         assertThatThrownBy(() -> new EtBillingStrategy(null)).isInstanceOf(IllegalArgumentException.class);
     }

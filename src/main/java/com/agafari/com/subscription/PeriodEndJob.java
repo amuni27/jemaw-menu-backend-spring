@@ -14,10 +14,11 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * AGF SUB-R2-10 (TA §4.3 rule 6, DD §3.3): persists what reads already enforce. The cadence enqueues one job per due row
- * (key = subscription + period end); the handler calls {@code materialize}, which re-evaluates the row under the locks, so
+ * (key = subscription + period end, plus the target status for a PROVIDER row, which has two transitions); the handler calls {@code materialize}, which re-evaluates the row under the locks, so
  * a repeat, a stale job or an admin extension changes nothing. Whether a row is due is decided only by {@link EffectiveState}.
  */
 @Component
@@ -70,17 +71,28 @@ public class PeriodEndJob implements JobHandler<PeriodEndJob.Payload> {
             batch = subscriptions.findPeriodEndCandidates(after, Limit.of(BATCH));
             if (batch.isEmpty()) break;
             after = batch.get(batch.size() - 1).getId();
-            List<BusinessSubscription> dueRows = batch.stream().filter(this::needsPersisting).toList();
+            List<DueRow> dueRows = batch.stream().map(this::dueRow).flatMap(Optional::stream).toList();
             due += dueRows.size();
-            transaction.executeWithoutResult(status -> dueRows.forEach(s ->
-                    queue.enqueue(TYPE, s.getId() + "@" + s.getPeriodEnd(), new Payload(s.getBusinessId(), s.getId(), s.getPeriodEnd()))));
+            transaction.executeWithoutResult(status -> dueRows.forEach(d ->
+                    queue.enqueue(TYPE, d.key(), new Payload(d.row().getBusinessId(), d.row().getId(), d.row().getPeriodEnd()))));
         } while (batch.size() == BATCH);
         return due;
     }
 
-    private boolean needsPersisting(BusinessSubscription s) {
+    /** One evaluation decides both whether a row is due and which transition its job is for. */
+    private Optional<DueRow> dueRow(BusinessSubscription s) {
         EffectiveView view = evaluator.view(s, false, clock.now());
-        return view.status() != LifecycleStatus.of(s.getStatus()) && (view.status() == LifecycleStatus.EXPIRED || view.status() == LifecycleStatus.PAST_DUE);
+        boolean due = view.status() != LifecycleStatus.of(s.getStatus()) && (view.status() == LifecycleStatus.EXPIRED || view.status() == LifecycleStatus.PAST_DUE);
+        return due ? Optional.of(new DueRow(s, key(s, view.status()))) : Optional.empty();
+    }
+
+    /** A PROVIDER row has two transitions per period, so each has its own identity; every other source keeps its one key unchanged. */
+    private static String key(BusinessSubscription s, LifecycleStatus target) {
+        String key = s.getId() + "@" + s.getPeriodEnd();
+        return SubscriptionSource.of(s.getSource()) == SubscriptionSource.PROVIDER ? key + "#" + target : key;
+    }
+
+    private record DueRow(BusinessSubscription row, String key) {
     }
 
     @Override

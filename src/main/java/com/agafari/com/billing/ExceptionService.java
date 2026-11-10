@@ -62,7 +62,7 @@ public class ExceptionService {
             (Long) rs.getObject("amount_minor"), rs.getString("currency"), instant(rs.getTimestamp("paid_at")), rs.getBoolean("involves_customer_funds"),
             rs.getString("owner_user_id"), instant(rs.getTimestamp("claimed_at")), instant(rs.getTimestamp("escalated_at")), rs.getString("escalation_reason"),
             rs.getString("escalated_to"), rs.getString("resolution"), rs.getString("resolution_note"), rs.getString("resolved_by"), instant(rs.getTimestamp("resolved_at")),
-            instant(rs.getTimestamp("created_at")), rs.getInt("row_version"));
+            instant(rs.getTimestamp("created_at")), rs.getInt("row_version"), instant(rs.getTimestamp("due_at")), null, null, null);
 
     private final JdbcTemplate jdbc;
     private final MonetizationLocks locks;
@@ -70,9 +70,13 @@ public class ExceptionService {
     private final TransactionTemplate transaction;
     private final ObjectMapper mapper;
     private final ObjectProvider<PaymentOutcomeService> outcomes;
+    private final ExceptionSla sla;
+    private final com.agafari.com.service.MonetizationClock clock;
 
     public ExceptionService(JdbcTemplate jdbc, MonetizationLocks locks, AdminAuditService audit, PlatformTransactionManager transactions, ObjectMapper mapper,
-                            ObjectProvider<PaymentOutcomeService> outcomes) {
+                            ObjectProvider<PaymentOutcomeService> outcomes, ExceptionSla sla, com.agafari.com.service.MonetizationClock clock) {
+        this.sla = sla;
+        this.clock = clock;
         this.jdbc = jdbc;
         this.locks = locks;
         this.audit = audit;
@@ -88,16 +92,40 @@ public class ExceptionService {
     boolean create(String businessId, String code, String paymentId, String checkoutId, String providerEventId, String refundRequestId, Long amountMinor, String currency,
                    Instant paidAt, boolean involvesCustomerFunds, String status, Map<String, Object> facts, Instant now) {
         String id = UUID.randomUUID().toString();
+        Instant created = now.truncatedTo(ChronoUnit.MICROS);
+        // AGF SUB-R4-12 (R-3, I2): a customer-funds exception gets its deadline now; its basis is kept with the facts
+        ExceptionSla.Due due = involvesCustomerFunds ? sla.compute(businessId, created) : null;
+        Map<String, Object> recorded = new java.util.LinkedHashMap<>(facts);
+        if (due != null) recorded.put("sla", due.facts());
         int inserted = jdbc.update("insert into billing_exception (id, business_id, code, payment_id, checkout_id, provider_event_id, refund_request_id, amount_minor, currency, "
-                        + "paid_at, involves_customer_funds, facts, status, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?) on conflict do nothing",
+                        + "paid_at, involves_customer_funds, facts, status, created_at, due_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?) on conflict do nothing",
                 id, businessId, code, paymentId, checkoutId, providerEventId, refundRequestId, amountMinor, currency, timestamp(paidAt), involvesCustomerFunds,
-                mapper.writeValueAsString(facts), status, timestamp(now));
-        if (inserted == 1) audit.success(OPENED, null, AdminAuditService.SYSTEM, TARGET, id, "code=" + code + " status=" + status);
+                mapper.writeValueAsString(recorded), status, timestamp(created), due == null ? null : timestamp(due.dueAt()));
+        if (inserted == 1) {
+            String deadline = due == null ? "" : " due=" + due.dueAt() + " immediate=" + due.immediate() + " calendarIncomplete=" + due.calendarIncomplete()
+                    + " graceUnknown=" + due.graceUnknown();
+            audit.success(OPENED, null, AdminAuditService.SYSTEM, TARGET, id, "code=" + code + " status=" + status + deadline);
+            if (due != null && due.immediate()) org.slf4j.LoggerFactory.getLogger(ExceptionService.class).warn("event=billing.exception_immediate id={} due={}", id, due.dueAt());
+            if (due != null && due.calendarIncomplete()) {
+                org.slf4j.LoggerFactory.getLogger(ExceptionService.class).warn("event=billing.calendar_incomplete id={} market={}", id, due.market());
+            }
+        }
         return inserted == 1;
     }
 
     public BillingExceptionView get(String id) {
-        return load(id).orElseThrow(() -> new NotFoundException("Exception not found"));
+        return derive(load(id).orElseThrow(() -> new NotFoundException("Exception not found")));
+    }
+
+    /** AGF SUB-R4-12 (G3): conditions derived from stored data, never stored themselves. */
+    private BillingExceptionView derive(BillingExceptionView v) {
+        if (v.involvesCustomerFunds() == false || v.dueAt() == null) return v;
+        boolean open = Set.of("AUTO_HANDLING", "OPEN", "IN_REVIEW").contains(v.status());
+        ExceptionSla.Due current = sla.compute(v.businessId(), v.createdAt());
+        return new BillingExceptionView(v.id(), v.businessId(), v.code(), v.status(), v.paymentId(), v.checkoutId(), v.providerEventId(), v.refundRequestId(), v.amountMinor(),
+                v.currency(), v.paidAt(), v.involvesCustomerFunds(), v.ownerUserId(), v.claimedAt(), v.escalatedAt(), v.escalationReason(), v.escalatedTo(), v.resolution(),
+                v.resolutionNote(), v.resolvedBy(), v.resolvedAt(), v.createdAt(), v.rowVersion(), v.dueAt(), v.dueAt().equals(v.createdAt()),
+                open && !v.dueAt().isAfter(clock.now()), current != null && current.calendarIncomplete());
     }
 
     public BillingExceptionView claim(String id, BillingExceptionActionRequest request, String adminId, String adminEmail) {

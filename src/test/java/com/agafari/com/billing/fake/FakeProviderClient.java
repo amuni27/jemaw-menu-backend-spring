@@ -95,6 +95,10 @@ public final class FakeProviderClient extends GuardedProviderClient {
     private final Map<String, VerifiedPayment> payments = new java.util.concurrent.ConcurrentHashMap<>();
     private volatile Runnable onVerify = () -> { };
     private volatile boolean verifyRanInTransaction;
+    private final java.util.concurrent.atomic.AtomicInteger refundSubmitCalls = new java.util.concurrent.atomic.AtomicInteger();
+    private volatile boolean refundRanInTransaction;
+    private volatile Runnable onRefund = () -> { };
+    private final Map<String, String> lastRefundKey = new java.util.concurrent.ConcurrentHashMap<>();
 
     public FakeProviderClient script(Script value) {
         script = value;
@@ -144,6 +148,26 @@ public final class FakeProviderClient extends GuardedProviderClient {
         return this;
     }
 
+    /** AGF SUB-R4-13: every call to submit a refund, including same-key retries. */
+    public int refundSubmitCalls() {
+        return refundSubmitCalls.get();
+    }
+
+    /** AGF SUB-R4-13: the idempotency key of the last submission for this refund request. */
+    public String lastRefundKeyFor(String refundRequestId) {
+        return lastRefundKey.get(refundRequestId);
+    }
+
+    public boolean refundRanInTransaction() {
+        return refundRanInTransaction;
+    }
+
+    /** AGF SUB-R4-13: runs at the start of each refund submission, to hold or observe it. */
+    public FakeProviderClient onRefund(Runnable value) {
+        onRefund = value;
+        return this;
+    }
+
     public boolean verifyRanInTransaction() {
         return verifyRanInTransaction;
     }
@@ -190,6 +214,17 @@ public final class FakeProviderClient extends GuardedProviderClient {
         nextSession = 0;
         sessions.clear();
         timedOut.clear();
+        // AGF SUB-R4-13: refunds start afresh in every test
+        nextRefund = 0;
+        refundsByKey.clear();
+        refundsByRequest.clear();
+        lookups.clear();
+        laggedLookups = 1;
+        delayedFetches = 1;
+        refundSubmitCalls.set(0);
+        lastRefundKey.clear();
+        refundRanInTransaction = false;
+        onRefund = () -> { };
     }
 
     public int refundsCreated() {
@@ -256,6 +291,14 @@ public final class FakeProviderClient extends GuardedProviderClient {
 
     @Override
     protected RefundSubmission doSubmitRefund(String paymentRef, Money amount, String key, Map<String, String> metadata) {
+        refundSubmitCalls.incrementAndGet();
+        if (metadata.get("refund_request_id") != null) lastRefundKey.put(metadata.get("refund_request_id"), key);
+        if (TransactionSynchronizationManager.isActualTransactionActive()) refundRanInTransaction = true;
+        onRefund.run();
+        return submitLocked(paymentRef, amount, key, metadata);
+    }
+
+    private synchronized RefundSubmission submitLocked(String paymentRef, Money amount, String key, Map<String, String> metadata) {
         if (script == Script.DECLINE) throw new ProviderRejectedException("declined");
         RefundSubmission submission = capabilities.idempotentRefund() ? refundsByKey.get(key) : null;
         if (submission == null) {

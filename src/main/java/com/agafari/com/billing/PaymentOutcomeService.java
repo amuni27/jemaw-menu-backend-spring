@@ -76,7 +76,6 @@ public class PaymentOutcomeService {
     static final String VERIFICATION = "SIGNED_WEBHOOK+API_FETCH";
     private static final String TARGET_EXCEPTION = "BILLING_EXCEPTION";
     private static final String EXCEPTION_OPENED = "BILLING_EXCEPTION_OPENED";
-    private static final String REFUND_REQUESTED = "BILLING_REFUND_REQUESTED";
     private static final int MAX_ERROR = 1000;
 
     /** @param replay an admin replay: an outcome already noted on the event is kept unless a new one replaces it */
@@ -111,11 +110,14 @@ public class PaymentOutcomeService {
     private final ObjectMapper mapper;
     private final Set<Market> enabled = ConcurrentHashMap.newKeySet();
     private final ExceptionService exceptions;
+    private final RefundService refunds;
 
     public PaymentOutcomeService(JdbcTemplate jdbc, BillingStrategyRegistry registry, MonetizationLocks locks, SubscriptionLifecycle lifecycle,
                                  BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs, MonetizationClock clock,
-                                 PlatformTransactionManager transactions, AdminAuditService audit, ObjectMapper mapper, BillingFlags flags, ExceptionService exceptions) {
+                                 PlatformTransactionManager transactions, AdminAuditService audit, ObjectMapper mapper, BillingFlags flags, ExceptionService exceptions,
+                                 RefundService refunds) {
         this.exceptions = exceptions;
+        this.refunds = refunds;
         this.jdbc = jdbc;
         this.registry = registry;
         this.locks = locks;
@@ -286,10 +288,7 @@ public class PaymentOutcomeService {
             }
             case AUTO_REFUND -> {
                 String paymentId = insertCharge(strategy.provider(), verified, c, businessId, null, tPay, now);
-                String refundId = UUID.randomUUID().toString();
-                jdbc.update("insert into refund_request (id, payment_id, amount_minor, reason, request_key, status) values (?, ?, ?, ?, ?, 'REQUESTED')",
-                        refundId, paymentId, verified.amount().minor(), decision.cause(), "outcome:" + decision.cause());
-                audit.success(REFUND_REQUESTED, null, AdminAuditService.SYSTEM, "REFUND_REQUEST", refundId, "reason=" + decision.cause());
+                String refundId = refunds.request(businessId, paymentId, decision.cause(), "outcome:" + decision.cause()); // AGF SUB-R4-13: B3 checks
                 exception(businessId, decision.code(), paymentId, c.id(), event.id(), refundId, verified, true, "AUTO_HANDLING", snapshot, now);
                 return finish(event, "PROCESSED", decision.code(), Result.PROCESSED);
             }

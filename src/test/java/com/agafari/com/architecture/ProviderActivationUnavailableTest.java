@@ -75,8 +75,11 @@ class ProviderActivationUnavailableTest {
         assertThat(offenders(code -> {
             String lower = code.toLowerCase();
             return lower.contains("'provider'") || lower.contains("subscriptionsource.provider.name()") || lower.contains("insert into payment")
-                    || lower.contains("insert into billing_invoice") || lower.contains("insert into refund_request");
+                    || lower.contains("insert into billing_invoice");
         }, OUTCOME_SERVICE)).isEmpty();
+        assertThat(offenders(code -> code.toLowerCase().contains("insert into refund_request"), "billing/RefundService.java")).as("SUB-R4-13: one refund-request writer").isEmpty();
+        assertThat(offenders(code -> withoutComments(code).contains(".submitRefund(") || withoutComments(code).contains(".findRefund("),
+                "billing/RefundService.java", "billing/port/GuardedProviderClient.java")).as("SUB-R4-13: only RefundService calls the provider about refunds").isEmpty();
         assertThat(offenders(code -> code.toLowerCase().contains("insert into billing_exception"), EXCEPTIONS)).as("SUB-R4-11: one exception writer").isEmpty();
         assertThat(offenders(code -> code.toLowerCase().contains("insert into subscription_period"), "jpa/repository/BusinessSubscriptionRepository.java")).isEmpty();
     }
@@ -91,7 +94,9 @@ class ProviderActivationUnavailableTest {
 
     @Test
     void onlyTheInboxHandlerAndAnExceptionReplayCallThePaymentOutcomeService() throws IOException {
-        assertThat(offenders(code -> withoutComments(code).contains("PaymentOutcomeService"), OUTCOME_SERVICE, HANDLER, EXCEPTIONS)).isEmpty();
+        assertThat(offenders(code -> withoutComments(code).contains("PaymentOutcomeService"), OUTCOME_SERVICE, HANDLER, EXCEPTIONS, "billing/RefundService.java")).isEmpty();
+        assertThat(offenders(code -> java.util.regex.Pattern.compile("outcomes\\.(process|replay)\\(").matcher(withoutComments(code)).find(), HANDLER, EXCEPTIONS))
+                .as("SUB-R4-13: RefundService only reads the billing gate").isEmpty();
         assertThat(offenders(code -> java.util.regex.Pattern.compile("\\.replay\\([^)]").matcher(withoutComments(code)).find(), EXCEPTIONS, "controller/AdminBillingExceptionController.java")).as("SUB-R4-11: replay only from an exception").isEmpty();
     }
 
@@ -124,7 +129,7 @@ class ProviderActivationUnavailableTest {
     @Test
     void theOutcomeServiceIgnoresTheBillingFlagWhileActivationIsNotReady() {
         BillingFlags on = new BillingFlags(true, true, true, new MarketFlags(true, true, false, false), new MarketFlags(true, true, false, false));
-        PaymentOutcomeService service = new PaymentOutcomeService(null, null, null, null, null, null, null, null, null, null, on, null);
+        PaymentOutcomeService service = new PaymentOutcomeService(null, null, null, null, null, null, null, null, null, null, on, null, null);
 
         assertThat(service.billingActive(Market.US)).isFalse();
         assertThat(service.billingActive(Market.ET)).isFalse();

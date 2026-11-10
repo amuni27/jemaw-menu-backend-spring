@@ -50,6 +50,7 @@ public class ExceptionService {
     static final String RESOLVED = "BILLING_EXCEPTION_RESOLVED";
     static final String REPLAYED = "BILLING_EXCEPTION_REPLAYED";
     static final String REJECTED = "BILLING_EXCEPTION_ACTION_REJECTED";
+    static final String HANDED_BACK = "BILLING_EXCEPTION_HANDED_BACK";
     private static final String TARGET = "BILLING_EXCEPTION";
     private static final Set<String> RESOLUTIONS = Set.of("FUNDS_HANDLED_EXTERNALLY", "NO_ACTION_REQUIRED");
     private static final Set<String> REVIEWABLE = Set.of("OPEN", "IN_REVIEW", "ESCALATED");
@@ -111,6 +112,22 @@ public class ExceptionService {
             }
         }
         return inserted == 1;
+    }
+
+    /**
+     * AGF SUB-R4-13 (PO B4, Q1): the approved refund flow hands the charge's AUTO_HANDLING exception back for manual
+     * resolution. Code and facts don't change; the reason is in the audit trail. In the caller's transaction, under the
+     * restaurant lock; repeating it changes nothing.
+     */
+    void handBack(String refundRequestId, String reason, String refundStatus) {
+        List<String> ids = jdbc.queryForList("select id from billing_exception where refund_request_id = ? and status = 'AUTO_HANDLING' for update", String.class, refundRequestId);
+        for (String id : ids) {
+            if (jdbc.update("update billing_exception set status = 'OPEN', row_version = row_version + 1 where id = ? and status = 'AUTO_HANDLING'", id) == 1) {
+                audit.success(HANDED_BACK, null, AdminAuditService.SYSTEM, TARGET, id, "reason=" + reason + " refund=" + refundRequestId + " refundStatus=" + refundStatus
+                        + " AUTO_HANDLING -> OPEN");
+                org.slf4j.LoggerFactory.getLogger(ExceptionService.class).warn("event=billing.refund_handed_back exceptionId={} refundId={} reason={}", id, refundRequestId, reason);
+            }
+        }
     }
 
     public BillingExceptionView get(String id) {

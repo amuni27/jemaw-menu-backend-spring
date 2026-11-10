@@ -94,7 +94,8 @@ class ProviderActivationUnavailableTest {
 
     @Test
     void onlyTheInboxHandlerAndAnExceptionReplayCallThePaymentOutcomeService() throws IOException {
-        assertThat(offenders(code -> withoutComments(code).contains("PaymentOutcomeService"), OUTCOME_SERVICE, HANDLER, EXCEPTIONS, "billing/RefundService.java")).isEmpty();
+        assertThat(offenders(code -> withoutComments(code).contains("PaymentOutcomeService"), OUTCOME_SERVICE, HANDLER, EXCEPTIONS, "billing/RefundService.java",
+                "billing/ReconciliationService.java")).isEmpty();
         assertThat(offenders(code -> java.util.regex.Pattern.compile("outcomes\\.(process|replay)\\(").matcher(withoutComments(code)).find(), HANDLER, EXCEPTIONS))
                 .as("SUB-R4-13: RefundService only reads the billing gate").isEmpty();
         assertThat(offenders(code -> java.util.regex.Pattern.compile("\\.replay\\([^)]").matcher(withoutComments(code)).find(), EXCEPTIONS, "controller/AdminBillingExceptionController.java")).as("SUB-R4-11: replay only from an exception").isEmpty();

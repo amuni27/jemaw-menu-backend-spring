@@ -99,6 +99,7 @@ public final class FakeProviderClient extends GuardedProviderClient {
     private volatile boolean refundRanInTransaction;
     private volatile Runnable onRefund = () -> { };
     private final Map<String, String> lastRefundKey = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicInteger listCalls = new java.util.concurrent.atomic.AtomicInteger();
 
     public FakeProviderClient script(Script value) {
         script = value;
@@ -156,6 +157,11 @@ public final class FakeProviderClient extends GuardedProviderClient {
     /** AGF SUB-R4-13: the idempotency key of the last submission for this refund request. */
     public String lastRefundKeyFor(String refundRequestId) {
         return lastRefundKey.get(refundRequestId);
+    }
+
+    /** AGF SUB-R4-14: how often a listing was asked for. */
+    public int listCalls() {
+        return listCalls.get();
     }
 
     public boolean refundRanInTransaction() {
@@ -223,6 +229,8 @@ public final class FakeProviderClient extends GuardedProviderClient {
         delayedFetches = 1;
         refundSubmitCalls.set(0);
         lastRefundKey.clear();
+        records.clear(); // AGF SUB-R4-14: listings start empty in every test
+        listCalls.set(0);
         refundRanInTransaction = false;
         onRefund = () -> { };
     }
@@ -325,6 +333,7 @@ public final class FakeProviderClient extends GuardedProviderClient {
 
     @Override
     protected List<ProviderRecord> doListSince(Instant since, RecordType type) {
+        listCalls.incrementAndGet();
         List<ProviderRecord> found = new ArrayList<>(records.stream().filter(r -> r.type() == type && !r.occurredAt().isBefore(since)).sorted(Comparator.comparing(ProviderRecord::occurredAt)).toList());
         if (script == Script.OUT_OF_ORDER) return found.reversed();
         if (script == Script.DUPLICATE) found.addAll(List.copyOf(found));

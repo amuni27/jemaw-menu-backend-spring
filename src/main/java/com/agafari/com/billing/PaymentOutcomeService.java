@@ -74,12 +74,19 @@ public class PaymentOutcomeService {
     public static final String LEDGER_FACTS_MISMATCH = "LEDGER_FACTS_MISMATCH";
 
     static final String VERIFICATION = "SIGNED_WEBHOOK+API_FETCH";
+    static final String RECONCILIATION_VERIFICATION = "RECONCILIATION_API_FETCH";
     private static final String TARGET_EXCEPTION = "BILLING_EXCEPTION";
     private static final String EXCEPTION_OPENED = "BILLING_EXCEPTION_OPENED";
     private static final int MAX_ERROR = 1000;
 
     /** @param replay an admin replay: an outcome already noted on the event is kept unless a new one replaces it */
-    private record Event(String id, String provider, String payload, String status, boolean replay) {
+    /** @param internal an internal reconciliation event (SUB-R4-14, G4): its own payload names the payment; the evidence is still the re-fetch */
+    private record Event(String id, String provider, String payload, String status, boolean replay, boolean internal) {
+
+        /** V23.4: the approved method for how this charge was verified. */
+        String verification() {
+            return internal ? RECONCILIATION_VERIFICATION : VERIFICATION;
+        }
     }
 
     private record Checkout(String id, String businessId, String priceId, int configVersion, CheckoutKind kind, String replaces, String status,
@@ -160,7 +167,7 @@ public class PaymentOutcomeService {
         ProviderCallGuard.assertNoTransaction();
         Event loaded = loadEvent(providerEventId);
         if (loaded == null) throw new PermanentJobException("No such provider event " + providerEventId, null);
-        Event event = new Event(loaded.id(), loaded.provider(), loaded.payload(), loaded.status(), replay);
+        Event event = new Event(loaded.id(), loaded.provider(), loaded.payload(), loaded.status(), replay, loaded.internal());
         if (!replay && !"PENDING".equals(event.status())) return Result.ALREADY_DONE;
         if (replay && "IGNORED".equals(event.status())) return Result.ALREADY_DONE;
 
@@ -168,7 +175,7 @@ public class PaymentOutcomeService {
         if (strategy == null) throw unprocessed(event, "billing is not active for provider " + event.provider());
         PaymentProviderClient client = strategy.client();
         byte[] body = event.payload().getBytes(StandardCharsets.UTF_8);
-        String ref = client.signatureVerifier().paymentReference(body).orElse(null);
+        String ref = event.internal() ? internalReference(event) : client.signatureVerifier().paymentReference(body).orElse(null);
         if (ref == null) throw unprocessed(event, "the event names no payment");
 
         VerifiedPayment verified;
@@ -214,6 +221,12 @@ public class PaymentOutcomeService {
     }
 
     // ---- outside the transaction ----
+
+    /** AGF SUB-R4-14: the payment an internal reconciliation event names; null if it names none. */
+    private String internalReference(Event event) {
+        String ref = mapper.readTree(event.payload()).path("payment_ref").asString("");
+        return ref.isBlank() ? null : ref;
+    }
 
     /** PO ruling R4: null when every verified key agrees with Agafari's records; otherwise why it doesn't. */
     private String matchCheckout(Event event, BillingStrategy strategy, VerifiedPayment verified) {
@@ -281,26 +294,26 @@ public class PaymentOutcomeService {
                 if (decision.row() == 0) {
                     exception(businessId, decision.code(), null, c.id(), event.id(), null, verified, true, "OPEN", snapshot, now);
                 } else {
-                    String paymentId = insertCharge(strategy.provider(), verified, c, businessId, null, tPay, now);
+                    String paymentId = insertCharge(event, strategy.provider(), verified, c, businessId, null, tPay, now);
                     exception(businessId, decision.code(), paymentId, c.id(), event.id(), null, verified, true, "OPEN", snapshot, now);
                 }
                 return finish(event, "PROCESSED", decision.code(), Result.PROCESSED);
             }
             case AUTO_REFUND -> {
-                String paymentId = insertCharge(strategy.provider(), verified, c, businessId, null, tPay, now);
+                String paymentId = insertCharge(event, strategy.provider(), verified, c, businessId, null, tPay, now);
                 String refundId = refunds.request(businessId, paymentId, decision.cause(), "outcome:" + decision.cause()); // AGF SUB-R4-13: B3 checks
                 exception(businessId, decision.code(), paymentId, c.id(), event.id(), refundId, verified, true, "AUTO_HANDLING", snapshot, now);
                 return finish(event, "PROCESSED", decision.code(), Result.PROCESSED);
             }
             default -> {
-                apply(decision, strategy, verified, c, businessId, current, price, tPay, now);
+                apply(event, decision, strategy, verified, c, businessId, current, price, tPay, now);
                 return finish(event, "PROCESSED", null, Result.PROCESSED);
             }
         }
     }
 
     /** Row 7: an invoice, the ledger row, then the lifecycle with a pointer to both; the database re-checks the evidence at commit. */
-    private void apply(PaymentOutcome decision, BillingStrategy strategy, VerifiedPayment verified, Checkout c, String businessId, BusinessSubscription current,
+    private void apply(Event event, PaymentOutcome decision, BillingStrategy strategy, VerifiedPayment verified, Checkout c, String businessId, BusinessSubscription current,
                        Map<String, Object> price, Instant tPay, Instant now) {
         try {
             if (decision.action() == PaymentOutcome.Action.EXTEND && current == null) throw new ExpectedSubscriptionChangedException(); // nothing to renew
@@ -314,7 +327,7 @@ public class PaymentOutcomeService {
             jdbc.update("insert into billing_invoice (id, business_id, checkout_session_id, price_id, period_start, period_end, amount_minor, currency, status) "
                             + "values (?, ?, ?, ?, ?, ?, ?, ?, 'PAID')", invoiceId, businessId, c.id(), c.priceId(), Timestamp.from(start), Timestamp.from(end),
                     price.get("amount_minor"), price.get("currency"));
-            String paymentId = insertCharge(strategy.provider(), verified, c, businessId, invoiceId, tPay, now);
+            String paymentId = insertCharge(event, strategy.provider(), verified, c, businessId, invoiceId, tPay, now);
             VerifiedPaymentRef ref = new VerifiedPaymentRef(paymentId, invoiceId);
             String planCode = (String) price.get("plan_code");
             PaidActivation activation = new PaidActivation(planCode, c.configVersion(), c.priceId(), strategy.provider(), null, null, start, end, ref, now);
@@ -344,7 +357,7 @@ public class PaymentOutcomeService {
         Checkout c = loadCheckout(checkoutId, true);
         Instant now = clock.now();
         if (ledgerRow(strategy.provider(), verified.providerPaymentRef()) != null) return finish(event, "PROCESSED", null, Result.PROCESSED);
-        String paymentId = insertCharge(strategy.provider(), verified, c, businessId, null, micros(verified.paidAt()), now);
+        String paymentId = insertCharge(event, strategy.provider(), verified, c, businessId, null, micros(verified.paidAt()), now);
         Map<String, Object> facts = facts(event, c, verified, null);
         facts.put("refusal", refused.reason);
         exception(businessId, refused.code, paymentId, c.id(), event.id(), null, verified, true, "OPEN", facts, now);
@@ -353,13 +366,13 @@ public class PaymentOutcomeService {
 
     // ---- writes ----
 
-    private String insertCharge(String provider, VerifiedPayment verified, Checkout c, String businessId, String invoiceId, Instant tPay, Instant now) {
+    private String insertCharge(Event event, String provider, VerifiedPayment verified, Checkout c, String businessId, String invoiceId, Instant tPay, Instant now) {
         String id = UUID.randomUUID().toString();
         int inserted = jdbc.update("insert into payment (id, business_id, invoice_id, checkout_session_id, provider, provider_payment_ref, amount_minor, currency, kind, status, "
                         + "occurred_at, verified_at, verification) values (?, ?, ?, ?, ?, ?, ?, ?, 'CHARGE', 'SUCCEEDED', ?, ?, ?) "
                         + "on conflict (provider, provider_payment_ref, kind) do nothing",
                 id, businessId, invoiceId, c.id(), provider, verified.providerPaymentRef(), verified.amount().minor(), verified.amount().currency().name(),
-                Timestamp.from(tPay), Timestamp.from(micros(now)), VERIFICATION);
+                Timestamp.from(tPay), Timestamp.from(micros(now)), event.verification());
         if (inserted == 0) throw new IllegalStateException("A ledger row appeared under the restaurant lock"); // never: checked above, under the same lock
         return id;
     }
@@ -403,8 +416,9 @@ public class PaymentOutcomeService {
     // ---- reads ----
 
     private Event loadEvent(String id) {
-        List<Event> rows = jdbc.query("select id, provider, payload::text as payload, status from provider_event where id = ?",
-                (rs, n) -> new Event(rs.getString("id"), rs.getString("provider"), rs.getString("payload"), rs.getString("status"), false), id);
+        List<Event> rows = jdbc.query("select id, provider, event_id, type, payload::text as payload, status from provider_event where id = ?",
+                (rs, n) -> new Event(rs.getString("id"), rs.getString("provider"), rs.getString("payload"), rs.getString("status"), false,
+                        com.agafari.com.billing.webhook.InboxService.isInternal(rs.getString("event_id"), rs.getString("type"))), id);
         return rows.isEmpty() ? null : rows.get(0);
     }
 

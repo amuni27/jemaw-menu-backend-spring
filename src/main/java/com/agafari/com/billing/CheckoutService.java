@@ -345,6 +345,11 @@ public class CheckoutService {
         ProviderCallGuard.assertNoTransaction();
         Row row = load(checkoutId);
         if (row == null || !"CREATING".equals(row.status())) return;
+        // AGF SUB-R4-14 (G3, R-2): no checkout is opened at the provider while a payment of this restaurant is under review
+        if (review.underReview(row.businessId())) {
+            markCreateFailed(row, CheckoutRefusedException.PAYMENT_UNDER_REVIEW);
+            return;
+        }
         BillingStrategy strategy = registry.forBusiness(row.businessId());
         if (!enabled.contains(strategy.market())) {
             markCreateFailed(row, "BILLING_DISABLED");

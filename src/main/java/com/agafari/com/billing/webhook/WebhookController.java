@@ -67,6 +67,7 @@ public class WebhookController {
         } catch (IllegalArgumentException e) {
             throw rejected(strategy.provider(), "malformed");
         }
+        if (InboxService.isReserved(event)) throw rejected(strategy.provider(), "reserved"); // AGF SUB-R4-14 (G4)
         inbox.store(strategy.provider(), event, body);
         return ResponseEntity.ok().build();
     }

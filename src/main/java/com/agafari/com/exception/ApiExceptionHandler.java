@@ -191,6 +191,12 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(e.status()).body(ApiError.of(e.status(), e.code(), e.getMessage()));
     }
 
+    // AGF SUB-R4-11
+    @ExceptionHandler(BillingExceptionRefusedException.class)
+    public ResponseEntity<ApiError> billingExceptionRefused(BillingExceptionRefusedException e) {
+        return ResponseEntity.status(e.status()).body(ApiError.of(e.status(), e.code(), e.getMessage()));
+    }
+
     @ExceptionHandler(CheckoutRefusedException.class)
     public ResponseEntity<ApiError> checkoutRefused(CheckoutRefusedException e) {
         return ResponseEntity.status(e.status()).body(ApiError.of(e.status(), e.code(), e.getMessage()));

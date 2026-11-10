@@ -79,7 +79,8 @@ public class PaymentOutcomeService {
     private static final String REFUND_REQUESTED = "BILLING_REFUND_REQUESTED";
     private static final int MAX_ERROR = 1000;
 
-    private record Event(String id, String provider, String payload, String status) {
+    /** @param replay an admin replay: an outcome already noted on the event is kept unless a new one replaces it */
+    private record Event(String id, String provider, String payload, String status, boolean replay) {
     }
 
     private record Checkout(String id, String businessId, String priceId, int configVersion, CheckoutKind kind, String replaces, String status,
@@ -109,10 +110,12 @@ public class PaymentOutcomeService {
     private final AdminAuditService audit;
     private final ObjectMapper mapper;
     private final Set<Market> enabled = ConcurrentHashMap.newKeySet();
+    private final ExceptionService exceptions;
 
     public PaymentOutcomeService(JdbcTemplate jdbc, BillingStrategyRegistry registry, MonetizationLocks locks, SubscriptionLifecycle lifecycle,
                                  BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs, MonetizationClock clock,
-                                 PlatformTransactionManager transactions, AdminAuditService audit, ObjectMapper mapper, BillingFlags flags) {
+                                 PlatformTransactionManager transactions, AdminAuditService audit, ObjectMapper mapper, BillingFlags flags, ExceptionService exceptions) {
+        this.exceptions = exceptions;
         this.jdbc = jdbc;
         this.registry = registry;
         this.locks = locks;
@@ -139,10 +142,25 @@ public class PaymentOutcomeService {
     }
 
     public Result process(String providerEventId) {
+        return run(providerEventId, false);
+    }
+
+    /**
+     * AGF SUB-R4-11 (DD §8.4, R-5): an admin replay of an event that already finished. The same path as {@link #process}: a
+     * fresh re-fetch, the matrix and full evidence validation. A payment already in the ledger is never applied again, and
+     * the event keeps its status unless the replay reaches a new outcome. Only {@link ExceptionService} calls this.
+     */
+    public Result replay(String providerEventId) {
+        return run(providerEventId, true);
+    }
+
+    private Result run(String providerEventId, boolean replay) {
         ProviderCallGuard.assertNoTransaction();
-        Event event = loadEvent(providerEventId);
-        if (event == null) throw new PermanentJobException("No such provider event " + providerEventId, null);
-        if (!"PENDING".equals(event.status())) return Result.ALREADY_DONE;
+        Event loaded = loadEvent(providerEventId);
+        if (loaded == null) throw new PermanentJobException("No such provider event " + providerEventId, null);
+        Event event = new Event(loaded.id(), loaded.provider(), loaded.payload(), loaded.status(), replay);
+        if (!replay && !"PENDING".equals(event.status())) return Result.ALREADY_DONE;
+        if (replay && "IGNORED".equals(event.status())) return Result.ALREADY_DONE;
 
         BillingStrategy strategy = registry.forProvider(event.provider()).filter(s -> enabled.contains(s.market())).orElse(null);
         if (strategy == null) throw unprocessed(event, "billing is not active for provider " + event.provider());
@@ -222,7 +240,7 @@ public class PaymentOutcomeService {
     private Result applyLocked(Event event, BillingStrategy strategy, VerifiedPayment verified, ProviderCapabilities capabilities, String checkoutId, String businessId) {
         locks.configShared();
         locks.restaurant(businessId);
-        if (!"PENDING".equals(jdbc.queryForObject("select status from provider_event where id = ? for update", String.class, event.id()))) return Result.ALREADY_DONE;
+        if (!event.status().equals(jdbc.queryForObject("select status from provider_event where id = ? for update", String.class, event.id()))) return Result.ALREADY_DONE;
         lifecycle.materialize(businessId);
         Checkout c = loadCheckout(checkoutId, true);
         Instant now = clock.now();
@@ -323,7 +341,7 @@ public class PaymentOutcomeService {
     private Result recordRefusal(Event event, BillingStrategy strategy, VerifiedPayment verified, String checkoutId, String businessId, Refused refused) {
         locks.configShared();
         locks.restaurant(businessId);
-        if (!"PENDING".equals(jdbc.queryForObject("select status from provider_event where id = ? for update", String.class, event.id()))) return Result.ALREADY_DONE;
+        if (!event.status().equals(jdbc.queryForObject("select status from provider_event where id = ? for update", String.class, event.id()))) return Result.ALREADY_DONE;
         Checkout c = loadCheckout(checkoutId, true);
         Instant now = clock.now();
         if (ledgerRow(strategy.provider(), verified.providerPaymentRef()) != null) return finish(event, "PROCESSED", null, Result.PROCESSED);
@@ -347,25 +365,20 @@ public class PaymentOutcomeService {
         return id;
     }
 
+    /** AGF SUB-R4-11: every exception is written by {@link ExceptionService}, in this transaction. */
     private void exception(String businessId, String code, String paymentId, String checkoutId, String eventId, String refundId, VerifiedPayment verified,
                            boolean funds, String status, Map<String, Object> facts, Instant now) {
-        String id = UUID.randomUUID().toString();
         boolean money = verified.amount() != null;
-        int inserted = jdbc.update("insert into billing_exception (id, business_id, code, payment_id, checkout_id, provider_event_id, refund_request_id, amount_minor, currency, "
-                        + "paid_at, involves_customer_funds, facts, status, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?) on conflict do nothing",
-                id, businessId, code, paymentId, checkoutId, eventId, refundId, money ? verified.amount().minor() : null, money ? verified.amount().currency().name() : null,
-                verified.paidAt() == null ? null : Timestamp.from(micros(verified.paidAt())), funds, mapper.writeValueAsString(facts), status, Timestamp.from(micros(now)));
-        if (inserted == 1) audit.success(EXCEPTION_OPENED, null, AdminAuditService.SYSTEM, TARGET_EXCEPTION, id, "code=" + code + " status=" + status);
+        exceptions.create(businessId, code, paymentId, checkoutId, eventId, refundId, money ? verified.amount().minor() : null, money ? verified.amount().currency().name() : null,
+                micros(verified.paidAt()), funds, status, facts, micros(now));
     }
 
-    private Result finish(String eventId, String status, String note, Result result) {
-        int updated = jdbc.update("update provider_event set status = ?, processed_at = now(), attempts = attempts + 1, last_error = ? where id = ? and status = 'PENDING'",
-                status, note, eventId);
-        return updated == 1 ? result : Result.ALREADY_DONE;
-    }
-
+    /** Only from the status the event had when this run loaded it, so a concurrent run can't finish it twice. */
     private Result finish(Event event, String status, String note, Result result) {
-        return finish(event.id(), status, note, result);
+        String kept = note == null && event.replay() ? jdbc.queryForObject("select last_error from provider_event where id = ?", String.class, event.id()) : note;
+        int updated = jdbc.update("update provider_event set status = ?, processed_at = now(), attempts = attempts + 1, last_error = ? where id = ? and status = ?",
+                status, kept, event.id(), event.status());
+        return updated == 1 ? result : Result.ALREADY_DONE;
     }
 
     /** No restaurant is established, so no exception row can be owned (it needs one): the event itself is the durable record. */
@@ -392,7 +405,7 @@ public class PaymentOutcomeService {
 
     private Event loadEvent(String id) {
         List<Event> rows = jdbc.query("select id, provider, payload::text as payload, status from provider_event where id = ?",
-                (rs, n) -> new Event(rs.getString("id"), rs.getString("provider"), rs.getString("payload"), rs.getString("status")), id);
+                (rs, n) -> new Event(rs.getString("id"), rs.getString("provider"), rs.getString("payload"), rs.getString("status"), false), id);
         return rows.isEmpty() ? null : rows.get(0);
     }
 

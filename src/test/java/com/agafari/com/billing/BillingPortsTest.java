@@ -230,7 +230,7 @@ class BillingPortsTest {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
         com.agafari.com.config.BillingFlags flags = new com.agafari.com.config.BillingFlags(false, false, false,
                 new com.agafari.com.config.BillingFlags.MarketFlags(false, false, false, false), new com.agafari.com.config.BillingFlags.MarketFlags(false, false, false, false));
-        CheckoutService service = new CheckoutService(jdbc, null, null, null, null, null, null, null, null, mock(org.springframework.transaction.PlatformTransactionManager.class), flags, null);
+        CheckoutService service = new CheckoutService(jdbc, null, null, null, null, null, null, null, null, mock(org.springframework.transaction.PlatformTransactionManager.class), flags, null, null);
         assertThatThrownBy(() -> service.create("b", "o", "p", "k")).isInstanceOf(com.agafari.com.exception.NotFoundException.class);
         assertThatThrownBy(() -> service.get("b", "c")).isInstanceOf(com.agafari.com.exception.NotFoundException.class);
         org.mockito.Mockito.verifyNoInteractions(jdbc);

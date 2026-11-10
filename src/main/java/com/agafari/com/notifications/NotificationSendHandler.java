@@ -29,8 +29,16 @@ public class NotificationSendHandler implements JobHandler<NotificationSendPaylo
 
     private final JdbcTemplate jdbc;
     private final Map<NotificationChannel, NotificationSender> senders;
+    private final PaymentReviewCheck review;
 
+    /** Without billing: nothing is ever under review. */
     public NotificationSendHandler(JdbcTemplate jdbc, List<NotificationSender> senders) {
+        this(jdbc, senders, PaymentReviewCheck.NONE);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public NotificationSendHandler(JdbcTemplate jdbc, List<NotificationSender> senders, PaymentReviewCheck review) {
+        this.review = review;
         this.jdbc = jdbc;
         this.senders = senders.stream().collect(Collectors.toMap(NotificationSender::channel, Function.identity()));
     }
@@ -65,6 +73,11 @@ public class NotificationSendHandler implements JobHandler<NotificationSendPaylo
             return;
         }
         NotificationKindClass kindClass = NotificationKindClass.valueOf((String) row.get("kind_class"));
+        // AGF SUB-R4-11 (I1): a payment request queued before a review isn't sent during it. Nothing left, so it stays retryable.
+        if (kindClass == NotificationKindClass.PAYMENT_REQUEST && review.underReview((String) row.get("business_id"))) {
+            fail(id, "paused_under_review");
+            return;
+        }
         boolean mayRepeat = mayRepeat(sender, kindClass);
         if (jdbc.update("update notification set attempts = attempts + 1, updated_at = now() where id = ? and status = 'PENDING' and (attempts = 0 or ?)", id, mayRepeat) == 0) {
             fail(id, "possibly_sent");

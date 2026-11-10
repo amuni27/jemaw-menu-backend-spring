@@ -91,11 +91,14 @@ public class CheckoutService {
     private final MonetizationClock clock;
     private final TransactionTemplate transaction;
     private final CheckoutCancellation cancellation;
+    private final PaymentReview review;
     private final Set<Market> enabled = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public CheckoutService(JdbcTemplate jdbc, BillingStrategyRegistry registry, MonetizationLocks locks, PlanPriceRepository prices, MonetizationConfigRepository configs,
                            BusinessSubscriptionRepository subscriptions, PlanRequestRepository planRequests, JobQueue jobs, MonetizationClock clock,
-                           PlatformTransactionManager transactions, BillingFlags flags, CheckoutCancellation cancellation) {
+                           PlatformTransactionManager transactions, BillingFlags flags, CheckoutCancellation cancellation,
+                           PaymentReview review) {
+        this.review = review;
         this.jdbc = jdbc;
         this.registry = registry;
         this.locks = locks;
@@ -173,6 +176,11 @@ public class CheckoutService {
     private Reservation reserveLocked(String businessId, String ownerId, String priceId, String key, Market market, BillingStrategy strategy, String replaceId, Integer replaceVersion) {
         locks.configShared();
         locks.restaurant(businessId);
+        // AGF SUB-R4-11 (R-2): no paid checkout of any kind, new or repeated, while a payment is under review
+        if (review.underReview(businessId)) {
+            throw new CheckoutRefusedException(HttpStatus.CONFLICT, CheckoutRefusedException.PAYMENT_UNDER_REVIEW,
+                    "We received your payment and are reviewing it. You will not lose this payment; we will contact you.");
+        }
         Instant now = clock.now();
         PlanPrice price = prices.findById(priceId).filter(p -> p.getMarket().equals(market.name()))
                 .orElseThrow(() -> new FieldValidationException(Map.of("priceId", "This price isn't available for your restaurant")));

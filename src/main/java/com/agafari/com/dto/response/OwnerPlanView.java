@@ -13,10 +13,11 @@ import java.util.List;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record OwnerPlanView(boolean visible, String setting, Integer configVersion, List<Plan> plans, Subscription current,
                             PlanRequestSummary pendingRequest, Boolean canRequest, Boolean trialAvailable, Boolean featuresUnaffected,
-                            Trial trial, EndedPlan endedPlan, SelfService selfService, List<Price> prices) {
+                            Trial trial, EndedPlan endedPlan, SelfService selfService, List<Price> prices,
+                            PaymentUnderReview paymentUnderReview) {
 
     public static OwnerPlanView hidden() {
-        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -46,6 +47,14 @@ public record OwnerPlanView(boolean visible, String setting, Integer configVersi
 
     /** AGF SUB-R3-02: only with {@code prices-visible} on for the restaurant's market. {@code id} is what a later checkout names. */
     public record Price(String id, String planCode, String interval, String currency, long amountMinor) {
+    }
+
+    /**
+     * AGF SUB-R4-11 (DD §8.5, R-2): present while a payment of this restaurant that involves customer funds is under review.
+     * {@code reference} is the review's id, to quote to support; {@code since} is when the earliest open review began.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record PaymentUnderReview(Long amountMinor, String currency, Instant paidAt, String reference, Instant since) {
     }
 
     public record Plan(String code, String model, String adSource, boolean paid) {

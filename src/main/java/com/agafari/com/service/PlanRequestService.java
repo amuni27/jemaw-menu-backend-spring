@@ -92,6 +92,7 @@ public class PlanRequestService {
     private volatile boolean selfServiceEnabled;
     private final SubscriptionLifecycle lifecycle;
     private final PlanPriceService planPrices;
+    private final com.agafari.com.billing.PaymentReview paymentReview;
 
     public PlanRequestService(PlanRequestRepository requests, BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs,
                               SubscriptionPlanRepository plans, BusinessRepository businesses, UserRepository users,
@@ -99,8 +100,10 @@ public class PlanRequestService {
                               TrialExpirer trialExpirer, MonetizationClock monetizationClock, PlatformTransactionManager transactionManager,
                               @Value("${app.monetization.owner-plans-visible:false}") boolean ownerPlansVisible,
                               GrandfatheringService grandfathering, EmailVerificationService emailVerification,
-                              @Value("${app.monetization.self-service-enabled:false}") boolean selfServiceEnabled, SubscriptionLifecycle lifecycle, PlanPriceService planPrices) {
+                              @Value("${app.monetization.self-service-enabled:false}") boolean selfServiceEnabled, SubscriptionLifecycle lifecycle, PlanPriceService planPrices,
+                              com.agafari.com.billing.PaymentReview paymentReview) {
         this.planPrices = planPrices;
+        this.paymentReview = paymentReview;
         this.lifecycle = lifecycle;
         this.grandfathering = grandfathering;
         this.emailVerification = emailVerification;
@@ -175,7 +178,8 @@ public class PlanRequestService {
         OwnerPlanView.SelfService selfService = !selfServiceEnabled ? null : new OwnerPlanView.SelfService(
                 setting2 && currentRow == null && eligible.stream().anyMatch(p -> !p.paid()), verificationRequired(businessId));
         return new OwnerPlanView(true, config.getSetting().name(), config.getVersion(), eligible, current, pending,
-                setting2 && currentRow == null && pending == null, trial != null, true, trial, endedPlan, selfService, priceView(businessId, config, now));
+                setting2 && currentRow == null && pending == null, trial != null, true, trial, endedPlan, selfService, priceView(businessId, config, now),
+                paymentReview.current(businessId).orElse(null));
     }
 
     /** AGF SUB-R3-02: null (absent from the response) unless prices are visible in the market of this restaurant's stored country. */

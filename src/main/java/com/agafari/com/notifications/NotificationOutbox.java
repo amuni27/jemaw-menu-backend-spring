@@ -23,8 +23,16 @@ public class NotificationOutbox {
     private final JobQueue queue;
     private final ObjectMapper mapper;
     private final Map<NotificationChannel, NotificationSender> senders;
+    private final PaymentReviewCheck review;
 
+    /** Without billing: nothing is ever under review. */
     public NotificationOutbox(JdbcTemplate jdbc, JobQueue queue, ObjectMapper mapper, List<NotificationSender> senders) {
+        this(jdbc, queue, mapper, senders, PaymentReviewCheck.NONE);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public NotificationOutbox(JdbcTemplate jdbc, JobQueue queue, ObjectMapper mapper, List<NotificationSender> senders, PaymentReviewCheck review) {
+        this.review = review;
         this.jdbc = jdbc;
         this.queue = queue;
         this.mapper = mapper;
@@ -40,6 +48,11 @@ public class NotificationOutbox {
     public boolean add(String businessId, NotificationKind kind, String key, NotificationChannel channel, Map<String, Object> templateData) {
         requireTransaction();
         if (!senders.containsKey(channel)) throw new NotificationChannelUnavailableException(channel);
+        // AGF SUB-R4-11 (I1): payment requests pause while a payment is under review; essential notices continue
+        if (kind.kindClass() == NotificationKindClass.PAYMENT_REQUEST && review.underReview(businessId)) {
+            org.slf4j.LoggerFactory.getLogger(NotificationOutbox.class).info("event=notification.paused businessId={} kind={} key={}", businessId, kind, key);
+            return false;
+        }
         String id = UUID.randomUUID().toString();
         int created = jdbc.update("insert into notification (id, business_id, kind, key, channel, kind_class, template_data) values (?, ?, ?, ?, ?, ?, ?::jsonb) "
                         + "on conflict (business_id, kind, key, channel) do nothing",

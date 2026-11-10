@@ -11,6 +11,8 @@ public class CheckoutRefusedException extends RuntimeException {
     public static final String NOT_CANCELLABLE = "CHECKOUT_NOT_CANCELLABLE";
     public static final String CANCELLED = "CHECKOUT_CANCELLED";
     public static final String CREATE_FAILED = "CHECKOUT_CREATE_FAILED";
+    /** AGF SUB-R4-11 (R-2): a payment of this restaurant is under review. */
+    public static final String PAYMENT_UNDER_REVIEW = "PAYMENT_UNDER_REVIEW";
 
     private final HttpStatus status;
     private final String code;

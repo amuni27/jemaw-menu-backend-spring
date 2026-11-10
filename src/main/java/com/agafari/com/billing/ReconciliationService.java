@@ -162,6 +162,7 @@ public class ReconciliationService {
                   and not exists (select 1 from subscription_period sp where sp.payment_id = p.id)
                   and not exists (select 1 from billing_exception e where e.payment_id = p.id)
                   and not exists (select 1 from refund_request r where r.payment_id = p.id)
+                  and not exists (select 1 from scheduled_change sc where sc.funding_payment_id = p.id and sc.status in ('PENDING', 'AWAITING_PAYMENT'))
                 order by p.occurred_at limit ?""", BATCH)) {
             Map<String, Object> facts = facts(p, "a verified charge is consumed by no period and linked to no refund request or exception");
             if (flag(p, CHARGE_UNACCOUNTED, true, facts)) n++;

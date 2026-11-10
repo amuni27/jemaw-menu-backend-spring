@@ -33,9 +33,21 @@ public class SubscriptionLifecycle {
     private final MonetizationClock clock;
     private final AdminAuditService audit;
     private final EvidenceValidator evidence;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
+    private final org.springframework.beans.factory.ObjectProvider<HeldFunding> heldFunding;
 
+    /** Without billing (unit tests): no paid scheduled change is ever resolved. */
     public SubscriptionLifecycle(BusinessSubscriptionRepository subscriptions, MonetizationLocks locks, EffectiveStateEvaluator evaluator,
                                  MonetizationClock clock, AdminAuditService audit, EvidenceValidator evidence) {
+        this(subscriptions, locks, evaluator, clock, audit, evidence, null, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public SubscriptionLifecycle(BusinessSubscriptionRepository subscriptions, MonetizationLocks locks, EffectiveStateEvaluator evaluator,
+                                 MonetizationClock clock, AdminAuditService audit, EvidenceValidator evidence, org.springframework.jdbc.core.JdbcTemplate jdbc,
+                                 org.springframework.beans.factory.ObjectProvider<HeldFunding> heldFunding) {
+        this.jdbc = jdbc;
+        this.heldFunding = heldFunding;
         this.subscriptions = subscriptions;
         this.locks = locks;
         this.evaluator = evaluator;
@@ -231,6 +243,14 @@ public class SubscriptionLifecycle {
      * expiry paths and audit rows ({@code TrialExpirer}, {@code GrandfatheringService}).
      */
     public void materialize(String businessId) {
+        if (!evaluator.isPeriodEndEnabled()) return; // accepted contract: with the flag off this does nothing at all
+        // AGF SUB-R4-15 (PO D4, boundary safeguard 1): a due paid downgrade is resolved before anything can expire the row
+        resolveDuePaidChange(businessId);
+        materializeCurrent(businessId);
+        failPaidChangesOfEndedRows(businessId);
+    }
+
+    private void materializeCurrent(String businessId) {
         if (!evaluator.isPeriodEndEnabled()) return;
         locks.assertHeld(businessId);
         BusinessSubscription s = subscriptions.findCurrentByBusinessId(businessId).orElse(null);
@@ -259,6 +279,84 @@ public class SubscriptionLifecycle {
             s.markPastDue(view.periodEnd(), now, AdminAuditService.SYSTEM);
             subscriptions.saveAndFlush(s);
             audit.success(PAST_DUE, null, AdminAuditService.SYSTEM, "BUSINESS_SUBSCRIPTION", s.getId(), "ACTIVE -> PAST_DUE");
+        }
+    }
+
+    // ---- AGF SUB-R4-15: paid scheduled downgrades (TA §4.4; PO D2–D4, P1, P3) ----
+
+    static final String CHANGE_APPLIED = "SCHEDULED_CHANGE_APPLIED";
+    static final String CHANGE_FAILED = "SCHEDULED_CHANGE_FAILED";
+    static final String CHANGE_AWAITING = "SCHEDULED_CHANGE_AWAITING_PAYMENT";
+    private static final String CHANGE_TARGET = "SCHEDULED_CHANGE";
+
+    /**
+     * The current row's paid downgrade whose boundary has passed. Funded: its evidence is re-validated under the locks and
+     * the target replaces the row exactly at the boundary, consuming the funding once. Refused evidence fails the change and
+     * hands its held charge to review. Unfunded: {@code AWAITING_PAYMENT}, which grants nothing; the row then follows its own
+     * path (recorded grace only, AD-7), and the change fails when the row ends.
+     */
+    private void resolveDuePaidChange(String businessId) {
+        if (jdbc == null) return;
+        locks.assertHeld(businessId);
+        BusinessSubscription s = subscriptions.findCurrentByBusinessId(businessId).orElse(null);
+        if (s == null || s.isTrial()) return;
+        Instant now = clock.now();
+        java.util.List<java.util.Map<String, Object>> due = jdbc.queryForList("select * from scheduled_change where from_subscription_id = ? and kind = 'DOWNGRADE' "
+                + "and target_price_id is not null and status in ('PENDING', 'AWAITING_PAYMENT') and effective_at <= ? for update", s.getId(), java.sql.Timestamp.from(now));
+        if (due.isEmpty()) return;
+        java.util.Map<String, Object> change = due.get(0);
+        String changeId = (String) change.get("id");
+        if (change.get("funding_payment_id") == null) {
+            if (jdbc.update("update scheduled_change set status = 'AWAITING_PAYMENT' where id = ? and status = 'PENDING'", changeId) == 1) {
+                audit.success(CHANGE_AWAITING, null, AdminAuditService.SYSTEM, CHANGE_TARGET, changeId, "boundary passed without a verified payment");
+            }
+            return;
+        }
+        String paymentId = (String) change.get("funding_payment_id"), invoiceId = (String) change.get("funding_invoice_id");
+        try {
+            BusinessSubscription next = applyFundedChange(s, change, heldFunding.getObject().evidence(paymentId, invoiceId), now);
+            jdbc.update("update scheduled_change set status = 'APPLIED', applied_subscription_id = ? where id = ? and status in ('PENDING', 'AWAITING_PAYMENT')", next.getId(), changeId);
+            audit.success(CHANGE_APPLIED, null, AdminAuditService.SYSTEM, CHANGE_TARGET, changeId, "paid downgrade applied at " + change.get("effective_at") + " -> " + next.getId());
+        } catch (EvidenceInvalidException | IllegalTransitionException | ExpectedSubscriptionChangedException e) {
+            jdbc.update("update scheduled_change set status = 'FAILED' where id = ? and status in ('PENDING', 'AWAITING_PAYMENT')", changeId);
+            audit.success(CHANGE_FAILED, null, AdminAuditService.SYSTEM, CHANGE_TARGET, changeId, "funded downgrade refused: " + e.getMessage());
+            heldFunding.getObject().release(changeId, "EVIDENCE_INVALID", e.getMessage());
+        }
+    }
+
+    /** Replaces {@code s} by the funded target exactly at the boundary. Everything is checked before anything is written. */
+    private BusinessSubscription applyFundedChange(BusinessSubscription s, java.util.Map<String, Object> change, com.agafari.com.billing.VerifiedPaymentRef ref, Instant now) {
+        locks.assertHeld(s.getBusinessId());
+        Instant effectiveAt = ((java.sql.Timestamp) change.get("effective_at")).toInstant();
+        Instant periodEnd = jdbc.queryForObject("select period_end from billing_invoice where id = ?", java.sql.Timestamp.class, ref.invoiceId()).toInstant();
+        String targetPlan = (String) change.get("target_plan_code"), targetPrice = (String) change.get("target_price_id");
+        EvidenceValidator.Result result = evidence.validate(new EvidenceValidator.Claim(ref, s.getBusinessId(), targetPlan, s.getProvider(), effectiveAt, periodEnd, null));
+        if (result.alreadyAppliedTo() != null) throw new EvidenceInvalidException(EvidenceInvalidException.Code.ALREADY_CONSUMED);
+        TransitionRules.requireReplacement(LifecycleStatus.of(s.getStatus()), SubscriptionSource.of(s.getSource()), TransitionReason.CHANGED, TransitionReason.VERIFIED_PAYMENT,
+                SubscriptionSource.PROVIDER);
+        int configVersion = subscriptions.findLatestConfig(Limit.of(1)).stream().findFirst().map(c -> c.getVersion()).orElseThrow(ExpectedSubscriptionChangedException::new);
+        // The target's contract starts at the boundary, so that is when its row begins, even when processing resumes late
+        // (V13: period_end > created_at). AD-7 is open: no grace is recorded.
+        BusinessSubscription next = BusinessSubscription.provider(s.getBusinessId(), targetPlan, configVersion, targetPrice, s.getProvider(), null, null, effectiveAt, periodEnd,
+                effectiveAt, AdminAuditService.SYSTEM);
+        s.endAtEffectiveTime(effectiveAt, TransitionReason.CHANGED.name(), now, AdminAuditService.SYSTEM);
+        s.recordEnding(TransitionReason.CHANGED.name(), next.getId());
+        subscriptions.saveAndFlush(s);
+        BusinessSubscription saved = subscriptions.saveAndFlush(next);
+        consume(saved, effectiveAt, periodEnd, ref);
+        audit.success(PAID_REPLACED, null, AdminAuditService.SYSTEM, TARGET, saved.getId(), "replaced=" + s.getId() + " reason=CHANGED scheduled");
+        return saved;
+    }
+
+    /** A paid change whose row has ended without it can't apply any more: FAILED, and a held charge goes to review. */
+    private void failPaidChangesOfEndedRows(String businessId) {
+        if (jdbc == null) return;
+        for (String changeId : jdbc.queryForList("select c.id from scheduled_change c join business_subscription s on s.id = c.from_subscription_id where c.business_id = ? "
+                + "and c.target_price_id is not null and c.status in ('PENDING', 'AWAITING_PAYMENT') and s.status = 'EXPIRED' for update of c", String.class, businessId)) {
+            if (jdbc.update("update scheduled_change set status = 'FAILED' where id = ? and status in ('PENDING', 'AWAITING_PAYMENT')", changeId) == 1) {
+                audit.success(CHANGE_FAILED, null, AdminAuditService.SYSTEM, CHANGE_TARGET, changeId, "the subscription ended without a verified payment");
+                heldFunding.getObject().release(changeId, "STATE_CHANGED", "the subscription ended before the change could apply");
+            }
         }
     }
 }

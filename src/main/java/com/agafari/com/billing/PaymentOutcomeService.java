@@ -64,7 +64,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Slf4j
 @Service
-public class PaymentOutcomeService {
+public class PaymentOutcomeService implements com.agafari.com.subscription.HeldFunding {
 
     public enum Result { PROCESSED, QUARANTINED, DECLINED, ALREADY_DONE }
 
@@ -89,8 +89,9 @@ public class PaymentOutcomeService {
         }
     }
 
+    /** @param scheduledChangeId AGF SUB-R4-15: the exact change a DOWNGRADE_RENEWAL checkout was made for (V23.5) */
     private record Checkout(String id, String businessId, String priceId, int configVersion, CheckoutKind kind, String replaces, String status,
-                            Instant cancelRequestedAt, Instant expiresAt, Money expected) {
+                            Instant cancelRequestedAt, Instant expiresAt, Money expected, String scheduledChangeId) {
     }
 
     /** The lifecycle refused what the matrix allowed; recorded in a transaction of its own. */
@@ -256,6 +257,12 @@ public class PaymentOutcomeService {
         locks.configShared();
         locks.restaurant(businessId);
         if (!event.status().equals(jdbc.queryForObject("select status from provider_event where id = ? for update", String.class, event.id()))) return Result.ALREADY_DONE;
+        // AGF SUB-R4-15 (boundary safeguard 1): downgrade funding is decided on the stored state, before materialize can end the row
+        Checkout early = loadCheckout(checkoutId, true);
+        if (early.kind() == CheckoutKind.DOWNGRADE_RENEWAL) {
+            Result funded = fundDowngrade(event, strategy, verified, early, businessId);
+            if (funded != null) return funded;
+        }
         lifecycle.materialize(businessId);
         Checkout c = loadCheckout(checkoutId, true);
         Instant now = clock.now();
@@ -278,12 +285,20 @@ public class PaymentOutcomeService {
         String planCode = (String) price.get("plan_code");
         BusinessSubscription current = subscriptions.findCurrentByBusinessId(businessId).orElse(null);
         boolean completedByAnother = jdbc.queryForObject("select count(*) from payment p join subscription_period sp on sp.payment_id = p.id where p.checkout_session_id = ?",
-                Integer.class, c.id()) > 0;
+                Integer.class, c.id()) > 0
+                // AGF SUB-R4-15 (N6): the change this checkout was made for is already funded by another payment
+                || (c.scheduledChangeId() != null && jdbc.queryForObject("select count(*) from scheduled_change where id = ? and funding_payment_id is not null",
+                Integer.class, c.scheduledChangeId()) > 0);
         boolean eligible = EligibilityAtTime.eligible(history(), planCode, tPay);
         OutcomeFacts facts = new OutcomeFacts(verifiedAsExpected ? PaymentVerification.VERIFIED : PaymentVerification.FAILED, true, completedByAnother, tPay, c.expiresAt(),
                 c.cancelRequestedAt(), eligible, c.replaces(), current == null ? null : current.getId(), c.kind(), capabilities, true);
         PaymentOutcome decision = PaymentOutcomeMatrix.decide(facts);
+        // AGF SUB-R4-15 (boundary safeguard 2): a downgrade renewal is never an ordinary row-7 replacement. Reaching here means it
+        // couldn't fund its change (deadline passed, change no longer open), so its funds go to review instead (P3, BD-17).
+        boolean downgradeNotFundable = c.kind() == CheckoutKind.DOWNGRADE_RENEWAL && decision.action() == PaymentOutcome.Action.REPLACE;
+        if (downgradeNotFundable) decision = new PaymentOutcome(PaymentOutcome.Action.EXCEPTION, 6, PaymentOutcome.STATE_CHANGED, PaymentOutcome.STATE_CHANGED);
         Map<String, Object> snapshot = facts(event, c, verified, decision);
+        if (downgradeNotFundable) snapshot.put("downgradeNotFundable", "the scheduled change could not be funded by this payment");
         snapshot.put("eligibleAtPayment", eligible);
         snapshot.put("completedByAnotherPayment", completedByAnother);
         snapshot.put("currentSubscriptionId", current == null ? null : current.getId());
@@ -334,8 +349,10 @@ public class PaymentOutcomeService {
             switch (decision.action()) {
                 case ACTIVATE -> lifecycle.activatePaid(businessId, activation);
                 case EXTEND -> lifecycle.renew(current.getId(), new PeriodExtension(start, end, ref, now));
-                case REPLACE -> lifecycle.replacePaid(businessId, c.replaces(), activation,
-                        c.kind() == CheckoutKind.CONVERSION ? TransitionReason.CONVERTED : TransitionReason.CHANGED);
+                case REPLACE -> {
+                    lifecycle.replacePaid(businessId, c.replaces(), activation, c.kind() == CheckoutKind.CONVERSION ? TransitionReason.CONVERTED : TransitionReason.CHANGED);
+                    supersedeOpenChanges(c.replaces(), "superseded by " + c.kind()); // AGF SUB-R4-15 (AC3): in the activation's own transaction
+                }
                 default -> throw new IllegalStateException("Not an applying outcome: " + decision);
             }
         } catch (EvidenceInvalidException e) {
@@ -425,10 +442,11 @@ public class PaymentOutcomeService {
     private Checkout loadCheckout(String id, boolean lock) {
         if (blank(id)) return null;
         List<Checkout> rows = jdbc.query("select id, business_id, price_id, config_version, kind, replaces_subscription_id, status, cancel_requested_at, expires_at, "
-                        + "expected_amount_minor, expected_currency from checkout_session where id = ?" + (lock ? " for update" : ""),
+                        + "expected_amount_minor, expected_currency, scheduled_change_id from checkout_session where id = ?" + (lock ? " for update" : ""),
                 (rs, n) -> new Checkout(rs.getString("id"), rs.getString("business_id"), rs.getString("price_id"), rs.getInt("config_version"),
                         CheckoutKind.valueOf(rs.getString("kind")), rs.getString("replaces_subscription_id"), rs.getString("status"), instant(rs.getTimestamp("cancel_requested_at")),
-                        instant(rs.getTimestamp("expires_at")), new Money(rs.getLong("expected_amount_minor"), Currency.valueOf(rs.getString("expected_currency")))),
+                        instant(rs.getTimestamp("expires_at")), new Money(rs.getLong("expected_amount_minor"), Currency.valueOf(rs.getString("expected_currency"))),
+                        rs.getString("scheduled_change_id")),
                 id);
         return rows.isEmpty() ? null : rows.get(0);
     }
@@ -497,5 +515,101 @@ public class PaymentOutcomeService {
 
     private static String clip(String s) {
         return s == null || s.length() <= MAX_ERROR ? s : s.substring(0, MAX_ERROR);
+    }
+
+    // ---- AGF SUB-R4-15: paid scheduled downgrades (PO D2–D4, P1–P3) ----
+
+    static final String CHANGE_FUNDED = "SCHEDULED_CHANGE_FUNDED";
+    static final String CHANGE_SUPERSEDED = "SCHEDULED_CHANGE_SUPERSEDED";
+
+    /**
+     * Funds the checkout's change from this verified payment when every rule holds, on the stored state and before
+     * {@code materialize}: the change is open and unfunded; the payment matches the checkout; it was made before the checkout
+     * expired or was cancelled; the target was enabled at {@code t_pay}; the stored current row is the one the change
+     * replaces. Then the boundary applies it (now, if already due). A payment after the deadline is refused here explicitly
+     * and goes to review, never to row 7. Returns null to let the normal matrix decide (rows 0–6 keep their precedence).
+     */
+    private Result fundDowngrade(Event event, BillingStrategy strategy, VerifiedPayment verified, Checkout c, String businessId) {
+        Instant now = clock.now();
+        Instant tPay = micros(verified.paidAt());
+        if (ledgerRow(strategy.provider(), verified.providerPaymentRef()) != null) return null;
+        if (!verified.amount().equals(c.expected())) return null; // row 0
+        if (tPay.isAfter(c.expiresAt())) return null; // row 3
+        if (c.cancelRequestedAt() != null && tPay.isAfter(c.cancelRequestedAt())) return null; // row 4
+        if (c.scheduledChangeId() == null) return null;
+        List<Map<String, Object>> rows = jdbc.queryForList("select * from scheduled_change where id = ? for update", c.scheduledChangeId());
+        if (rows.isEmpty()) return null;
+        Map<String, Object> change = rows.get(0);
+        if (!List.of("PENDING", "AWAITING_PAYMENT").contains(change.get("status")) || change.get("funding_payment_id") != null) return null; // N4, N6: the matrix decides
+        Map<String, Object> price = jdbc.queryForMap("select plan_code, billing_interval, amount_minor, currency from plan_price where id = ?", c.priceId());
+        if (!EligibilityAtTime.eligible(history(), (String) price.get("plan_code"), tPay)) return null; // row 5
+        BusinessSubscription stored = subscriptions.findCurrentByBusinessId(businessId).orElse(null);
+        if (stored == null || !stored.getId().equals(change.get("from_subscription_id")) || !stored.getId().equals(c.replaces())) return null; // row 6
+        Instant effectiveAt = ((Timestamp) change.get("effective_at")).toInstant();
+        Instant deadline = stored.getGraceDays() != null && stored.getPeriodEnd() != null
+                ? stored.getPeriodEnd().plus(java.time.Duration.ofDays(stored.getGraceDays())) : effectiveAt; // only recorded grace counts (AD-7)
+        if (tPay.isAfter(deadline)) {
+            // boundary safeguard 2 (N5): too late to fund, even though the old row is still stored as current
+            String paymentId = insertCharge(event, strategy.provider(), verified, c, businessId, null, tPay, now);
+            Map<String, Object> facts = facts(event, c, verified, null);
+            facts.put("scheduledChangeId", change.get("id"));
+            facts.put("deadline", deadline.toString());
+            facts.put("reason", "paid after the scheduled downgrade's deadline");
+            exception(businessId, PaymentOutcome.STATE_CHANGED, paymentId, c.id(), event.id(), null, verified, true, "OPEN", facts, now);
+            return finish(event, "PROCESSED", PaymentOutcome.STATE_CHANGED, Result.PROCESSED);
+        }
+        Instant end = oneInterval(effectiveAt, PriceInterval.valueOf((String) price.get("billing_interval")));
+        String invoiceId = UUID.randomUUID().toString();
+        jdbc.update("insert into billing_invoice (id, business_id, checkout_session_id, price_id, period_start, period_end, amount_minor, currency, status) "
+                        + "values (?, ?, ?, ?, ?, ?, ?, ?, 'PAID')", invoiceId, businessId, c.id(), c.priceId(), Timestamp.from(effectiveAt), Timestamp.from(end),
+                price.get("amount_minor"), price.get("currency"));
+        String paymentId = insertCharge(event, strategy.provider(), verified, c, businessId, invoiceId, tPay, now);
+        jdbc.update("update scheduled_change set funding_payment_id = ?, funding_invoice_id = ?, funded_at = ? where id = ? and funding_payment_id is null "
+                + "and status in ('PENDING', 'AWAITING_PAYMENT')", paymentId, invoiceId, Timestamp.from(micros(now)), change.get("id"));
+        audit.success(CHANGE_FUNDED, null, AdminAuditService.SYSTEM, "SCHEDULED_CHANGE", (String) change.get("id"), "payment=" + paymentId + " tPay=" + tPay + " deadline=" + deadline);
+        jdbc.update("update checkout_session set status = 'COMPLETED', row_version = row_version + 1 where id = ? and status in ('CREATING', 'OPEN')", c.id());
+        lifecycle.materialize(businessId); // applies it now if the boundary has passed; otherwise it stays held
+        return finish(event, "PROCESSED", null, Result.PROCESSED);
+    }
+
+    /** AC3: an activation that replaces the row supersedes its open change; a held charge goes to review, in the same transaction. */
+    private void supersedeOpenChanges(String replacedSubscriptionId, String reason) {
+        if (replacedSubscriptionId == null) return;
+        for (String changeId : jdbc.queryForList("select id from scheduled_change where from_subscription_id = ? and status in ('PENDING', 'AWAITING_PAYMENT') for update",
+                String.class, replacedSubscriptionId)) {
+            if (jdbc.update("update scheduled_change set status = 'SUPERSEDED' where id = ? and status in ('PENDING', 'AWAITING_PAYMENT')", changeId) == 1) {
+                audit.success(CHANGE_SUPERSEDED, null, AdminAuditService.SYSTEM, "SCHEDULED_CHANGE", changeId, reason);
+                release(changeId, PaymentOutcome.STATE_CHANGED, reason);
+            }
+        }
+    }
+
+    // ---- HeldFunding ----
+
+    @Override
+    public VerifiedPaymentRef evidence(String paymentId, String invoiceId) {
+        return new VerifiedPaymentRef(paymentId, invoiceId);
+    }
+
+    @Override
+    public void release(String changeId, String code, String reason) {
+        List<Map<String, Object>> rows = jdbc.queryForList("select c.id as change_id, c.business_id, p.* from scheduled_change c join payment p on p.id = c.funding_payment_id where c.id = ?",
+                changeId);
+        if (rows.isEmpty()) return; // unfunded: nothing is held
+        Map<String, Object> p = rows.get(0);
+        Map<String, Object> facts = new LinkedHashMap<>();
+        facts.put("scheduledChangeId", changeId);
+        facts.put("reason", reason);
+        facts.put("providerPaymentRef", p.get("provider_payment_ref"));
+        facts.put("source", "held downgrade funding");
+        exceptions.create((String) p.get("business_id"), code, (String) p.get("id"), (String) p.get("checkout_session_id"), null, null, ((Number) p.get("amount_minor")).longValue(),
+                (String) p.get("currency"), ((Timestamp) p.get("occurred_at")).toInstant(), true, "OPEN", facts, micros(clock.now()));
+    }
+
+    @Override
+    public boolean billingActive(String businessId) {
+        List<String> markets = jdbc.queryForList("select distinct market from billing_account where business_id = ?", String.class, businessId);
+        String code = markets.size() == 1 ? markets.get(0) : jdbc.queryForList("select country from business where id = ?", String.class, businessId).stream().findFirst().orElse(null);
+        return code != null && Market.fromCountry(code).map(enabled::contains).orElse(false);
     }
 }

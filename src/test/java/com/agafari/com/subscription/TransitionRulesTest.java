@@ -55,6 +55,8 @@ class TransitionRulesTest {
             new Transition(ACTIVE, EXPIRED, REFUNDED, Set.of(PROVIDER)),
             new Transition(ACTIVE, EXPIRED, DISPUTE_LOST, Set.of(PROVIDER)),
             new Transition(PAST_DUE, EXPIRED, PAYMENT_FAILED, Set.of(PROVIDER)),
+            // AGF SUB-R4-15 (PO D2): a paid downgrade funded within recorded grace replaces the PAST_DUE row (status pair unchanged)
+            new Transition(PAST_DUE, EXPIRED, CHANGED, Set.of(PROVIDER)),
             new Transition(PAST_DUE, EXPIRED, ADMIN, Set.of(PROVIDER)),
             new Transition(PAST_DUE, EXPIRED, REFUNDED, Set.of(PROVIDER)),
             new Transition(PAST_DUE, EXPIRED, DISPUTE_LOST, Set.of(PROVIDER)),

@@ -66,11 +66,22 @@ public class ScheduledChangeService {
     private final MonetizationClock clock;
     private final TransactionTemplate transaction;
     private volatile boolean billingEnabled;
+    private final org.springframework.beans.factory.ObjectProvider<com.agafari.com.subscription.HeldFunding> heldFunding;
 
+    /** Without billing (tests of the free path): paid targets are never schedulable and nothing is ever held. */
     public ScheduledChangeService(JdbcTemplate jdbc, ScheduledChangeRepository changes, BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs,
                                   SubscriptionPlanRepository plans, SubscriptionLifecycle lifecycle, MonetizationLocks locks, AdminAuditService audit,
                                   EffectiveStateEvaluator evaluator, MonetizationClock clock, PlatformTransactionManager transactions,
                                   BillingFlags flags) {
+        this(jdbc, changes, subscriptions, configs, plans, lifecycle, locks, audit, evaluator, clock, transactions, flags, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ScheduledChangeService(JdbcTemplate jdbc, ScheduledChangeRepository changes, BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs,
+                                  SubscriptionPlanRepository plans, SubscriptionLifecycle lifecycle, MonetizationLocks locks, AdminAuditService audit,
+                                  EffectiveStateEvaluator evaluator, MonetizationClock clock, PlatformTransactionManager transactions,
+                                  BillingFlags flags, org.springframework.beans.factory.ObjectProvider<com.agafari.com.subscription.HeldFunding> heldFunding) {
+        this.heldFunding = heldFunding;
         this.jdbc = jdbc;
         this.changes = changes;
         this.subscriptions = subscriptions;
@@ -96,7 +107,12 @@ public class ScheduledChangeService {
 
     public ScheduledChangeResponse scheduleDowngrade(String businessId, String planCode, String ownerId, String email) {
         SubscriptionPlan plan = planCode == null ? null : plans.findById(planCode).orElse(null);
-        if (plan == null || plan.isPaid()) throw new FieldValidationException(Map.of("planCode", "Only Free with Ads can be scheduled"));
+        if (plan == null) throw new FieldValidationException(Map.of("planCode", "Choose a plan"));
+        // AGF SUB-R4-15 (PO D1): a paid target is schedulable only where billing is active, and only as a true downgrade
+        // With the market's billing gate closed, a paid target is refused exactly as before SUB-R4-15
+        if (plan.isPaid() && (heldFunding == null || !heldFunding.getObject().billingActive(businessId))) {
+            throw new FieldValidationException(Map.of("planCode", "Only Free with Ads can be scheduled"));
+        }
         return schedule(businessId, DOWNGRADE, plan, ownerId, email);
     }
 
@@ -119,17 +135,19 @@ public class ScheduledChangeService {
                 }
                 BusinessSubscription current = subscriptions.findCurrentByBusinessId(businessId).orElseThrow(() -> new ScheduledChangeRefusedException("There is no current subscription to change"));
                 requireSchedulable(current, kind, target, now);
+                String targetPrice = target != null && target.isPaid() ? requirePaidDowngrade(businessId, current, target, now) : null;
                 ScheduledChange open = changes.findOpenByBusinessId(businessId).orElse(null);
                 if (open != null) {
                     requireNotInEffect(open, now);
                     jdbc.update("update scheduled_change set status = 'SUPERSEDED' where id = ? and status in ('PENDING', 'AWAITING_PAYMENT')", open.getId());
                     audit.success(SUPERSEDED, ownerId, actor, TARGET, open.getId(), open.getKind());
+                    release(open.getId(), "superseded by a new request");
                 }
                 String id = UUID.randomUUID().toString();
                 Instant effectiveAt = current.getPeriodEnd();
                 String targetCode = target == null ? null : target.getCode();
-                jdbc.update("insert into scheduled_change (id, business_id, from_subscription_id, kind, target_plan_code, effective_at, status) values (?, ?, ?, ?, ?, ?, 'PENDING')",
-                        id, businessId, current.getId(), kind, targetCode, Timestamp.from(effectiveAt));
+                jdbc.update("insert into scheduled_change (id, business_id, from_subscription_id, kind, target_plan_code, target_price_id, effective_at, status) values (?, ?, ?, ?, ?, ?, ?, 'PENDING')",
+                        id, businessId, current.getId(), kind, targetCode, targetPrice, Timestamp.from(effectiveAt));
                 audit.success(REQUESTED, ownerId, actor, TARGET, id, kind + " target=" + targetCode + " effectiveAt=" + effectiveAt);
                 return new ScheduledChangeResponse(id, kind, targetCode, effectiveAt, "PENDING");
             });
@@ -151,6 +169,35 @@ public class ScheduledChangeService {
         }
     }
 
+    /**
+     * AGF SUB-R4-15 (PO D1): the target price for a paid downgrade of {@code current}, or a refusal. Requires the market's
+     * billing gate; compares prices only within one market, currency and billing interval.
+     */
+    private String requirePaidDowngrade(String businessId, BusinessSubscription current, SubscriptionPlan target, Instant now) {
+        if (heldFunding == null || !heldFunding.getObject().billingActive(businessId)) throw new ScheduledChangeRefusedException("Paid plan changes aren't available");
+        if (!"PROVIDER".equals(current.getSource()) || current.getPriceId() == null) throw new ScheduledChangeRefusedException("This subscription can't take this change");
+        Map<String, Object> cur = jdbc.queryForMap("select plan_code, market, currency, billing_interval, amount_minor from plan_price where id = ?", current.getPriceId());
+        java.util.List<Map<String, Object>> found = jdbc.queryForList("select id, plan_code, market, currency, billing_interval, amount_minor from plan_price where plan_code = ? "
+                + "and market = ? and currency = ? and billing_interval = ? and active and valid_from <= ? order by version desc limit 1", target.getCode(), cur.get("market"),
+                cur.get("currency"), cur.get("billing_interval"), Timestamp.from(now));
+        com.agafari.com.subscription.PaidDowngradeRules.PriceFacts currentFacts = facts(cur);
+        com.agafari.com.subscription.PaidDowngradeRules.PriceFacts targetFacts = found.isEmpty() ? null : facts(found.get(0));
+        com.agafari.com.subscription.PaidDowngradeRules.refusal(currentFacts, targetFacts).ifPresent(why -> {
+            throw new ScheduledChangeRefusedException(why);
+        });
+        return (String) found.get(0).get("id");
+    }
+
+    private static com.agafari.com.subscription.PaidDowngradeRules.PriceFacts facts(Map<String, Object> p) {
+        return new com.agafari.com.subscription.PaidDowngradeRules.PriceFacts((String) p.get("plan_code"), (String) p.get("market"), (String) p.get("currency"),
+                (String) p.get("billing_interval"), ((Number) p.get("amount_minor")).longValue());
+    }
+
+    /** AGF SUB-R4-15 (D3, N7, N8): a change that won't apply hands its held charge, if any, to review. */
+    private void release(String changeId, String reason) {
+        if (heldFunding != null) heldFunding.getObject().release(changeId, "STATE_CHANGED", reason);
+    }
+
     private static void requireNotInEffect(ScheduledChange change, Instant now) {
         if (!change.getEffectiveAt().isAfter(now)) throw new ScheduledChangeRefusedException("The scheduled change is already in effect");
     }
@@ -166,6 +213,7 @@ public class ScheduledChangeService {
                 requireNotInEffect(open, clock.now());
                 jdbc.update("update scheduled_change set status = 'CANCELLED' where id = ? and status in ('PENDING', 'AWAITING_PAYMENT')", open.getId());
                 audit.success(CANCELLED, ownerId, actor, TARGET, open.getId(), open.getKind());
+                release(open.getId(), "cancelled by the owner");
             });
         } catch (ScheduledChangeRefusedException e) {
             audit.failure(REJECTED, ownerId, actor, TARGET, businessId, "cancel_pending");
@@ -181,7 +229,12 @@ public class ScheduledChangeService {
         return Boolean.TRUE.equals(transaction.execute(status -> {
             locks.configShared();
             locks.restaurant(businessId);
-            Map<String, Object> change = jdbc.queryForMap("select from_subscription_id, kind, target_plan_code, effective_at, status from scheduled_change where id = ?", changeId);
+            Map<String, Object> change = jdbc.queryForMap("select from_subscription_id, kind, target_plan_code, target_price_id, effective_at, status from scheduled_change where id = ?", changeId);
+            if (change.get("target_price_id") != null) {
+                // AGF SUB-R4-15 (D4): a paid downgrade is resolved at the lifecycle's boundary, the same place every expiry passes first
+                lifecycle.materialize(businessId);
+                return "APPLIED".equals(jdbc.queryForObject("select status from scheduled_change where id = ?", String.class, changeId));
+            }
             Instant now = clock.now();
             Instant effectiveAt = ((Timestamp) change.get("effective_at")).toInstant();
             if (!"PENDING".equals(change.get("status")) || now.isBefore(effectiveAt)) return false;
@@ -230,6 +283,7 @@ public class ScheduledChangeService {
                 continue;
             }
             audit.success(INVALIDATED, adminId, actor, TARGET, id, change.get("kind") + " reason=period_end_changed periodEnd " + before + " -> " + after);
+            release(id, "invalidated by a period change");
         }
     }
 }

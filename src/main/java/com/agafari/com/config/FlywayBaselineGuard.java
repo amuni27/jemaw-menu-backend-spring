@@ -68,7 +68,8 @@ public final class FlywayBaselineGuard {
                     "plan_price_append_only", // V22: AGF SUB-R3-01
                     "billing_account_guard", // V23.1: AGF SUB-R4-01
                     "payment_append_only", "billing_invoice_guard", "subscription_period_guard", "provider_row_has_evidence", // V23.2: AGF SUB-R4-02
-                    "refund_request_guard", "billing_exception_guard"); // V23.3: AGF SUB-R4-03
+                    "refund_request_guard", "billing_exception_guard", // V23.3: AGF SUB-R4-03
+                    "checkout_session_change_guard", "scheduled_change_funding_guard", "scheduled_change_applied_evidence"); // V23.5: AGF SUB-R4-15
 
     private FlywayBaselineGuard() {
     }

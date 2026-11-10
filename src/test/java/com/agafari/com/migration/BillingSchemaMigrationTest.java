@@ -173,9 +173,18 @@ class BillingSchemaMigrationTest extends AbstractIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"NEW", "CONVERSION", "UPGRADE", "RENEWAL", "DOWNGRADE_RENEWAL"})
+    @ValueSource(strings = {"NEW", "CONVERSION", "UPGRADE", "RENEWAL"})
     void everyAcceptedKindIsAllowed(String kind) {
         assertThatCode(() -> checkoutWith("kind", "'" + kind + "'")).doesNotThrowAnyException();
+    }
+
+    /**
+     * AGF V23.5: DOWNGRADE_RENEWAL is still an accepted kind, but such a checkout must name its scheduled change (PO P2);
+     * the accepted case is in {@code ScheduledChangeFundingMigrationTest}.
+     */
+    @Test
+    void aDowngradeRenewalWithoutItsScheduledChangeIsRefused() {
+        assertThatThrownBy(() -> checkoutWith("kind", "'DOWNGRADE_RENEWAL'")).hasMessageContaining("ck_checkout_session_change");
     }
 
     @Test

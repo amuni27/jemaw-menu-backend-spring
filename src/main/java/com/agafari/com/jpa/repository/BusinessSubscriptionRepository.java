@@ -29,7 +29,8 @@ public interface BusinessSubscriptionRepository extends Repository<BusinessSubsc
     List<BusinessSubscription> findByBusinessIdOrderByCreatedAtDesc(String businessId);
 
     /** AGF SUB-R2-11: the pending change of this row whose time has come (at most one per restaurant). */
-    @Query("select c from ScheduledChange c where c.fromSubscriptionId = :subscriptionId and c.status = 'PENDING' and c.effectiveAt <= :now")
+    // AGF SUB-R4-15: a paid change (with a target price) is resolved by the lifecycle itself, not deferred to here
+    @Query("select c from ScheduledChange c where c.fromSubscriptionId = :subscriptionId and c.status = 'PENDING' and c.effectiveAt <= :now and c.targetPriceId is null")
     Optional<ScheduledChange> findDueScheduledChange(String subscriptionId, Instant now);
 
     @Query("select c from MonetizationConfig c order by c.version desc")

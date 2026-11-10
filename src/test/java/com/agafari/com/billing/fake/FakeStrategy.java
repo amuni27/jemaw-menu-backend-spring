@@ -25,9 +25,12 @@ public record FakeStrategy(Market market, String provider, PaymentProviderClient
         this(market, "FAKE", new FakeProviderClient());
     }
 
+    /** AGF SUB-R4-15: tests choose the kind the fake plans next (NEW by default); a real strategy decides it (R5, R6). */
+    public static volatile CheckoutKind nextKind = CheckoutKind.NEW;
+
     @Override
     public CheckoutPlan planCheckout(CheckoutRequest request, CurrentState state) {
-        return new CheckoutPlan(CheckoutKind.NEW, new Money(1000, market.currency()), PriceInterval.MONTH, state.subscriptionId());
+        return new CheckoutPlan(nextKind, new Money(1000, market.currency()), PriceInterval.MONTH, state.subscriptionId());
     }
 
     @Override

@@ -169,6 +169,10 @@ public class CheckoutService {
                 return transaction.execute(s -> reserveLocked(businessId, ownerId, priceId, key, market, strategy, replaceId, replaceVersion));
             }
             if (e.getMessage() != null && e.getMessage().contains("uk_checkout_session_active")) throw active();
+            // AGF SUB-R4-15 (P2): the change's earlier checkout can still be paid (OPEN or CANCEL_REQUESTED)
+            if (e.getMessage() != null && e.getMessage().contains("uk_checkout_session_change_payable")) {
+                throw new CheckoutRefusedException(HttpStatus.CONFLICT, CheckoutRefusedException.ACTIVE, "An earlier checkout for this plan change can still be paid. Please try again later.");
+            }
             throw e;
         }
     }
@@ -218,10 +222,20 @@ public class CheckoutService {
         Instant expiresAt = now.plus(QUOTE_LIFETIME);
         // The amount comes from plan_price only (the story's rule); the strategy decides the kind and what it replaces.
         Money expected = new Money(price.getAmountMinor(), Currency.valueOf(price.getCurrency()));
-        jdbc.update("insert into checkout_session (id, business_id, owner_user_id, price_id, config_version, kind, replaces_subscription_id, provider, status, idempotency_key, request_hash, expires_at, expected_amount_minor, expected_currency, created_at) "
-                        + "values (?, ?, ?, ?, ?, ?, ?, ?, 'CREATING', ?, ?, ?, ?, ?, ?)",
+        // AGF SUB-R4-15 (P2): a downgrade-renewal checkout names the exact open, unfunded change it pays for
+        String scheduledChangeId = null;
+        if (plan.kind() == CheckoutKind.DOWNGRADE_RENEWAL) {
+            List<String> open = jdbc.queryForList("select id from scheduled_change where business_id = ? and from_subscription_id = ? and target_price_id = ? and kind = 'DOWNGRADE' "
+                    + "and status in ('PENDING', 'AWAITING_PAYMENT') and funding_payment_id is null", String.class, businessId, plan.replacesSubscriptionId(), priceId);
+            if (open.size() != 1) {
+                throw new CheckoutRefusedException(HttpStatus.UNPROCESSABLE_ENTITY, "CHECKOUT_NO_SCHEDULED_CHANGE", "There is no scheduled plan change waiting for this payment.");
+            }
+            scheduledChangeId = open.get(0);
+        }
+        jdbc.update("insert into checkout_session (id, business_id, owner_user_id, price_id, config_version, kind, replaces_subscription_id, provider, status, idempotency_key, request_hash, expires_at, expected_amount_minor, expected_currency, created_at, scheduled_change_id) "
+                        + "values (?, ?, ?, ?, ?, ?, ?, ?, 'CREATING', ?, ?, ?, ?, ?, ?, ?)",
                 id, businessId, ownerId, priceId, config.getId(), plan.kind().name(), plan.replacesSubscriptionId(), strategy.provider(), key, hash,
-                Timestamp.from(expiresAt), expected.minor(), expected.currency().name(), Timestamp.from(now));
+                Timestamp.from(expiresAt), expected.minor(), expected.currency().name(), Timestamp.from(now), scheduledChangeId);
         jobs.enqueue(CheckoutCreateHandler.TYPE, id, new CheckoutCreatePayload(id), BACKSTOP_DELAY);
         return new Reservation(new Row(id, businessId, priceId, plan.kind(), "CREATING", null, expiresAt, now, expected, hash, null, 0), true, strategy);
     }

@@ -2,6 +2,7 @@ package com.agafari.com.config;
 
 import com.agafari.com.billing.Market;
 import com.agafari.com.billing.PriceAvailability;
+import com.agafari.com.billing.ProviderActivationReadiness;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.annotation.Value;
@@ -41,9 +42,19 @@ public class FlagMatrixValidator implements SmartInitializingSingleton {
 
     /** Throws {@link FlagMatrixViolationException} if this candidate configuration can't run. */
     public void check(BillingFlags candidate, boolean candidateJobsEnabled) {
-        List<String> violations = FlagMatrix.violations(candidate, candidateJobsEnabled, new FlagFacts(postgres(),
+        List<String> violations = violations(candidate, candidateJobsEnabled, new FlagFacts(postgres(),
                 candidate.us().pricesVisible() && available(Market.US), candidate.et().pricesVisible() && available(Market.ET), false, false, false, false));
         if (!violations.isEmpty()) throw new FlagMatrixViolationException(violations);
+    }
+
+    /**
+     * AGF SUB-R4-10 (PO ruling R3): the flag matrix plus the intentional activation-readiness restriction, so billing stays
+     * refused even when every other requirement, provider secrets included, is met.
+     */
+    public static List<String> violations(BillingFlags candidate, boolean candidateJobsEnabled, FlagFacts facts) {
+        List<String> found = new java.util.ArrayList<>(FlagMatrix.violations(candidate, candidateJobsEnabled, facts));
+        found.addAll(ProviderActivationReadiness.violations(candidate));
+        return found;
     }
 
     private boolean available(Market market) {

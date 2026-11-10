@@ -364,7 +364,7 @@ class CheckoutCreationTest extends CheckoutTestBase {
     @Test
     void c5ACrashAfterTheCallIsRecoveredWithTheSameKey() {
         String id = reserveOnly();
-        fakeEt.createSession(new ProviderSessionRequest(id, new Money(ET_AMOUNT, Currency.ETB), java.time.Instant.now()), "checkout:" + id);
+        fakeEt.createSession(new ProviderSessionRequest(id, owner.businessId(), new Money(ET_AMOUNT, Currency.ETB), java.time.Instant.now()), "checkout:" + id);
         recover(id);
         assertThat(only()).containsEntry("status", "OPEN").containsEntry("provider_session_ref", "fake_session_1");
         assertThat(fakeEt.sessionsCreated()).isEqualTo(1);

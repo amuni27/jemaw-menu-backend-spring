@@ -62,7 +62,7 @@ class BillingPortsTest {
     private final FakeProviderClient fake = new FakeProviderClient();
 
     private static ProviderSessionRequest session() {
-        return new ProviderSessionRequest("c1", TEN, T);
+        return new ProviderSessionRequest("c1", "b1", TEN, T);
     }
 
     @AfterEach

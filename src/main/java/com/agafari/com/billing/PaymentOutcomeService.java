@@ -1,0 +1,475 @@
+package com.agafari.com.billing;
+
+import com.agafari.com.billing.port.BillingStrategy;
+import com.agafari.com.billing.port.CheckoutKind;
+import com.agafari.com.billing.port.PaymentProviderClient;
+import com.agafari.com.billing.port.ProviderCapabilities;
+import com.agafari.com.billing.port.ProviderTimeoutException;
+import com.agafari.com.billing.port.VerifiedPayment;
+import com.agafari.com.config.BillingFlags;
+import com.agafari.com.jobs.PermanentJobException;
+import com.agafari.com.jobs.ProviderCallGuard;
+import com.agafari.com.jobs.TransientJobException;
+import com.agafari.com.jpa.entity.BusinessSubscription;
+import com.agafari.com.jpa.entity.MonetizationConfig;
+import com.agafari.com.jpa.repository.BusinessSubscriptionRepository;
+import com.agafari.com.jpa.repository.MonetizationConfigRepository;
+import com.agafari.com.security.AdminAuditService;
+import com.agafari.com.service.MonetizationClock;
+import com.agafari.com.service.MonetizationLocks;
+import com.agafari.com.subscription.EvidenceInvalidException;
+import com.agafari.com.subscription.ExpectedSubscriptionChangedException;
+import com.agafari.com.subscription.IllegalTransitionException;
+import com.agafari.com.subscription.PaidActivation;
+import com.agafari.com.subscription.PeriodExtension;
+import com.agafari.com.subscription.SubscriptionLifecycle;
+import com.agafari.com.subscription.TransitionReason;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.databind.ObjectMapper;
+
+import java.nio.charset.StandardCharsets;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * AGF SUB-R4-10 (DD §8.2, §8.3, §10.1): turns one stored provider event into exactly one durable outcome. The only writer of
+ * the ledger and the only builder of {@link VerifiedPaymentRef}; called only by {@link InboxProcessHandler}.
+ *
+ * <ol>
+ *   <li>Outside any transaction: re-fetch the payment from the provider (the event body is never evidence), read the
+ *   provider's capabilities, and match the payment to a checkout by its verified metadata (PO ruling R4). Missing or
+ *   conflicting evidence is quarantined; ownership is never inferred.</li>
+ *   <li>One transaction under the configuration and restaurant locks: {@code materialize}, load the committed facts, run
+ *   {@link PaymentOutcomeMatrix}, and write the ledger row, lifecycle change, checkout status, exception, refund request and
+ *   event status together.</li>
+ *   <li>If the lifecycle refuses the evidence, that transaction rolls back and a new one records the verified charge with
+ *   an exception: nothing is activated or refunded.</li>
+ * </ol>
+ * A pending provider outcome is unresolved, never a failure (PO D2): the job retries it. A definite decline records nothing
+ * financial (R7a). Real activation stays blocked by {@link ProviderActivationReadiness}.
+ */
+@Slf4j
+@Service
+public class PaymentOutcomeService {
+
+    public enum Result { PROCESSED, QUARANTINED, DECLINED, ALREADY_DONE }
+
+    /** DD §2.4: the lifecycle refused the evidence. */
+    public static final String EVIDENCE_INVALID = "EVIDENCE_INVALID";
+    /** PO ruling R5: a re-fetch contradicts the immutable ledger row of the same payment. */
+    public static final String LEDGER_FACTS_MISMATCH = "LEDGER_FACTS_MISMATCH";
+
+    static final String VERIFICATION = "SIGNED_WEBHOOK+API_FETCH";
+    private static final String TARGET_EXCEPTION = "BILLING_EXCEPTION";
+    private static final String EXCEPTION_OPENED = "BILLING_EXCEPTION_OPENED";
+    private static final String REFUND_REQUESTED = "BILLING_REFUND_REQUESTED";
+    private static final int MAX_ERROR = 1000;
+
+    private record Event(String id, String provider, String payload, String status) {
+    }
+
+    private record Checkout(String id, String businessId, String priceId, int configVersion, CheckoutKind kind, String replaces, String status,
+                            Instant cancelRequestedAt, Instant expiresAt, Money expected) {
+    }
+
+    /** The lifecycle refused what the matrix allowed; recorded in a transaction of its own. */
+    private static final class Refused extends RuntimeException {
+        final String code;
+        final String reason;
+
+        Refused(String code, String reason, Throwable cause) {
+            super(code + ": " + reason, cause);
+            this.code = code;
+            this.reason = reason;
+        }
+    }
+
+    private final JdbcTemplate jdbc;
+    private final BillingStrategyRegistry registry;
+    private final MonetizationLocks locks;
+    private final SubscriptionLifecycle lifecycle;
+    private final BusinessSubscriptionRepository subscriptions;
+    private final MonetizationConfigRepository configs;
+    private final MonetizationClock clock;
+    private final TransactionTemplate transaction;
+    private final AdminAuditService audit;
+    private final ObjectMapper mapper;
+    private final Set<Market> enabled = ConcurrentHashMap.newKeySet();
+
+    public PaymentOutcomeService(JdbcTemplate jdbc, BillingStrategyRegistry registry, MonetizationLocks locks, SubscriptionLifecycle lifecycle,
+                                 BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs, MonetizationClock clock,
+                                 PlatformTransactionManager transactions, AdminAuditService audit, ObjectMapper mapper, BillingFlags flags) {
+        this.jdbc = jdbc;
+        this.registry = registry;
+        this.locks = locks;
+        this.lifecycle = lifecycle;
+        this.subscriptions = subscriptions;
+        this.configs = configs;
+        this.clock = clock;
+        this.transaction = new TransactionTemplate(transactions);
+        this.audit = audit;
+        this.mapper = mapper;
+        // PO ruling R3: the flag alone never opens this path while activation isn't ready.
+        if (ProviderActivationReadiness.ready() && flags.us().billingEnabled()) enabled.add(Market.US);
+        if (ProviderActivationReadiness.ready() && flags.et().billingEnabled()) enabled.add(Market.ET);
+    }
+
+    /** Tests only: the flag itself comes from configuration, and readiness from {@link ProviderActivationReadiness}. */
+    public void setBillingEnabled(Market market, boolean on) {
+        if (on) enabled.add(market);
+        else enabled.remove(market);
+    }
+
+    public boolean billingActive(Market market) {
+        return enabled.contains(market);
+    }
+
+    public Result process(String providerEventId) {
+        ProviderCallGuard.assertNoTransaction();
+        Event event = loadEvent(providerEventId);
+        if (event == null) throw new PermanentJobException("No such provider event " + providerEventId, null);
+        if (!"PENDING".equals(event.status())) return Result.ALREADY_DONE;
+
+        BillingStrategy strategy = registry.forProvider(event.provider()).filter(s -> enabled.contains(s.market())).orElse(null);
+        if (strategy == null) throw unprocessed(event, "billing is not active for provider " + event.provider());
+        PaymentProviderClient client = strategy.client();
+        byte[] body = event.payload().getBytes(StandardCharsets.UTF_8);
+        String ref = client.signatureVerifier().paymentReference(body).orElse(null);
+        if (ref == null) throw unprocessed(event, "the event names no payment");
+
+        VerifiedPayment verified;
+        ProviderCapabilities capabilities;
+        try {
+            verified = client.verifyPayment(ref);
+            capabilities = client.capabilities();
+        } catch (ProviderTimeoutException e) {
+            note(event, "UNRESOLVED: the provider timed out");
+            throw new TransientJobException("The provider timed out verifying a payment", e);
+        }
+        if (!ref.equals(verified.providerPaymentRef())) return quarantine(event, "VERIFICATION_FAILED: the re-fetch named another payment");
+        switch (verified.status()) {
+            case PENDING -> {
+                note(event, "UNRESOLVED: the provider reports the payment pending");
+                throw new TransientJobException("The payment outcome is unresolved", null);
+            }
+            case FAILED -> {
+                return finishWithoutOwner(event, "FAILED", "PROVIDER_DECLINED", Result.DECLINED);
+            }
+            case SUCCEEDED -> {
+                // continued below
+            }
+        }
+
+        String mismatch = matchCheckout(event, strategy, verified);
+        Checkout checkout = mismatch == null ? loadCheckout(verified.metadata().get(PaymentMetadata.CHECKOUT_ID), false) : null;
+        if (checkout == null) {
+            PaymentOutcome row1 = PaymentOutcomeMatrix.decide(new OutcomeFacts(PaymentVerification.VERIFIED, false, false, null, null, null, false, null, null, null, capabilities, false));
+            return quarantine(event, row1.code() + ": " + (mismatch == null ? "no checkout" : mismatch));
+        }
+        Refused refused;
+        try {
+            return transaction.execute(s -> applyLocked(event, strategy, verified, capabilities, checkout.id(), checkout.businessId()));
+        } catch (Refused e) {
+            refused = e;
+        } catch (DataIntegrityViolationException e) {
+            refused = new Refused(EVIDENCE_INVALID, "DATABASE_REFUSED_AT_COMMIT", e); // the deferred evidence trigger (V23.2)
+        }
+        log.warn("event=billing.outcome_refused eventId={} code={} reason={}", event.id(), refused.code, refused.reason);
+        Refused recorded = refused;
+        return transaction.execute(s -> recordRefusal(event, strategy, verified, checkout.id(), checkout.businessId(), recorded));
+    }
+
+    // ---- outside the transaction ----
+
+    /** PO ruling R4: null when every verified key agrees with Agafari's records; otherwise why it doesn't. */
+    private String matchCheckout(Event event, BillingStrategy strategy, VerifiedPayment verified) {
+        Map<String, String> m = verified.metadata();
+        String checkoutId = m.get(PaymentMetadata.CHECKOUT_ID), businessId = m.get(PaymentMetadata.BUSINESS_ID);
+        if (blank(checkoutId) || blank(businessId)) return "the payment carries no checkout or restaurant";
+        Checkout c = loadCheckout(checkoutId, false);
+        if (c == null) return "the payment names an unknown checkout";
+        if (!c.businessId().equals(businessId)) return "the checkout belongs to another restaurant";
+        String checkoutProvider = jdbc.queryForObject("select provider from checkout_session where id = ?", String.class, c.id());
+        if (!event.provider().equals(checkoutProvider) || !strategy.provider().equals(checkoutProvider)) return "the checkout belongs to another provider";
+        String recorded = jdbc.queryForObject("select provider_session_ref from checkout_session where id = ?", String.class, c.id());
+        String named = m.get(PaymentMetadata.PROVIDER_SESSION_REF);
+        if (recorded != null && !recorded.equals(named)) return "the provider session reference is missing or differs";
+        if (recorded == null && named != null
+                && jdbc.queryForObject("select count(*) from checkout_session where provider = ? and provider_session_ref = ?", Integer.class, checkoutProvider, named) > 0) {
+            return "the provider session reference belongs to another checkout";
+        }
+        List<String> markets = jdbc.queryForList("select market from billing_account where business_id = ? and provider = ?", String.class, c.businessId(), checkoutProvider);
+        if (markets.size() != 1 || !markets.get(0).equals(strategy.market().name())) return "the restaurant has no billing account in this market";
+        return null;
+    }
+
+    // ---- the outcome transaction ----
+
+    private Result applyLocked(Event event, BillingStrategy strategy, VerifiedPayment verified, ProviderCapabilities capabilities, String checkoutId, String businessId) {
+        locks.configShared();
+        locks.restaurant(businessId);
+        if (!"PENDING".equals(jdbc.queryForObject("select status from provider_event where id = ? for update", String.class, event.id()))) return Result.ALREADY_DONE;
+        lifecycle.materialize(businessId);
+        Checkout c = loadCheckout(checkoutId, true);
+        Instant now = clock.now();
+        Instant tPay = micros(verified.paidAt());
+
+        Map<String, Object> existing = ledgerRow(strategy.provider(), verified.providerPaymentRef());
+        if (existing != null) {
+            List<String> differences = ledgerDifferences(existing, c, verified, tPay);
+            if (!differences.isEmpty()) {
+                Map<String, Object> facts = facts(event, c, verified, null);
+                facts.put("ledgerDifferences", differences);
+                exception(businessId, LEDGER_FACTS_MISMATCH, (String) existing.get("id"), c.id(), event.id(), null, verified, true, "OPEN", facts, now);
+            }
+            // One-time consumption: the outcome of this payment was recorded when its row was written.
+            return finish(event, "PROCESSED", differences.isEmpty() ? null : LEDGER_FACTS_MISMATCH, Result.PROCESSED);
+        }
+
+        boolean verifiedAsExpected = verified.amount().equals(c.expected());
+        Map<String, Object> price = jdbc.queryForMap("select plan_code, billing_interval, amount_minor, currency from plan_price where id = ?", c.priceId());
+        String planCode = (String) price.get("plan_code");
+        BusinessSubscription current = subscriptions.findCurrentByBusinessId(businessId).orElse(null);
+        boolean completedByAnother = jdbc.queryForObject("select count(*) from payment p join subscription_period sp on sp.payment_id = p.id where p.checkout_session_id = ?",
+                Integer.class, c.id()) > 0;
+        boolean eligible = EligibilityAtTime.eligible(history(), planCode, tPay);
+        OutcomeFacts facts = new OutcomeFacts(verifiedAsExpected ? PaymentVerification.VERIFIED : PaymentVerification.FAILED, true, completedByAnother, tPay, c.expiresAt(),
+                c.cancelRequestedAt(), eligible, c.replaces(), current == null ? null : current.getId(), c.kind(), capabilities, true);
+        PaymentOutcome decision = PaymentOutcomeMatrix.decide(facts);
+        Map<String, Object> snapshot = facts(event, c, verified, decision);
+        snapshot.put("eligibleAtPayment", eligible);
+        snapshot.put("completedByAnotherPayment", completedByAnother);
+        snapshot.put("currentSubscriptionId", current == null ? null : current.getId());
+
+        switch (decision.action()) {
+            case UNRESOLVED -> throw new IllegalStateException("An unresolved payment never reaches the outcome transaction");
+            case EXCEPTION -> {
+                if (decision.row() == 0) {
+                    exception(businessId, decision.code(), null, c.id(), event.id(), null, verified, true, "OPEN", snapshot, now);
+                } else {
+                    String paymentId = insertCharge(strategy.provider(), verified, c, businessId, null, tPay, now);
+                    exception(businessId, decision.code(), paymentId, c.id(), event.id(), null, verified, true, "OPEN", snapshot, now);
+                }
+                return finish(event, "PROCESSED", decision.code(), Result.PROCESSED);
+            }
+            case AUTO_REFUND -> {
+                String paymentId = insertCharge(strategy.provider(), verified, c, businessId, null, tPay, now);
+                String refundId = UUID.randomUUID().toString();
+                jdbc.update("insert into refund_request (id, payment_id, amount_minor, reason, request_key, status) values (?, ?, ?, ?, ?, 'REQUESTED')",
+                        refundId, paymentId, verified.amount().minor(), decision.cause(), "outcome:" + decision.cause());
+                audit.success(REFUND_REQUESTED, null, AdminAuditService.SYSTEM, "REFUND_REQUEST", refundId, "reason=" + decision.cause());
+                exception(businessId, decision.code(), paymentId, c.id(), event.id(), refundId, verified, true, "AUTO_HANDLING", snapshot, now);
+                return finish(event, "PROCESSED", decision.code(), Result.PROCESSED);
+            }
+            default -> {
+                apply(decision, strategy, verified, c, businessId, current, price, tPay, now);
+                return finish(event, "PROCESSED", null, Result.PROCESSED);
+            }
+        }
+    }
+
+    /** Row 7: an invoice, the ledger row, then the lifecycle with a pointer to both; the database re-checks the evidence at commit. */
+    private void apply(PaymentOutcome decision, BillingStrategy strategy, VerifiedPayment verified, Checkout c, String businessId, BusinessSubscription current,
+                       Map<String, Object> price, Instant tPay, Instant now) {
+        try {
+            if (decision.action() == PaymentOutcome.Action.EXTEND && current == null) throw new ExpectedSubscriptionChangedException(); // nothing to renew
+            Instant start = switch (decision.action()) {
+                case EXTEND -> current.getPeriodEnd(); // PD-3 open: a renewal starts exactly at period_end (R4-09 D2)
+                default -> tPay; // R8: an initial or replacement period starts at the verified payment time
+            };
+            if (start == null) throw new EvidenceInvalidException(EvidenceInvalidException.Code.PERIOD_MISMATCH);
+            Instant end = oneInterval(start, PriceInterval.valueOf((String) price.get("billing_interval")));
+            String invoiceId = UUID.randomUUID().toString();
+            jdbc.update("insert into billing_invoice (id, business_id, checkout_session_id, price_id, period_start, period_end, amount_minor, currency, status) "
+                            + "values (?, ?, ?, ?, ?, ?, ?, ?, 'PAID')", invoiceId, businessId, c.id(), c.priceId(), Timestamp.from(start), Timestamp.from(end),
+                    price.get("amount_minor"), price.get("currency"));
+            String paymentId = insertCharge(strategy.provider(), verified, c, businessId, invoiceId, tPay, now);
+            VerifiedPaymentRef ref = new VerifiedPaymentRef(paymentId, invoiceId);
+            String planCode = (String) price.get("plan_code");
+            PaidActivation activation = new PaidActivation(planCode, c.configVersion(), c.priceId(), strategy.provider(), null, null, start, end, ref, now);
+            switch (decision.action()) {
+                case ACTIVATE -> lifecycle.activatePaid(businessId, activation);
+                case EXTEND -> lifecycle.renew(current.getId(), new PeriodExtension(start, end, ref, now));
+                case REPLACE -> lifecycle.replacePaid(businessId, c.replaces(), activation,
+                        c.kind() == CheckoutKind.CONVERSION ? TransitionReason.CONVERTED : TransitionReason.CHANGED);
+                default -> throw new IllegalStateException("Not an applying outcome: " + decision);
+            }
+        } catch (EvidenceInvalidException e) {
+            throw new Refused(EVIDENCE_INVALID, e.code().name(), e);
+        } catch (ExpectedSubscriptionChangedException | IllegalTransitionException e) {
+            throw new Refused(PaymentOutcome.STATE_CHANGED, e.getClass().getSimpleName(), e);
+        } catch (DataIntegrityViolationException e) {
+            throw new Refused(EVIDENCE_INVALID, "DATABASE_REFUSED", e);
+        }
+        // A checkout whose cancel was requested keeps that state (V23.1 forbids COMPLETED with a cancel time).
+        jdbc.update("update checkout_session set status = 'COMPLETED', row_version = row_version + 1 where id = ? and status in ('CREATING', 'OPEN')", c.id());
+    }
+
+    /** DD §2.4: the refused attempt rolled back; the verified charge is still recorded, with an exception and nothing else. */
+    private Result recordRefusal(Event event, BillingStrategy strategy, VerifiedPayment verified, String checkoutId, String businessId, Refused refused) {
+        locks.configShared();
+        locks.restaurant(businessId);
+        if (!"PENDING".equals(jdbc.queryForObject("select status from provider_event where id = ? for update", String.class, event.id()))) return Result.ALREADY_DONE;
+        Checkout c = loadCheckout(checkoutId, true);
+        Instant now = clock.now();
+        if (ledgerRow(strategy.provider(), verified.providerPaymentRef()) != null) return finish(event, "PROCESSED", null, Result.PROCESSED);
+        String paymentId = insertCharge(strategy.provider(), verified, c, businessId, null, micros(verified.paidAt()), now);
+        Map<String, Object> facts = facts(event, c, verified, null);
+        facts.put("refusal", refused.reason);
+        exception(businessId, refused.code, paymentId, c.id(), event.id(), null, verified, true, "OPEN", facts, now);
+        return finish(event, "PROCESSED", refused.code, Result.PROCESSED);
+    }
+
+    // ---- writes ----
+
+    private String insertCharge(String provider, VerifiedPayment verified, Checkout c, String businessId, String invoiceId, Instant tPay, Instant now) {
+        String id = UUID.randomUUID().toString();
+        int inserted = jdbc.update("insert into payment (id, business_id, invoice_id, checkout_session_id, provider, provider_payment_ref, amount_minor, currency, kind, status, "
+                        + "occurred_at, verified_at, verification) values (?, ?, ?, ?, ?, ?, ?, ?, 'CHARGE', 'SUCCEEDED', ?, ?, ?) "
+                        + "on conflict (provider, provider_payment_ref, kind) do nothing",
+                id, businessId, invoiceId, c.id(), provider, verified.providerPaymentRef(), verified.amount().minor(), verified.amount().currency().name(),
+                Timestamp.from(tPay), Timestamp.from(micros(now)), VERIFICATION);
+        if (inserted == 0) throw new IllegalStateException("A ledger row appeared under the restaurant lock"); // never: checked above, under the same lock
+        return id;
+    }
+
+    private void exception(String businessId, String code, String paymentId, String checkoutId, String eventId, String refundId, VerifiedPayment verified,
+                           boolean funds, String status, Map<String, Object> facts, Instant now) {
+        String id = UUID.randomUUID().toString();
+        boolean money = verified.amount() != null;
+        int inserted = jdbc.update("insert into billing_exception (id, business_id, code, payment_id, checkout_id, provider_event_id, refund_request_id, amount_minor, currency, "
+                        + "paid_at, involves_customer_funds, facts, status, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?) on conflict do nothing",
+                id, businessId, code, paymentId, checkoutId, eventId, refundId, money ? verified.amount().minor() : null, money ? verified.amount().currency().name() : null,
+                verified.paidAt() == null ? null : Timestamp.from(micros(verified.paidAt())), funds, mapper.writeValueAsString(facts), status, Timestamp.from(micros(now)));
+        if (inserted == 1) audit.success(EXCEPTION_OPENED, null, AdminAuditService.SYSTEM, TARGET_EXCEPTION, id, "code=" + code + " status=" + status);
+    }
+
+    private Result finish(String eventId, String status, String note, Result result) {
+        int updated = jdbc.update("update provider_event set status = ?, processed_at = now(), attempts = attempts + 1, last_error = ? where id = ? and status = 'PENDING'",
+                status, note, eventId);
+        return updated == 1 ? result : Result.ALREADY_DONE;
+    }
+
+    private Result finish(Event event, String status, String note, Result result) {
+        return finish(event.id(), status, note, result);
+    }
+
+    /** No restaurant is established, so no exception row can be owned (it needs one): the event itself is the durable record. */
+    private Result quarantine(Event event, String reason) {
+        log.warn("event=billing.event_quarantined eventId={} reason={}", event.id(), reason);
+        return finishWithoutOwner(event, "QUARANTINED", reason, Result.QUARANTINED);
+    }
+
+    private Result finishWithoutOwner(Event event, String status, String note, Result result) {
+        return transaction.execute(s -> finish(event, status, clip(note), result));
+    }
+
+    /** Leaves the event PENDING, counts the attempt and keeps the reason visible. */
+    private void note(Event event, String reason) {
+        jdbc.update("update provider_event set attempts = attempts + 1, last_error = ? where id = ? and status = 'PENDING'", clip(reason), event.id());
+    }
+
+    private PermanentJobException unprocessed(Event event, String reason) {
+        note(event, reason);
+        return new PermanentJobException("Provider event " + event.id() + " can't be processed: " + reason, null);
+    }
+
+    // ---- reads ----
+
+    private Event loadEvent(String id) {
+        List<Event> rows = jdbc.query("select id, provider, payload::text as payload, status from provider_event where id = ?",
+                (rs, n) -> new Event(rs.getString("id"), rs.getString("provider"), rs.getString("payload"), rs.getString("status")), id);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private Checkout loadCheckout(String id, boolean lock) {
+        if (blank(id)) return null;
+        List<Checkout> rows = jdbc.query("select id, business_id, price_id, config_version, kind, replaces_subscription_id, status, cancel_requested_at, expires_at, "
+                        + "expected_amount_minor, expected_currency from checkout_session where id = ?" + (lock ? " for update" : ""),
+                (rs, n) -> new Checkout(rs.getString("id"), rs.getString("business_id"), rs.getString("price_id"), rs.getInt("config_version"),
+                        CheckoutKind.valueOf(rs.getString("kind")), rs.getString("replaces_subscription_id"), rs.getString("status"), instant(rs.getTimestamp("cancel_requested_at")),
+                        instant(rs.getTimestamp("expires_at")), new Money(rs.getLong("expected_amount_minor"), Currency.valueOf(rs.getString("expected_currency")))),
+                id);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private Map<String, Object> ledgerRow(String provider, String ref) {
+        List<Map<String, Object>> rows = jdbc.queryForList("select * from payment where provider = ? and provider_payment_ref = ? and kind = 'CHARGE'", provider, ref);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private static List<String> ledgerDifferences(Map<String, Object> row, Checkout c, VerifiedPayment verified, Instant tPay) {
+        List<String> found = new java.util.ArrayList<>();
+        if (!c.businessId().equals(row.get("business_id"))) found.add("business_id");
+        if (!Objects.equals(c.id(), row.get("checkout_session_id"))) found.add("checkout_session_id");
+        if (((Number) row.get("amount_minor")).longValue() != verified.amount().minor()) found.add("amount_minor");
+        if (!verified.amount().currency().name().equals(row.get("currency"))) found.add("currency");
+        if (!((Timestamp) row.get("occurred_at")).toInstant().equals(tPay)) found.add("occurred_at");
+        return found;
+    }
+
+    private List<ConfigVersionFacts> history() {
+        return configs.findByVersionGreaterThan(0).stream()
+                .map((MonetizationConfig v) -> new ConfigVersionFacts(v.getVersion(), v.getEffectiveFrom(), v.models().stream().map(Enum::name).collect(java.util.stream.Collectors.toSet())))
+                .toList();
+    }
+
+    /** No PII or secrets: identifiers, amounts, times and the matrix inputs and result. */
+    private static Map<String, Object> facts(Event event, Checkout c, VerifiedPayment verified, PaymentOutcome decision) {
+        Map<String, Object> f = new LinkedHashMap<>();
+        f.put("providerEventId", event.id());
+        f.put("providerPaymentRef", verified.providerPaymentRef());
+        f.put("checkoutId", c.id());
+        f.put("checkoutKind", c.kind().name());
+        f.put("checkoutStatus", c.status());
+        f.put("expected", c.expected().minor() + " " + c.expected().currency());
+        f.put("verified", verified.amount().minor() + " " + verified.amount().currency());
+        f.put("tPay", String.valueOf(verified.paidAt()));
+        f.put("expiresAt", String.valueOf(c.expiresAt()));
+        f.put("cancelRequestedAt", String.valueOf(c.cancelRequestedAt()));
+        f.put("replacesSubscriptionId", c.replaces());
+        if (decision != null) {
+            f.put("row", decision.row());
+            f.put("action", decision.action().name());
+            f.put("cause", decision.cause());
+        }
+        return f;
+    }
+
+    static Instant oneInterval(Instant start, PriceInterval interval) {
+        return switch (interval) {
+            case MONTH -> start.atZone(ZoneOffset.UTC).plusMonths(1).toInstant();
+            case YEAR -> start.atZone(ZoneOffset.UTC).plusYears(1).toInstant();
+        };
+    }
+
+    private static Instant micros(Instant i) {
+        return i == null ? null : i.truncatedTo(ChronoUnit.MICROS);
+    }
+
+    private static Instant instant(Timestamp t) {
+        return t == null ? null : t.toInstant();
+    }
+
+    private static boolean blank(String s) {
+        return s == null || s.isBlank();
+    }
+
+    private static String clip(String s) {
+        return s == null || s.length() <= MAX_ERROR ? s : s.substring(0, MAX_ERROR);
+    }
+}

@@ -1,6 +1,7 @@
 package com.agafari.com.billing.port;
 
 import java.util.Map;
+import java.util.Optional;
 
 /** AGF SUB-R4-07 (BD-20): during a secret rotation both the current and the previous secret are accepted. */
 public final class RotatingSignatureVerifier implements SignatureVerifier {
@@ -23,5 +24,10 @@ public final class RotatingSignatureVerifier implements SignatureVerifier {
     @Override
     public InboundEvent identify(byte[] rawBody) {
         return current.identify(rawBody);
+    }
+
+    @Override
+    public Optional<String> paymentReference(byte[] rawBody) {
+        return current.paymentReference(rawBody);
     }
 }

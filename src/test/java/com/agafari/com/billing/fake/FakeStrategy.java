@@ -32,7 +32,7 @@ public record FakeStrategy(Market market, String provider, PaymentProviderClient
 
     @Override
     public ProviderSessionRequest sessionRequest(CheckoutSession session) {
-        return new ProviderSessionRequest(session.id(), session.expected(), session.expiresAt());
+        return new ProviderSessionRequest(session.id(), session.businessId(), session.expected(), session.expiresAt());
     }
 
     @Override

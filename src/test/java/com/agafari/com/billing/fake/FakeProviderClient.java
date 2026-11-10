@@ -54,13 +54,16 @@ import java.util.Set;
  *   <li>{@link Script#ALREADY_COMPLETE_ON_EXPIRE}: expiring a session reports it was already paid.</li>
  *   <li>{@link Script#EXPIRE_TIMEOUT}, {@link Script#EXPIRE_REFUSED}: expiring a session times out, or is definitely refused.</li>
  *   <li>{@link Script#LOOKUP_LAG}: {@code findRefund} finds nothing for {@code laggedLookups} calls, even when the refund exists.</li>
+ *   <li>{@link Script#VERIFY_TIMEOUT}: verification times out (AGF SUB-R4-10).</li>
  * </ul>
+ * AGF SUB-R4-10: {@link #payment(VerifiedPayment)} scripts what a re-fetch of one reference returns; DECLINE and DELAY still
+ * apply on top of it. {@link #onVerify(Runnable)} runs at the start of each re-fetch, to hold or observe it.
  * Capability toggles ({@link #capabilities(ProviderCapabilities)}): without idempotent create or refund a repeated key creates
  * a new object; without session expiry or refund lookup those calls are unsupported.
  */
 public final class FakeProviderClient extends GuardedProviderClient {
 
-    public enum Script { SUCCESS, DECLINE, DELAY, TIMEOUT_AFTER_ACCEPT, DUPLICATE, OUT_OF_ORDER, ALREADY_COMPLETE_ON_EXPIRE, LOOKUP_LAG, EXPIRE_TIMEOUT, EXPIRE_REFUSED }
+    public enum Script { SUCCESS, DECLINE, DELAY, TIMEOUT_AFTER_ACCEPT, DUPLICATE, OUT_OF_ORDER, ALREADY_COMPLETE_ON_EXPIRE, LOOKUP_LAG, EXPIRE_TIMEOUT, EXPIRE_REFUSED, VERIFY_TIMEOUT }
 
     public static final ProviderCapabilities ALL = new ProviderCapabilities(true, true, true, Duration.ofHours(24), true);
     public static final Instant PAID_AT = Instant.parse("2030-01-01T00:00:00Z");
@@ -89,6 +92,9 @@ public final class FakeProviderClient extends GuardedProviderClient {
     private final Map<String, Integer> lookups = new HashMap<>();
     private final Set<String> timedOut = new HashSet<>();
     private final List<ProviderRecord> records = new ArrayList<>();
+    private final Map<String, VerifiedPayment> payments = new java.util.concurrent.ConcurrentHashMap<>();
+    private volatile Runnable onVerify = () -> { };
+    private volatile boolean verifyRanInTransaction;
 
     public FakeProviderClient script(Script value) {
         script = value;
@@ -119,6 +125,27 @@ public final class FakeProviderClient extends GuardedProviderClient {
     public FakeProviderClient onCreate(Runnable value) {
         onCreate = value;
         return this;
+    }
+
+    /** AGF SUB-R4-10: what a re-fetch of this payment's reference returns from now on. */
+    public FakeProviderClient payment(VerifiedPayment value) {
+        payments.put(value.providerPaymentRef(), value);
+        return this;
+    }
+
+    /** AGF SUB-R4-10: a re-fetch of {@code ref} answers with {@code value}, even if it names another payment. */
+    public FakeProviderClient payment(String ref, VerifiedPayment value) {
+        payments.put(ref, value);
+        return this;
+    }
+
+    public FakeProviderClient onVerify(Runnable value) {
+        onVerify = value;
+        return this;
+    }
+
+    public boolean verifyRanInTransaction() {
+        return verifyRanInTransaction;
     }
 
     public int expireCalls() {
@@ -153,6 +180,9 @@ public final class FakeProviderClient extends GuardedProviderClient {
         currentSecret = SECRET;
         previousSecret = null;
         fetches.clear();
+        payments.clear();
+        onVerify = () -> { };
+        verifyRanInTransaction = false;
         createCalls.set(0);
         expireCalls.set(0);
         lastExpireKey = null;
@@ -209,10 +239,19 @@ public final class FakeProviderClient extends GuardedProviderClient {
 
     @Override
     protected VerifiedPayment doVerifyPayment(String ref) {
-        int fetch = fetches.merge(ref, 1, Integer::sum);
-        if (script == Script.DECLINE) return new VerifiedPayment(ref, ProviderPaymentStatus.FAILED, AMOUNT, null, Map.of());
-        if (script == Script.DELAY && fetch <= delayedFetches) return new VerifiedPayment(ref, ProviderPaymentStatus.PENDING, AMOUNT, null, Map.of());
-        return new VerifiedPayment(ref, ProviderPaymentStatus.SUCCEEDED, AMOUNT, PAID_AT, Map.of());
+        if (TransactionSynchronizationManager.isActualTransactionActive()) verifyRanInTransaction = true;
+        onVerify.run();
+        int fetch;
+        synchronized (this) {
+            fetch = fetches.merge(ref, 1, Integer::sum);
+        }
+        if (script == Script.VERIFY_TIMEOUT) throw new ProviderTimeoutException("timed out");
+        VerifiedPayment scripted = payments.get(ref);
+        Map<String, String> metadata = scripted == null ? Map.of() : scripted.metadata();
+        Money amount = scripted == null ? AMOUNT : scripted.amount();
+        if (script == Script.DECLINE) return new VerifiedPayment(ref, ProviderPaymentStatus.FAILED, amount, null, metadata);
+        if (script == Script.DELAY && fetch <= delayedFetches) return new VerifiedPayment(ref, ProviderPaymentStatus.PENDING, amount, null, metadata);
+        return scripted != null ? scripted : new VerifiedPayment(ref, ProviderPaymentStatus.SUCCEEDED, AMOUNT, PAID_AT, Map.of());
     }
 
     @Override
@@ -273,6 +312,17 @@ public final class FakeProviderClient extends GuardedProviderClient {
                 return new InboundEvent(node.path("id").asString(""), node.path("type").asString(""));
             } catch (JacksonException e) {
                 throw new IllegalArgumentException("Not JSON", e);
+            }
+        }
+
+        /** AGF SUB-R4-10: a fake event names its payment in {@code payment_ref}. */
+        @Override
+        public Optional<String> paymentReference(byte[] body) {
+            try {
+                String ref = new ObjectMapper().readTree(body).path("payment_ref").asString("");
+                return ref.isBlank() ? Optional.empty() : Optional.of(ref);
+            } catch (JacksonException e) {
+                return Optional.empty();
             }
         }
     }

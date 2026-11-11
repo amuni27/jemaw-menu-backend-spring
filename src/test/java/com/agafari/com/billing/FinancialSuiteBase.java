@@ -92,11 +92,36 @@ abstract class FinancialSuiteBase extends PaymentOutcomeTestBase {
         webhooks.setBillingEnabled(Market.ET, true);
         planRequests.setOwnerPlansVisible(true);
         price3 = price("MODEL_3", "ET", "ETB", 1500);
-        // Model 3 enabled as well, from before any payment in these tests (the base configuration enables Models 2 and 4)
+        // Model 3 enabled as well, at every instant from 60 days ago (the base configuration, version 1, enables Models 2 and 4
+        // only and is in force from its own now()). Version 2 covers payments before version 1; version 3 shares version 1's
+        // effective_from, so the version tie-break puts it in force from that same instant, leaving no window with Model 3 off
+        // (AGF R5-02 Q6 flake: R1/R10 paid at tc - 1 s could otherwise land between version 1 and a later version 3).
         jdbc.update("insert into monetization_config (version, setting, model_2_enabled, model_3_enabled, model_4_enabled, effective_from, created_at, created_by_user_id) "
                 + "values (2, 'SETTING_2', true, true, true, ?, now(), ?)", Timestamp.from(Instant.now().minus(Duration.ofDays(60))), admin.getId());
         jdbc.update("insert into monetization_config (version, setting, model_2_enabled, model_3_enabled, model_4_enabled, effective_from, created_at, created_by_user_id) "
-                + "values (3, 'SETTING_2', true, true, true, now(), now(), ?)", admin.getId());
+                + "select 3, 'SETTING_2', true, true, true, effective_from, now(), ? from monetization_config where version = 1", admin.getId());
+        assertModel3NeverDisabledSinceVersion2();
+    }
+
+    /**
+     * Fixture guard: Model 3 is eligible at every version boundary from version 2 on, so no t_pay in that range can fall in a
+     * window where the base configuration (version 1, Model 3 off) is in force.
+     */
+    private void assertModel3NeverDisabledSinceVersion2() {
+        List<ConfigVersionFacts> history = jdbc.query("select version, effective_from, model_2_enabled, model_3_enabled, model_4_enabled from monetization_config",
+                (rs, i) -> {
+                    java.util.Set<String> on = new java.util.HashSet<>();
+                    if (rs.getBoolean("model_2_enabled")) on.add("MODEL_2");
+                    if (rs.getBoolean("model_3_enabled")) on.add("MODEL_3");
+                    if (rs.getBoolean("model_4_enabled")) on.add("MODEL_4");
+                    return new ConfigVersionFacts(rs.getInt("version"), rs.getTimestamp("effective_from").toInstant(), on);
+                });
+        Instant from = history.stream().filter(v -> v.version() == 2).findFirst().orElseThrow().effectiveFrom();
+        for (ConfigVersionFacts v : history) {
+            if (v.effectiveFrom().isBefore(from)) continue;
+            assertThat(EligibilityAtTime.eligible(history, "MODEL_3", v.effectiveFrom()))
+                    .as("fixture: Model 3 is enabled at %s (version %d boundary)", v.effectiveFrom(), v.version()).isTrue();
+        }
     }
 
     /** Runs after every test, failed or not (E4): faults are dropped, gates released, runners stopped. */

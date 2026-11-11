@@ -51,6 +51,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- AGF SUB-R5-01 (BD-13, PO-approved 2026-11-10): official Stripe Java SDK, pinned, MIT. Types stay in billing.stripe -->
+        <dependency>
+            <groupId>com.stripe</groupId>
+            <artifactId>stripe-java</artifactId>
+            <version>34.1.0</version>
+        </dependency>
         <!-- Decision A: versioned schema migrations (versions managed by the Spring Boot parent) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

@@ -101,14 +101,26 @@ class ProviderActivationUnavailableTest {
         assertThat(offenders(code -> java.util.regex.Pattern.compile("\\.replay\\([^)]").matcher(withoutComments(code)).find(), EXCEPTIONS, "controller/AdminBillingExceptionController.java")).as("SUB-R4-11: replay only from an exception").isEmpty();
     }
 
+    /**
+     * Realigned by AGF SUB-R5-01 (PO-authorized Stripe scaffolding): the only production adapter is the Stripe skeleton, and
+     * its only wiring sits behind {@code app.billing.stripe.enabled=true} (off by default). Without that switch no provider
+     * strategy exists (the Spring-level half, {@code ProviderActivationReachabilityTest}, is unchanged), and even with it
+     * real activation stays refused by {@link ProviderActivationReadiness}.
+     */
     @Test
-    void noProductionProviderAdapterOrStrategyBeanExists() throws IOException {
-        assertThat(offenders(code -> code.contains("extends GuardedProviderClient") || code.contains("implements PaymentProviderClient"), "billing/port/GuardedProviderClient.java")).isEmpty();
+    void noProductionProviderAdapterOrStrategyBeanExistsExceptTheSwitchedOffStripeScaffolding() throws IOException {
+        assertThat(offenders(code -> code.contains("extends GuardedProviderClient") || code.contains("implements PaymentProviderClient"), "billing/port/GuardedProviderClient.java", STRIPE_ADAPTER)).isEmpty();
         for (Class<?> strategy : List.of(com.agafari.com.billing.EtBillingStrategy.class, com.agafari.com.billing.UsBillingStrategy.class)) {
             assertThat(strategy.isAnnotationPresent(Component.class) || strategy.isAnnotationPresent(Service.class)).as(strategy + " is not a bean").isFalse();
         }
-        assertThat(offenders(code -> code.contains("@Bean") && (code.contains(BillingStrategy.class.getSimpleName()) || code.contains(PaymentProviderClient.class.getSimpleName())))).isEmpty();
+        assertThat(offenders(code -> code.contains("@Bean") && (code.contains(BillingStrategy.class.getSimpleName()) || code.contains(PaymentProviderClient.class.getSimpleName())), STRIPE_CONFIGURATION)).isEmpty();
+        String wiring = Files.readString(Path.of("src/main/java/com/agafari/com", STRIPE_CONFIGURATION));
+        assertThat(wiring).as("SUB-R5-01: the Stripe wiring exists only behind its off-by-default switch")
+                .contains("@ConditionalOnProperty(prefix = \"app.billing.stripe\", name = \"enabled\", havingValue = \"true\")").doesNotContain("matchIfMissing");
     }
+
+    private static final String STRIPE_ADAPTER = "billing/stripe/StripeProviderClient.java";
+    private static final String STRIPE_CONFIGURATION = "billing/stripe/StripeConfiguration.java";
 
     @Test
     void activationReadinessIsAnIntentionalRestrictionWithTheOpenGatesNamed() {

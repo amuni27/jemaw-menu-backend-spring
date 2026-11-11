@@ -29,6 +29,12 @@ public class InboxProcessHandler implements JobHandler<InboxProcessPayload> {
         return InboxProcessPayload.class;
     }
 
+    /** AGF R4-16-D1: the provider the event was stored for (after its signature check, or by that provider's reconciliation). */
+    @Override
+    public String providerSql() {
+        return "(select e.provider from provider_event e where e.id = j.payload->>'providerEventId')";
+    }
+
     @Override
     public void handle(InboxProcessPayload payload) {
         outcomes.process(payload.providerEventId());

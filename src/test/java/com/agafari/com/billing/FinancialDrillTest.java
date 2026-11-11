@@ -10,7 +10,6 @@ import com.agafari.com.subscription.EffectiveView;
 import com.agafari.com.subscription.PeriodEndJob;
 import com.agafari.com.subscription.ScheduledChangeJob;
 import com.agafari.com.support.TestDataFactory.Tenant;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -49,7 +48,13 @@ class FinancialDrillTest extends FinancialSuiteBase {
     @Test
     void providerOutageAndRecovery() throws Exception {
         Map<String, Object> log = new LinkedHashMap<>();
-        JobRunner runner = runner(null, null);
+        // AGF R4-16-D1: the runner's own clock, so the provider pause can be passed deterministically
+        java.util.concurrent.atomic.AtomicReference<Instant> runnerNow = new java.util.concurrent.atomic.AtomicReference<>(Instant.now());
+        JobRunner runner = runner(null, new java.time.Clock() {
+            @Override public java.time.ZoneId getZone() { return java.time.ZoneOffset.UTC; }
+            @Override public java.time.Clock withZone(java.time.ZoneId zone) { return this; }
+            @Override public Instant instant() { return runnerNow.get(); }
+        });
 
         // a row-4 refund, requested before the outage
         Tenant refunded = data.tenant("outage-refund");
@@ -92,10 +97,17 @@ class FinancialDrillTest extends FinancialSuiteBase {
         assertThat(count("select count(*) from job where type = 'inbox.process' and status = 'PENDING' and last_error_kind = 'TRANSIENT'")).as("backing off").isGreaterThanOrEqualTo(10);
         assertThat(fakeEt.verifyRanInTransaction() || fakeEt.refundRanInTransaction() || fakeEt.createRanInTransaction()).as("NC-19: no provider call inside a transaction").isFalse();
 
+        // AGF R4-16-D1: ten consecutive transient failures paused the provider (DD §9.2 item 5); nothing is claimed during the pause
+        assertThat(runner.isPaused(PROVIDER)).as("D1: the outage paused the provider").isTrue();
+        log.put("provider paused during outage", true);
+
         // recovery, inside the refund idempotency window
         fakeEt.script(FakeProviderClient.Script.SUCCESS);
         clock.setOffset(Duration.ofHours(1));
         backoffPasses();
+        assertThat(runner.pollOnce()).as("D1: still paused, nothing claimed").isEmpty();
+        runnerNow.set(runnerNow.get().plus(Duration.ofMinutes(5)).plusSeconds(1)); // the 5-minute pause ends
+        assertThat(runner.isPaused(PROVIDER)).isFalse();
         drain(runner, "inbox.process", "refund.execute");
         reconciliation.hourly(clock.now().plus(15, ChronoUnit.MINUTES)); // the stale CREATING checkout is recovered
         for (Tenant t : payers) {
@@ -120,7 +132,6 @@ class FinancialDrillTest extends FinancialSuiteBase {
      * separate decision. Run it with {@code -Djunit.jupiter.conditions.deactivate=org.junit.*DisabledCondition}.
      */
     @Test
-    @Disabled("DEFECT R4-16-D1: the per-provider pause never engages for financial jobs (no handler declares its provider); preserved failing test, PO E2")
     void theProviderPauseEngagesAfterTenTransientFailuresDuringAnOutage() throws Exception {
         JobRunner runner = runner(null, null);
         fakeEt.script(FakeProviderClient.Script.VERIFY_TIMEOUT);

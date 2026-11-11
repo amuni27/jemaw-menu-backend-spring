@@ -79,14 +79,30 @@ public class JobRunner {
         int capacity = Math.min(MAX_BATCH, workers - inFlight.get());
         String types = handlers.values().stream().filter(h -> h.provider() == null || !isPaused(h.provider())).map(JobHandler::type).collect(Collectors.joining(","));
         if (capacity <= 0 || types.isEmpty()) return List.of();
+        // AGF R4-16-D1: a paused provider's jobs of a multi-provider type are skipped one by one; nothing changes when none is paused
+        List<String> paused = pausedUntil.keySet().stream().filter(this::isPaused).sorted().toList();
+        StringBuilder skip = new StringBuilder();
+        List<Object> args = new ArrayList<>(List.of(JobFailurePolicy.MAX_CLAIMS, types));
+        if (!paused.isEmpty()) {
+            String pausedArray = "{" + String.join(",", paused) + "}";
+            for (JobHandler<?> h : handlers.values()) {
+                if (h.provider() != null || h.providerSql() == null) continue;
+                skip.append(" and not (j.type = ? and coalesce(").append(h.providerSql()).append(", '') = any (?::text[]))");
+                args.add(h.type());
+                args.add(pausedArray);
+            }
+        }
+        args.add(capacity);
         List<Map<String, Object>> claimed = jdbc.queryForList("""
-                with due as (select id from job where status = 'PENDING' and run_at <= now() and claims < ? and type = any (string_to_array(?, ','))
-                             order by run_at for update skip locked limit ?)
+                with due as (select j.id from job j where j.status = 'PENDING' and j.run_at <= now() and j.claims < ? and j.type = any (string_to_array(?, ','))"""
+                + skip + """
+
+                             order by j.run_at for update of j skip locked limit ?)
                 update job j set status = 'RUNNING', claims = claims + 1, claim_token = gen_random_uuid()::text, lease_until = now() + interval '10 minutes',
                                  first_attempt_at = coalesce(first_attempt_at, now())
                 from due where j.id = due.id
                 returning j.id, j.type, j.payload::text as payload, j.claims, j.claim_token, j.first_attempt_at
-                """, JobFailurePolicy.MAX_CLAIMS, types, capacity);
+                """, args.toArray());
         List<Future<?>> started = new ArrayList<>();
         for (Map<String, Object> row : claimed) {
             inFlight.incrementAndGet();
@@ -141,7 +157,10 @@ public class JobRunner {
             fail(handler, row, e);
             return;
         }
-        if (handler.provider() != null) providerFailures.remove(handler.provider());
+        if (!providerFailures.isEmpty()) {
+            String provider = providerOf(handler, id);
+            if (provider != null) providerFailures.remove(provider);
+        }
         fenced(jdbc.update("update job set status = 'DONE', finished_at = now(), lease_until = null, last_error = null, last_error_kind = null where id = ? and claim_token = ? and status = 'RUNNING'", id, token), id);
     }
 
@@ -154,7 +173,7 @@ public class JobRunner {
         String token = (String) row.get("claim_token");
         String type = (String) row.get("type");
         JobFailurePolicy.Kind kind = JobFailurePolicy.classify(e);
-        trackProvider(handler, kind);
+        trackProvider(providerOf(handler, id), kind);
         Duration cap = JobFailurePolicy.transientCap(type, handler.transientCap());
         Instant now = jdbc.queryForObject("select now()", Timestamp.class).toInstant();
         int claims = ((Number) row.get("claims")).intValue();
@@ -171,8 +190,24 @@ public class JobRunner {
         }
     }
 
-    private void trackProvider(JobHandler<?> handler, JobFailurePolicy.Kind kind) {
-        String provider = handler.provider();
+    /**
+     * AGF R4-16-D1: the provider a job counts against: the handler's type-level provider, else the job's own provider resolved
+     * from persisted data by {@link JobHandler#providerSql()}; null if it has none or can't be resolved (then nothing is
+     * counted, as before).
+     */
+    private String providerOf(JobHandler<?> handler, String jobId) {
+        if (handler.provider() != null) return handler.provider();
+        if (handler.providerSql() == null) return null;
+        try {
+            List<String> found = jdbc.queryForList("select " + handler.providerSql() + " from job j where j.id = ?", String.class, jobId);
+            return found.isEmpty() ? null : found.get(0);
+        } catch (RuntimeException e) {
+            log.warn("event=job.provider_unresolved id={} type={} error={}", jobId, handler.type(), e.getClass().getSimpleName());
+            return null;
+        }
+    }
+
+    private void trackProvider(String provider, JobFailurePolicy.Kind kind) {
         if (provider == null) return;
         if (kind != JobFailurePolicy.Kind.TRANSIENT) {
             providerFailures.remove(provider);

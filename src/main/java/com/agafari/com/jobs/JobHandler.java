@@ -20,6 +20,16 @@ public interface JobHandler<T> {
     }
 
     /**
+     * AGF R4-16-D1: for a job type that serves several providers, a scalar SQL expression over the job row {@code j} that
+     * yields one job's provider from trusted persisted data (null when it can't be resolved), so the per-provider pause
+     * applies per job. A constant written in code, never built from input. Ignored when {@link #provider()} is set; null
+     * (the default) means the type has no provider.
+     */
+    default String providerSql() {
+        return null;
+    }
+
+    /**
      * The transient-error time cap of a non-financial job type; null means {@link JobFailurePolicy#NON_FINANCIAL_TRANSIENT_CAP}.
      * Financial types always use {@link JobFailurePolicy#FINANCIAL_TRANSIENT_CAP}. The eight-claim limit applies either way.
      */

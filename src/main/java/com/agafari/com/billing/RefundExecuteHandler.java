@@ -26,6 +26,12 @@ public class RefundExecuteHandler implements JobHandler<RefundExecuteHandler.Pay
         return Payload.class;
     }
 
+    /** AGF R4-16-D1: the provider of the verified charge being refunded (the join {@code RefundService} uses). */
+    @Override
+    public String providerSql() {
+        return "(select p.provider from refund_request r join payment p on p.id = r.payment_id where r.id = j.payload->>'refundRequestId')";
+    }
+
     @Override
     public void handle(Payload payload) {
         refunds.execute(payload.refundRequestId());

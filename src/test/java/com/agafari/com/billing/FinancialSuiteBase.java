@@ -519,6 +519,8 @@ abstract class FinancialSuiteBase extends PaymentOutcomeTestBase {
             }
             claims += started.size();
             if (started.isEmpty() && runnable(types) == 0) return claims;
+            // AGF R4-16-D1: a paused provider's due jobs wait out the pause; draining stops instead of timing out
+            if (started.isEmpty() && (r.isPaused(PROVIDER) || r.isPaused("FAKE_US"))) return claims;
             if (started.isEmpty()) sleep(20);
         }
         throw new AssertionError("jobs still runnable after 60 s: " + jdbc.queryForList("select type, status, run_at from job where status in ('PENDING', 'RUNNING')"));

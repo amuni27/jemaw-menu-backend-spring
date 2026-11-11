@@ -25,6 +25,12 @@ public class CheckoutExpireHandler implements JobHandler<CheckoutExpirePayload> 
         return CheckoutExpirePayload.class;
     }
 
+    /** AGF R4-16-D1: the provider the checkout was reserved with. */
+    @Override
+    public String providerSql() {
+        return "(select c.provider from checkout_session c where c.id = j.payload->>'checkoutId')";
+    }
+
     @Override
     public void handle(CheckoutExpirePayload payload) {
         checkouts.expire(payload.checkoutId());

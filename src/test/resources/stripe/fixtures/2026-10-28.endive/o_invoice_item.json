@@ -1,0 +1,9 @@
+{
+  "amount": 100,
+  "currency": "usd",
+  "customer": "cus_VbnCjwuXH0WhUX",
+  "id": "ii_1UaZjmFk6HuOfbR4KlKNQgnu",
+  "invoice": null,
+  "livemode": false,
+  "object": "invoiceitem"
+}

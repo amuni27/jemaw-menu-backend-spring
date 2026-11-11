@@ -1,0 +1,85 @@
+{
+  "amount_due": 2500,
+  "amount_overpaid": 0,
+  "amount_paid": 2500,
+  "amount_paid_off_stripe": 0,
+  "amount_remaining": 0,
+  "billing_reason": "subscription_create",
+  "collection_method": "charge_automatically",
+  "created": 1794397001,
+  "currency": "usd",
+  "customer": "cus_VbnQuFEse8zx5T",
+  "ending_balance": 0,
+  "id": "in_1UaZpVFk6HuOfbR4pyzwRdnz",
+  "lines": {
+    "data": [
+      {
+        "amount": 2500,
+        "currency": "usd",
+        "id": "il_1UaZpVFk6HuOfbR4RwoHITTe",
+        "object": "line_item",
+        "period": {
+          "end": 1796989001,
+          "start": 1794397001
+        },
+        "pricing": {
+          "price_details": {
+            "price": "price_1UaZSmFk6HuOfbR4CTwnqF48",
+            "product": "prod_Vbn2bimLj8AJ7s"
+          },
+          "type": "price_details"
+        },
+        "quantity": 1
+      }
+    ],
+    "has_more": false,
+    "object": "list"
+  },
+  "livemode": false,
+  "object": "invoice",
+  "parent": {
+    "subscription_details": {
+      "metadata": {
+        "agafari_business_id": "73f6bc1b-ba60-4163-acfb-6d1bd29c634d"
+      },
+      "subscription": "sub_1UaZqTFk6HuOfbR4O8JkLwN5"
+    },
+    "type": "subscription_details"
+  },
+  "payments": {
+    "data": [
+      {
+        "amount_paid": 2500,
+        "amount_requested": 2500,
+        "currency": "usd",
+        "id": "inpay_1UaZqVFk6HuOfbR4YsHP7Chk",
+        "is_default": true,
+        "object": "invoice_payment",
+        "payment": {
+          "payment_intent": "pi_3UaZpVFk6HuOfbR41QJf7uEf",
+          "type": "payment_intent"
+        },
+        "status": "paid"
+      }
+    ],
+    "has_more": false,
+    "object": "list"
+  },
+  "period_end": 1794397001,
+  "period_start": 1794397001,
+  "post_payment_credit_notes_amount": 0,
+  "pre_payment_credit_notes_amount": 0,
+  "starting_balance": 0,
+  "status": "paid",
+  "status_transitions": {
+    "finalized_at": 1794397001,
+    "marked_uncollectible_at": null,
+    "paid_at": 1794397060,
+    "voided_at": null
+  },
+  "subtotal": 2500,
+  "test_clock": null,
+  "total": 2500,
+  "total_discount_amounts": [],
+  "total_taxes": []
+}

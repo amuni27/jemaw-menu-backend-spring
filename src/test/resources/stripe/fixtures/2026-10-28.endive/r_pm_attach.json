@@ -1,0 +1,11 @@
+{
+  "card": {
+    "brand": "visa",
+    "funding": "credit"
+  },
+  "customer": "cus_VbnJw27gFrcKPo",
+  "id": "pm_1UaZiYFk6HuOfbR4OpERh33T",
+  "livemode": false,
+  "object": "payment_method",
+  "type": "card"
+}

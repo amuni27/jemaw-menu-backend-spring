@@ -1,0 +1,37 @@
+{
+  "amount": 2500,
+  "amount_received": 2500,
+  "created": 1794396154,
+  "currency": "usd",
+  "customer": "cus_VbnCjwuXH0WhUX",
+  "id": "pi_3UaZbqFk6HuOfbR40TlYlccp",
+  "latest_charge": {
+    "amount": 2500,
+    "amount_captured": 2500,
+    "amount_refunded": 0,
+    "captured": true,
+    "created": 1794396154,
+    "currency": "usd",
+    "id": "ch_3UaZbqFk6HuOfbR40lPJ60JK",
+    "livemode": false,
+    "object": "charge",
+    "paid": true,
+    "payment_intent": "pi_3UaZbqFk6HuOfbR40TlYlccp",
+    "payment_method_details": {
+      "card": {
+        "brand": "visa",
+        "funding": "credit",
+        "three_d_secure": null
+      },
+      "type": "card"
+    },
+    "refunded": false,
+    "status": "succeeded"
+  },
+  "livemode": false,
+  "object": "payment_intent",
+  "payment_method_types": [
+    "card"
+  ],
+  "status": "succeeded"
+}

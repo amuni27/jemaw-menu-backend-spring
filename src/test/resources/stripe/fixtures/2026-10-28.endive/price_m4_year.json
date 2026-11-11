@@ -1,0 +1,20 @@
+{
+  "active": true,
+  "currency": "usd",
+  "id": "price_1UaZSnFk6HuOfbR4ZNfJ5FRN",
+  "livemode": false,
+  "lookup_key": "agafari:MODEL_4:YEAR:q6-v1",
+  "metadata": {
+    "agafari_plan": "MODEL_4"
+  },
+  "object": "price",
+  "product": "prod_Vbn2bimLj8AJ7s",
+  "recurring": {
+    "interval": "year",
+    "interval_count": 1,
+    "usage_type": "licensed"
+  },
+  "tax_behavior": "unspecified",
+  "type": "recurring",
+  "unit_amount": 25000
+}

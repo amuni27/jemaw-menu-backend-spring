@@ -1,0 +1,34 @@
+{
+  "allow_promotion_codes": false,
+  "allowed_payment_method_types": [
+    "card"
+  ],
+  "amount_subtotal": 2500,
+  "amount_total": 2500,
+  "automatic_tax": {
+    "enabled": false
+  },
+  "cancel_url": "[REDACTED]",
+  "client_reference_id": "68ff648b-7bf2-4b89-babc-a1fba067aad1",
+  "created": 1794396709,
+  "currency": "usd",
+  "customer": null,
+  "expires_at": 1794400308,
+  "id": "cs_test_a07CPIANzibkJrQCEyrZAGiBJCTuCI3212fd7mGCXFTRti5FmekpCpw9ZP",
+  "invoice": null,
+  "livemode": false,
+  "metadata": {
+    "agafari_business_id": "1957d07f-75e7-4037-8c9c-9298bb3a999b",
+    "agafari_checkout_id": "68ff648b-7bf2-4b89-babc-a1fba067aad1"
+  },
+  "mode": "subscription",
+  "object": "checkout.session",
+  "payment_method_types": [
+    "card"
+  ],
+  "payment_status": "unpaid",
+  "status": "open",
+  "subscription": null,
+  "success_url": "[REDACTED]",
+  "url": "[REDACTED]"
+}

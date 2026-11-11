@@ -1,0 +1,138 @@
+{
+  "data": [
+    {
+      "amount_due": 2500,
+      "amount_overpaid": 0,
+      "amount_paid": 2500,
+      "amount_remaining": 0,
+      "billing_reason": "subscription_cycle",
+      "collection_method": "charge_automatically",
+      "created": 1796988568,
+      "currency": "usd",
+      "customer": "cus_VbnJw27gFrcKPo",
+      "ending_balance": 0,
+      "id": "in_1UaZigFk6HuOfbR4amapMaJu",
+      "lines": {
+        "data": [
+          {
+            "amount": 2500,
+            "currency": "usd",
+            "id": "il_1UlS0yFk6HuOfbR4mtAIpp4Z",
+            "object": "line_item",
+            "period": {
+              "end": 1799666968,
+              "start": 1796988568
+            },
+            "pricing": {
+              "price_details": {
+                "price": "price_1UaZSmFk6HuOfbR4CTwnqF48",
+                "product": "prod_Vbn2bimLj8AJ7s"
+              },
+              "type": "price_details"
+            },
+            "quantity": 1
+          }
+        ],
+        "has_more": false,
+        "object": "list"
+      },
+      "livemode": false,
+      "object": "invoice",
+      "parent": {
+        "subscription_details": {
+          "metadata": {
+            "agafari_business_id": "1957d07f-75e7-4037-8c9c-9298bb3a999b",
+            "agafari_checkout_id": "63c91801-4d7b-4609-a42d-10e23364e2bc"
+          },
+          "subscription": "sub_1UaZiaFk6HuOfbR4BrBuu83k"
+        },
+        "type": "subscription_details"
+      },
+      "period_end": 1796988568,
+      "period_start": 1794396568,
+      "post_payment_credit_notes_amount": 0,
+      "pre_payment_credit_notes_amount": 0,
+      "starting_balance": 0,
+      "status": "paid",
+      "status_transitions": {
+        "finalized_at": 1796992168,
+        "marked_uncollectible_at": null,
+        "paid_at": 1796992168,
+        "voided_at": null
+      },
+      "subtotal": 2500,
+      "test_clock": "clock_1UaZiXFk6HuOfbR4pMAGgvUU",
+      "total": 2500,
+      "total_discount_amounts": [],
+      "total_taxes": []
+    },
+    {
+      "amount_due": 2500,
+      "amount_overpaid": 0,
+      "amount_paid": 2500,
+      "amount_remaining": 0,
+      "billing_reason": "subscription_create",
+      "collection_method": "charge_automatically",
+      "created": 1794396568,
+      "currency": "usd",
+      "customer": "cus_VbnJw27gFrcKPo",
+      "ending_balance": 0,
+      "id": "in_1UaZiaFk6HuOfbR4OUtw2lFf",
+      "lines": {
+        "data": [
+          {
+            "amount": 2500,
+            "currency": "usd",
+            "id": "il_1UaZiWFk6HuOfbR4BEemx5HJ",
+            "object": "line_item",
+            "period": {
+              "end": 1796988568,
+              "start": 1794396568
+            },
+            "pricing": {
+              "price_details": {
+                "price": "price_1UaZSmFk6HuOfbR4CTwnqF48",
+                "product": "prod_Vbn2bimLj8AJ7s"
+              },
+              "type": "price_details"
+            },
+            "quantity": 1
+          }
+        ],
+        "has_more": false,
+        "object": "list"
+      },
+      "livemode": false,
+      "object": "invoice",
+      "parent": {
+        "subscription_details": {
+          "metadata": {
+            "agafari_business_id": "1957d07f-75e7-4037-8c9c-9298bb3a999b",
+            "agafari_checkout_id": "63c91801-4d7b-4609-a42d-10e23364e2bc"
+          },
+          "subscription": "sub_1UaZiaFk6HuOfbR4BrBuu83k"
+        },
+        "type": "subscription_details"
+      },
+      "period_end": 1794396568,
+      "period_start": 1794396568,
+      "post_payment_credit_notes_amount": 0,
+      "pre_payment_credit_notes_amount": 0,
+      "starting_balance": 0,
+      "status": "paid",
+      "status_transitions": {
+        "finalized_at": 1794396568,
+        "marked_uncollectible_at": null,
+        "paid_at": 1794396568,
+        "voided_at": null
+      },
+      "subtotal": 2500,
+      "test_clock": "clock_1UaZiXFk6HuOfbR4pMAGgvUU",
+      "total": 2500,
+      "total_discount_amounts": [],
+      "total_taxes": []
+    }
+  ],
+  "has_more": false,
+  "object": "list"
+}

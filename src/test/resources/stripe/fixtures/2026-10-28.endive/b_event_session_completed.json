@@ -1,0 +1,49 @@
+{
+  "api_version": "2026-10-28.endive",
+  "created": 1794397063,
+  "data": {
+    "object": {
+      "allow_promotion_codes": false,
+      "allowed_payment_method_types": [
+        "card"
+      ],
+      "amount_subtotal": 2500,
+      "amount_total": 2500,
+      "automatic_tax": {
+        "enabled": false
+      },
+      "cancel_url": "[REDACTED]",
+      "client_reference_id": "a98cf1d8-a4b1-4255-9bb9-36bdbff1e7aa",
+      "created": 1794396917,
+      "currency": "usd",
+      "customer": "cus_VbnQuFEse8zx5T",
+      "expires_at": 1794400517,
+      "id": "cs_test_a0uoFQSHvnys7ugL386YQvenTp7mUkVa2djrziI5C32DG19GfUNKwIE7wG",
+      "invoice": "in_1UaZpVFk6HuOfbR4pyzwRdnz",
+      "livemode": false,
+      "metadata": {
+        "agafari_business_id": "73f6bc1b-ba60-4163-acfb-6d1bd29c634d",
+        "agafari_checkout_id": "a98cf1d8-a4b1-4255-9bb9-36bdbff1e7aa"
+      },
+      "mode": "subscription",
+      "object": "checkout.session",
+      "payment_method_types": [
+        "card"
+      ],
+      "payment_status": "paid",
+      "status": "complete",
+      "subscription": "sub_1UaZqTFk6HuOfbR4O8JkLwN5",
+      "success_url": "[REDACTED]",
+      "url": null
+    }
+  },
+  "id": "evt_1UaZqVFk6HuOfbR4rzCGBzlW",
+  "livemode": false,
+  "object": "event",
+  "pending_webhooks": 0,
+  "request": {
+    "id": null,
+    "idempotency_key": null
+  },
+  "type": "checkout.session.completed"
+}

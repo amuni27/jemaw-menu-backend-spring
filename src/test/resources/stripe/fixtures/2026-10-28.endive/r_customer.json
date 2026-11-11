@@ -1,0 +1,9 @@
+{
+  "id": "cus_VbnJw27gFrcKPo",
+  "invoice_settings": {
+    "default_payment_method": null
+  },
+  "livemode": false,
+  "object": "customer",
+  "test_clock": "clock_1UaZiXFk6HuOfbR4pMAGgvUU"
+}

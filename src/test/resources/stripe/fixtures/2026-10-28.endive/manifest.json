@@ -1,0 +1,1126 @@
+{
+  "account_default_api_version": "2026-10-28.endive (PO, Dashboard Workbench, 2026-11-11)",
+  "blocked": [],
+  "captured_by": "Product Owner",
+  "environment": "sandbox",
+  "files": {
+    "a_event_invoice_paid.json": {
+      "argv": [
+        "get",
+        "/v1/events/evt_1UaZbsFk6HuOfbR4pBQ3YQqL"
+      ],
+      "body": "ok:event",
+      "captured_at": "2026-11-11T11:23:07Z",
+      "exit": 0,
+      "expect": "ok:event",
+      "scenario": "A",
+      "sha256": "647c28bb4555627c318825f1d6d1f2266fae0d572ddeb66ced26839fdde7b236"
+    },
+    "a_event_session_completed.json": {
+      "argv": [
+        "get",
+        "/v1/events/evt_1UaZbsFk6HuOfbR4mBDrhbdA"
+      ],
+      "body": "ok:event",
+      "captured_at": "2026-11-11T11:23:06Z",
+      "exit": 0,
+      "expect": "ok:event",
+      "scenario": "A",
+      "sha256": "d1df7cc8354744db67e315b750423d9cbcf87dd72895c4a02f5a95fe301dbcd4"
+    },
+    "a_invoice_plain.json": {
+      "argv": [
+        "get",
+        "/v1/invoices/in_1UaZbqFk6HuOfbR40Zy0OwJP",
+        "-v",
+        "2026-10-28.endive"
+      ],
+      "body": "ok:invoice",
+      "captured_at": "2026-11-11T11:23:02Z",
+      "exit": 0,
+      "expect": "ok:invoice",
+      "scenario": "A",
+      "sha256": "733d28aa6ea6126c5a5ed2b847b615e46f17dece0fbe8fd6153f5afcfc631323"
+    },
+    "a_invoice_verify.json": {
+      "argv": [
+        "get",
+        "/v1/invoices/in_1UaZbqFk6HuOfbR40Zy0OwJP",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "expand[]=payments",
+        "-d",
+        "expand[]=amount_paid_off_stripe"
+      ],
+      "body": "ok:invoice",
+      "captured_at": "2026-11-11T11:23:02Z",
+      "exit": 0,
+      "expect": "ok:invoice",
+      "scenario": "A",
+      "sha256": "db84acac82f6ef1c8fcddac151e0d0946e6585177427fedeb39255e4335dfd72"
+    },
+    "a_open_invoices_none.json": {
+      "argv": [
+        "get",
+        "/v1/invoices",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "customer=cus_VbnCjwuXH0WhUX",
+        "-d",
+        "status=open",
+        "-d",
+        "limit=100"
+      ],
+      "body": "ok:list",
+      "captured_at": "2026-11-11T11:23:05Z",
+      "exit": 0,
+      "expect": "ok:list",
+      "scenario": "A",
+      "sha256": "481acfb42d46137294793f68e4e3065c25ade9c777801b946b4693a27b5bd96c"
+    },
+    "a_payment_intent.json": {
+      "argv": [
+        "get",
+        "/v1/payment_intents/pi_3UaZbqFk6HuOfbR40TlYlccp",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "expand[]=latest_charge"
+      ],
+      "body": "ok:payment_intent",
+      "captured_at": "2026-11-11T11:23:03Z",
+      "exit": 0,
+      "expect": "ok:payment_intent",
+      "scenario": "A",
+      "sha256": "7bf5525a06cd0d30d98eb4b0ba64eef925d2c2103be380646e0aea14dc45589c"
+    },
+    "a_session_after.json": {
+      "argv": [
+        "get",
+        "/v1/checkout/sessions/cs_test_a0CS2KHAnQy1H5hZtrxv6zcn6MHMDKmZsucyFZcxCkgJyBJXt6WcmUWEAI",
+        "-v",
+        "2026-10-28.endive"
+      ],
+      "body": "ok:checkout.session",
+      "captured_at": "2026-11-11T11:23:01Z",
+      "exit": 0,
+      "expect": "ok:checkout.session",
+      "scenario": "A",
+      "sha256": "74832f4b60b4f2f33f14a069a1f1ab9e09e011f2033334b2e1bb8c47025cd813"
+    },
+    "a_session_create.json": {
+      "argv": [
+        "post",
+        "/v1/checkout/sessions",
+        "-v",
+        "2026-10-28.endive",
+        "-i",
+        "checkout:5de7bd4e-1018-4c1d-93f3-3844339932d4",
+        "-d",
+        "mode=subscription",
+        "-d",
+        "line_items[0][price]=price_1UaZSmFk6HuOfbR4CTwnqF48",
+        "-d",
+        "line_items[0][quantity]=1",
+        "-d",
+        "success_url=[REDACTED]",
+        "-d",
+        "cancel_url=[REDACTED]",
+        "-d",
+        "client_reference_id=5de7bd4e-1018-4c1d-93f3-3844339932d4",
+        "-d",
+        "metadata[agafari_checkout_id]=5de7bd4e-1018-4c1d-93f3-3844339932d4",
+        "-d",
+        "metadata[agafari_business_id]=1957d07f-75e7-4037-8c9c-9298bb3a999b",
+        "-d",
+        "subscription_data[metadata][agafari_business_id]=1957d07f-75e7-4037-8c9c-9298bb3a999b",
+        "-d",
+        "allowed_payment_method_types[0]=card",
+        "-d",
+        "allow_promotion_codes=false",
+        "-d",
+        "automatic_tax[enabled]=false",
+        "-d",
+        "expires_at=1794399279"
+      ],
+      "body": "ok:checkout.session",
+      "captured_at": "2026-11-11T11:14:40Z",
+      "exit": 0,
+      "expect": "ok:checkout.session",
+      "scenario": "A",
+      "sha256": "a04b7f2fabdaa8b6137b71902a4aaed6adca0588694e7a9d0ce539f2ecb2e496"
+    },
+    "a_sessions_by_sub.json": {
+      "argv": [
+        "get",
+        "/v1/checkout/sessions",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "subscription=sub_1UaZbrFk6HuOfbR4pJBAxzvG",
+        "-d",
+        "limit=2"
+      ],
+      "body": "ok:list",
+      "captured_at": "2026-11-11T11:23:04Z",
+      "exit": 0,
+      "expect": "ok:list",
+      "scenario": "A",
+      "sha256": "e00ac357b6c7c1eef286d08c64083b707b3b583ed3d4357c950ef69c46247ea4"
+    },
+    "a_subscription.json": {
+      "argv": [
+        "get",
+        "/v1/subscriptions/sub_1UaZbrFk6HuOfbR4pJBAxzvG",
+        "-v",
+        "2026-10-28.endive"
+      ],
+      "body": "ok:subscription",
+      "captured_at": "2026-11-11T11:23:03Z",
+      "exit": 0,
+      "expect": "ok:subscription",
+      "scenario": "A",
+      "sha256": "e65c495a9d7ad87162ccb3a6794195112274e9408be7d823319fbc7556a638b7"
+    },
+    "b_event_invoice_paid.json": {
+      "argv": [
+        "get",
+        "/v1/events/evt_1UaZqWFk6HuOfbR4bJOQlk4h"
+      ],
+      "body": "ok:event",
+      "captured_at": "2026-11-11T11:38:04Z",
+      "exit": 0,
+      "expect": "ok:event",
+      "scenario": "B",
+      "sha256": "34b1a9a9ab764f5ea71c8ef2c63994562059a4db1398b9e53d78fca3d1cd5b5a"
+    },
+    "b_event_session_completed.json": {
+      "argv": [
+        "get",
+        "/v1/events/evt_1UaZqVFk6HuOfbR4rzCGBzlW"
+      ],
+      "body": "ok:event",
+      "captured_at": "2026-11-11T11:38:04Z",
+      "exit": 0,
+      "expect": "ok:event",
+      "scenario": "B",
+      "sha256": "31ae2eaac270322afa66ea301b2bed7443daeac0a3ded76ada34233765dfe9aa"
+    },
+    "b_invoice_plain.json": {
+      "argv": [
+        "get",
+        "/v1/invoices/in_1UaZpVFk6HuOfbR4pyzwRdnz",
+        "-v",
+        "2026-10-28.endive"
+      ],
+      "body": "ok:invoice",
+      "captured_at": "2026-11-11T11:37:59Z",
+      "exit": 0,
+      "expect": "ok:invoice",
+      "scenario": "B",
+      "sha256": "9a94bf5165974c91a75fcaa6da83c73b206ffd19c23c9a6f893a1a22149aaa55"
+    },
+    "b_invoice_verify.json": {
+      "argv": [
+        "get",
+        "/v1/invoices/in_1UaZpVFk6HuOfbR4pyzwRdnz",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "expand[]=payments",
+        "-d",
+        "expand[]=amount_paid_off_stripe"
+      ],
+      "body": "ok:invoice",
+      "captured_at": "2026-11-11T11:37:59Z",
+      "exit": 0,
+      "expect": "ok:invoice",
+      "scenario": "B",
+      "sha256": "52f5bd9033879f4e2c4508702ad74a6c4b1552108aac80b049d29920fd5fc33f"
+    },
+    "b_open_invoices_none.json": {
+      "argv": [
+        "get",
+        "/v1/invoices",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "customer=cus_VbnQuFEse8zx5T",
+        "-d",
+        "status=open",
+        "-d",
+        "limit=100"
+      ],
+      "body": "ok:list",
+      "captured_at": "2026-11-11T11:38:02Z",
+      "exit": 0,
+      "expect": "ok:list",
+      "scenario": "B",
+      "sha256": "481acfb42d46137294793f68e4e3065c25ade9c777801b946b4693a27b5bd96c"
+    },
+    "b_payment_intent.json": {
+      "argv": [
+        "get",
+        "/v1/payment_intents/pi_3UaZpVFk6HuOfbR41QJf7uEf",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "expand[]=latest_charge"
+      ],
+      "body": "ok:payment_intent",
+      "captured_at": "2026-11-11T11:38:00Z",
+      "exit": 0,
+      "expect": "ok:payment_intent",
+      "scenario": "B",
+      "sha256": "82706c298a4d9bb5e9ea59953725c62b10fd98e36519c719fe7b0267c76f2654"
+    },
+    "b_session_after.json": {
+      "argv": [
+        "get",
+        "/v1/checkout/sessions/cs_test_a0uoFQSHvnys7ugL386YQvenTp7mUkVa2djrziI5C32DG19GfUNKwIE7wG",
+        "-v",
+        "2026-10-28.endive"
+      ],
+      "body": "ok:checkout.session",
+      "captured_at": "2026-11-11T11:37:58Z",
+      "exit": 0,
+      "expect": "ok:checkout.session",
+      "scenario": "B",
+      "sha256": "7425581b34c396a1a46759d6b021cf155009118ba62a9f60cadfd7b43cb847a8"
+    },
+    "b_session_create.json": {
+      "argv": [
+        "post",
+        "/v1/checkout/sessions",
+        "-v",
+        "2026-10-28.endive",
+        "-i",
+        "checkout:a98cf1d8-a4b1-4255-9bb9-36bdbff1e7aa",
+        "-d",
+        "mode=subscription",
+        "-d",
+        "line_items[0][price]=price_1UaZSmFk6HuOfbR4CTwnqF48",
+        "-d",
+        "line_items[0][quantity]=1",
+        "-d",
+        "success_url=[REDACTED]",
+        "-d",
+        "cancel_url=[REDACTED]",
+        "-d",
+        "client_reference_id=a98cf1d8-a4b1-4255-9bb9-36bdbff1e7aa",
+        "-d",
+        "metadata[agafari_checkout_id]=a98cf1d8-a4b1-4255-9bb9-36bdbff1e7aa",
+        "-d",
+        "metadata[agafari_business_id]=73f6bc1b-ba60-4163-acfb-6d1bd29c634d",
+        "-d",
+        "subscription_data[metadata][agafari_business_id]=73f6bc1b-ba60-4163-acfb-6d1bd29c634d",
+        "-d",
+        "allowed_payment_method_types[0]=card",
+        "-d",
+        "allow_promotion_codes=false",
+        "-d",
+        "automatic_tax[enabled]=false",
+        "-d",
+        "expires_at=1794400517"
+      ],
+      "body": "ok:checkout.session",
+      "captured_at": "2026-11-11T11:35:18Z",
+      "exit": 0,
+      "expect": "ok:checkout.session",
+      "scenario": "B",
+      "sha256": "99ae5bea8d5ded8c8723bb9dd06621548466591dffc3a3d47c7bf3358c874aaa"
+    },
+    "b_session_during_3ds.json": {
+      "argv": [
+        "get",
+        "/v1/checkout/sessions/cs_test_a0uoFQSHvnys7ugL386YQvenTp7mUkVa2djrziI5C32DG19GfUNKwIE7wG",
+        "-v",
+        "2026-10-28.endive"
+      ],
+      "body": "ok:checkout.session",
+      "captured_at": "2026-11-11T11:37:21Z",
+      "exit": 0,
+      "expect": "ok:checkout.session",
+      "scenario": "B",
+      "sha256": "94981b9b071f52f5e289aefa79c95d13014c216cbb7a288ca093016fd027f426"
+    },
+    "b_sessions_by_sub.json": {
+      "argv": [
+        "get",
+        "/v1/checkout/sessions",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "subscription=sub_1UaZqTFk6HuOfbR4O8JkLwN5",
+        "-d",
+        "limit=2"
+      ],
+      "body": "ok:list",
+      "captured_at": "2026-11-11T11:38:01Z",
+      "exit": 0,
+      "expect": "ok:list",
+      "scenario": "B",
+      "sha256": "4563072a579dac1d621a4c78cf8200e98091e6bfed67530258fd365d8799d027"
+    },
+    "b_subscription.json": {
+      "argv": [
+        "get",
+        "/v1/subscriptions/sub_1UaZqTFk6HuOfbR4O8JkLwN5",
+        "-v",
+        "2026-10-28.endive"
+      ],
+      "body": "ok:subscription",
+      "captured_at": "2026-11-11T11:38:01Z",
+      "exit": 0,
+      "expect": "ok:subscription",
+      "scenario": "B",
+      "sha256": "8a18525b97535bbe21ad4ff8b995883304faf0b281f9aa6351d9dd76c236982a"
+    },
+    "c_cancel.json": {
+      "argv": [
+        "delete",
+        "/v1/subscriptions/sub_1UaZbrFk6HuOfbR4pJBAxzvG",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "invoice_now=false",
+        "-d",
+        "prorate=false",
+        "--confirm"
+      ],
+      "body": "ok:subscription",
+      "captured_at": "2026-11-11T11:31:19Z",
+      "exit": 0,
+      "expect": "ok:subscription",
+      "scenario": "C",
+      "sha256": "0a37293ddf3c391e42177b2a79736f1999b00244ff36f31f160b112c93305843"
+    },
+    "c_cancel_again.json": {
+      "argv": [
+        "delete",
+        "/v1/subscriptions/sub_1UaZbrFk6HuOfbR4pJBAxzvG",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "invoice_now=false",
+        "-d",
+        "prorate=false",
+        "--confirm"
+      ],
+      "body": "err:invalid_request_error",
+      "captured_at": "2026-11-11T11:31:20Z",
+      "exit": 0,
+      "expect": "err:invalid_request_error",
+      "scenario": "C",
+      "sha256": "54cad31c6814de7198af2d5f95a8781f4f28520905df206747e812989ab12580"
+    },
+    "c_invoices_after.json": {
+      "argv": [
+        "get",
+        "/v1/invoices",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "subscription=sub_1UaZbrFk6HuOfbR4pJBAxzvG",
+        "-d",
+        "limit=10"
+      ],
+      "body": "ok:list",
+      "captured_at": "2026-11-11T11:31:21Z",
+      "exit": 0,
+      "expect": "ok:list",
+      "scenario": "C",
+      "sha256": "f7791c93df634e06c1f82e12b6096c10b69ad6f9ce78e66bf1559f22ee211928"
+    },
+    "c_subscription_after.json": {
+      "argv": [
+        "get",
+        "/v1/subscriptions/sub_1UaZbrFk6HuOfbR4pJBAxzvG",
+        "-v",
+        "2026-10-28.endive"
+      ],
+      "body": "ok:subscription",
+      "captured_at": "2026-11-11T11:31:20Z",
+      "exit": 0,
+      "expect": "ok:subscription",
+      "scenario": "C",
+      "sha256": "0a37293ddf3c391e42177b2a79736f1999b00244ff36f31f160b112c93305843"
+    },
+    "o_invoice_create.json": {
+      "argv": [
+        "post",
+        "/v1/invoices",
+        "-v",
+        "2026-10-28.endive",
+        "-i",
+        "agafari-fixture-o-invoice-5de7bd4e-1018-4c1d-93f3-3844339932d4",
+        "-d",
+        "customer=cus_VbnCjwuXH0WhUX",
+        "-d",
+        "collection_method=send_invoice",
+        "-d",
+        "days_until_due=30",
+        "-d",
+        "pending_invoice_items_behavior=include",
+        "-d",
+        "auto_advance=false"
+      ],
+      "body": "ok:invoice",
+      "captured_at": "2026-11-11T11:30:47Z",
+      "exit": 0,
+      "expect": "ok:invoice",
+      "scenario": "O",
+      "sha256": "cdaadbc07515d44c9e74cef43df26524109b84f60e4422b50c2cdcf5bbe10ce5"
+    },
+    "o_invoice_finalize.json": {
+      "argv": [
+        "post",
+        "/v1/invoices/in_1UaZjnFk6HuOfbR4T98tQaIB/finalize",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "auto_advance=false"
+      ],
+      "body": "ok:invoice",
+      "captured_at": "2026-11-11T11:30:49Z",
+      "exit": 0,
+      "expect": "ok:invoice",
+      "scenario": "O",
+      "sha256": "150c9a7ea03b1680a82810c5dbe80dd5076d0d2f6a9ee617de87ad8535bca3b3"
+    },
+    "o_invoice_item.json": {
+      "argv": [
+        "post",
+        "/v1/invoiceitems",
+        "-v",
+        "2026-10-28.endive",
+        "-i",
+        "agafari-fixture-o-item-5de7bd4e-1018-4c1d-93f3-3844339932d4",
+        "-d",
+        "customer=cus_VbnCjwuXH0WhUX",
+        "-d",
+        "amount=100",
+        "-d",
+        "currency=usd",
+        "-d",
+        "description=agafari q6 other open invoice"
+      ],
+      "body": "ok:invoiceitem",
+      "captured_at": "2026-11-11T11:30:46Z",
+      "exit": 0,
+      "expect": "ok:invoiceitem",
+      "scenario": "O",
+      "sha256": "e4169f49d58c7591a1defaa7114d67d59217d62e906a88ef7186e6607e5fb5a8"
+    },
+    "o_invoice_void.json": {
+      "argv": [
+        "post",
+        "/v1/invoices/in_1UaZjnFk6HuOfbR4T98tQaIB/void",
+        "-v",
+        "2026-10-28.endive"
+      ],
+      "body": "ok:invoice",
+      "captured_at": "2026-11-11T11:30:50Z",
+      "exit": 0,
+      "expect": "ok:invoice",
+      "scenario": "O",
+      "sha256": "f9ca2131ba9ec620456fbce3e090266339cea604c8b951c8fd53fa9ed43044f7"
+    },
+    "o_open_invoices_after_void.json": {
+      "argv": [
+        "get",
+        "/v1/invoices",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "customer=cus_VbnCjwuXH0WhUX",
+        "-d",
+        "status=open",
+        "-d",
+        "limit=100"
+      ],
+      "body": "ok:list",
+      "captured_at": "2026-11-11T11:30:51Z",
+      "exit": 0,
+      "expect": "ok:list",
+      "scenario": "O",
+      "sha256": "481acfb42d46137294793f68e4e3065c25ade9c777801b946b4693a27b5bd96c"
+    },
+    "o_open_invoices_other.json": {
+      "argv": [
+        "get",
+        "/v1/invoices",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "customer=cus_VbnCjwuXH0WhUX",
+        "-d",
+        "status=open",
+        "-d",
+        "limit=100"
+      ],
+      "body": "ok:list",
+      "captured_at": "2026-11-11T11:30:49Z",
+      "exit": 0,
+      "expect": "ok:list",
+      "scenario": "O",
+      "sha256": "c45b4cdace3515ade06d52598e2a9c94a388155a0e3564f9cfb4b35794a9a865"
+    },
+    "price_m4_month.json": {
+      "argv": [
+        "post",
+        "/v1/prices",
+        "-v",
+        "2026-10-28.endive",
+        "-i",
+        "agafari-fixture-price-m4-month-1957d07f-75e7-4037-8c9c-9298bb3a999b",
+        "-d",
+        "product=prod_Vbn2bimLj8AJ7s",
+        "-d",
+        "currency=usd",
+        "-d",
+        "unit_amount=2500",
+        "-d",
+        "recurring[interval]=month",
+        "-d",
+        "recurring[interval_count]=1",
+        "-d",
+        "lookup_key=agafari:MODEL_4:MONTH:q6-v1",
+        "-d",
+        "metadata[agafari_plan]=MODEL_4"
+      ],
+      "body": "ok:price",
+      "captured_at": "2026-11-11T11:13:12Z",
+      "exit": 0,
+      "expect": "ok:price",
+      "scenario": "P",
+      "sha256": "ae7fa1f53913ed675d117e5ab2593633c38f94337b17bd32840b3ab2781dd272"
+    },
+    "price_m4_year.json": {
+      "argv": [
+        "post",
+        "/v1/prices",
+        "-v",
+        "2026-10-28.endive",
+        "-i",
+        "agafari-fixture-price-m4-year-1957d07f-75e7-4037-8c9c-9298bb3a999b",
+        "-d",
+        "product=prod_Vbn2bimLj8AJ7s",
+        "-d",
+        "currency=usd",
+        "-d",
+        "unit_amount=25000",
+        "-d",
+        "recurring[interval]=year",
+        "-d",
+        "recurring[interval_count]=1",
+        "-d",
+        "lookup_key=agafari:MODEL_4:YEAR:q6-v1",
+        "-d",
+        "metadata[agafari_plan]=MODEL_4"
+      ],
+      "body": "ok:price",
+      "captured_at": "2026-11-11T11:13:13Z",
+      "exit": 0,
+      "expect": "ok:price",
+      "scenario": "P",
+      "sha256": "7f3b371c6f2de2d12ea9bd3b13a80ec1b927707c1ff51a9544e0787b8b1b8432"
+    },
+    "product_m4.json": {
+      "argv": [
+        "post",
+        "/v1/products",
+        "-v",
+        "2026-10-28.endive",
+        "-i",
+        "agafari-fixture-product-m4-1957d07f-75e7-4037-8c9c-9298bb3a999b",
+        "-d",
+        "name=[REDACTED]",
+        "-d",
+        "metadata[agafari_plan]=MODEL_4",
+        "-d",
+        "metadata[agafari_fixture]=q6"
+      ],
+      "body": "ok:product",
+      "captured_at": "2026-11-11T11:13:12Z",
+      "exit": 0,
+      "expect": "ok:product",
+      "scenario": "P",
+      "sha256": "a1333ed4b7aa1c536e38402c6fe44843dac5f0c527ca3850bfa4a9e128be94ae"
+    },
+    "r_clock.json": {
+      "argv": [
+        "post",
+        "/v1/test_helpers/test_clocks",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "frozen_time=1794396568",
+        "-d",
+        "name=[REDACTED]"
+      ],
+      "body": "ok:test_helpers.test_clock",
+      "captured_at": "2026-11-11T11:29:29Z",
+      "exit": 0,
+      "expect": "ok:test_helpers.test_clock",
+      "scenario": "R",
+      "sha256": "7d4e2972724cfa2376595fb157b5496739e267be4fc841ca01026e2186b89939"
+    },
+    "r_customer.json": {
+      "argv": [
+        "post",
+        "/v1/customers",
+        "-v",
+        "2026-10-28.endive",
+        "-i",
+        "agafari-fixture-r-customer-63c91801-4d7b-4609-a42d-10e23364e2bc",
+        "-d",
+        "test_clock=clock_1UaZiXFk6HuOfbR4pMAGgvUU",
+        "-d",
+        "email=[REDACTED]",
+        "-d",
+        "name=[REDACTED]"
+      ],
+      "body": "ok:customer",
+      "captured_at": "2026-11-11T11:29:30Z",
+      "exit": 0,
+      "expect": "ok:customer",
+      "scenario": "R",
+      "sha256": "bb00d01d4d0bff66f418f9eb28617f8fb9349bcbbbb5c9ef136a8a02fe318da9"
+    },
+    "r_customer_default.json": {
+      "argv": [
+        "post",
+        "/v1/customers/cus_VbnJw27gFrcKPo",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "invoice_settings[default_payment_method]=pm_1UaZiYFk6HuOfbR4OpERh33T"
+      ],
+      "body": "ok:customer",
+      "captured_at": "2026-11-11T11:29:31Z",
+      "exit": 0,
+      "expect": "ok:customer",
+      "scenario": "R",
+      "sha256": "c82f2b1e5b0570d29bab083a9272fc4171891d3be751bf47c2807644b8f9bdfd"
+    },
+    "r_event_invoice_paid_cycle.json": {
+      "argv": [
+        "get",
+        "/v1/events/evt_1UaZisFk6HuOfbR4XPJQitsa"
+      ],
+      "body": "ok:event",
+      "captured_at": "2026-11-11T11:29:58Z",
+      "exit": 0,
+      "expect": "ok:event",
+      "scenario": "R",
+      "sha256": "f066de7cc78aa72635f9077de4dd703a5017dd931aaf693b9c89e9b4a4fa8e19"
+    },
+    "r_invoice_create_verify.json": {
+      "argv": [
+        "get",
+        "/v1/invoices/in_1UaZiaFk6HuOfbR4OUtw2lFf",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "expand[]=payments",
+        "-d",
+        "expand[]=amount_paid_off_stripe"
+      ],
+      "body": "ok:invoice",
+      "captured_at": "2026-11-11T11:29:55Z",
+      "exit": 0,
+      "expect": "ok:invoice",
+      "scenario": "R",
+      "sha256": "204399a9e9e7907333aa919b9f4d538a54c18ad3ae8dbfdd8092e717e34a13b8"
+    },
+    "r_invoice_cycle_verify.json": {
+      "argv": [
+        "get",
+        "/v1/invoices/in_1UaZigFk6HuOfbR4amapMaJu",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "expand[]=payments",
+        "-d",
+        "expand[]=amount_paid_off_stripe"
+      ],
+      "body": "ok:invoice",
+      "captured_at": "2026-11-11T11:29:56Z",
+      "exit": 0,
+      "expect": "ok:invoice",
+      "scenario": "R",
+      "sha256": "d8eeac8fee4286b1d5d9ed0e38df7d917957b3fbdf5c15035bfcbf4c1d5ad30b"
+    },
+    "r_invoices.json": {
+      "argv": [
+        "get",
+        "/v1/invoices",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "subscription=sub_1UaZiaFk6HuOfbR4BrBuu83k",
+        "-d",
+        "limit=10"
+      ],
+      "body": "ok:list",
+      "captured_at": "2026-11-11T11:29:54Z",
+      "exit": 0,
+      "expect": "ok:list",
+      "scenario": "R",
+      "sha256": "edf7cdacdbe5dfde1515ce24c178761ed8843f78e24757c753b218edc7df919b"
+    },
+    "r_pm_attach.json": {
+      "argv": [
+        "post",
+        "/v1/payment_methods/pm_card_visa/attach",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "customer=cus_VbnJw27gFrcKPo"
+      ],
+      "body": "ok:payment_method",
+      "captured_at": "2026-11-11T11:29:31Z",
+      "exit": 0,
+      "expect": "ok:payment_method",
+      "scenario": "R",
+      "sha256": "1123ad4b4ada6b3b820696d4518e929ebb130bc2f6b8d71eaaee827cf7445dec"
+    },
+    "r_sessions_by_sub.json": {
+      "argv": [
+        "get",
+        "/v1/checkout/sessions",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "subscription=sub_1UaZiaFk6HuOfbR4BrBuu83k",
+        "-d",
+        "limit=2"
+      ],
+      "body": "ok:list",
+      "captured_at": "2026-11-11T11:29:56Z",
+      "exit": 0,
+      "expect": "ok:list",
+      "scenario": "R",
+      "sha256": "481acfb42d46137294793f68e4e3065c25ade9c777801b946b4693a27b5bd96c"
+    },
+    "r_subscription_create.json": {
+      "argv": [
+        "post",
+        "/v1/subscriptions",
+        "-v",
+        "2026-10-28.endive",
+        "-i",
+        "agafari-fixture-r-sub-63c91801-4d7b-4609-a42d-10e23364e2bc",
+        "-d",
+        "customer=cus_VbnJw27gFrcKPo",
+        "-d",
+        "items[0][price]=price_1UaZSmFk6HuOfbR4CTwnqF48",
+        "-d",
+        "metadata[agafari_business_id]=1957d07f-75e7-4037-8c9c-9298bb3a999b",
+        "-d",
+        "metadata[agafari_checkout_id]=63c91801-4d7b-4609-a42d-10e23364e2bc"
+      ],
+      "body": "ok:subscription",
+      "captured_at": "2026-11-11T11:29:35Z",
+      "exit": 0,
+      "expect": "ok:subscription",
+      "scenario": "R",
+      "sha256": "da7313176a53bc7e1bbfc02d6614993bf9581f527197782b92cc8baef1d140d1"
+    },
+    "x_expire_completed.json": {
+      "argv": [
+        "post",
+        "/v1/checkout/sessions/cs_test_a0CS2KHAnQy1H5hZtrxv6zcn6MHMDKmZsucyFZcxCkgJyBJXt6WcmUWEAI/expire",
+        "-v",
+        "2026-10-28.endive",
+        "-i",
+        "expire:5de7bd4e-1018-4c1d-93f3-3844339932d4"
+      ],
+      "body": "err:invalid_request_error",
+      "captured_at": "2026-11-11T11:31:50Z",
+      "exit": 0,
+      "expect": "err:invalid_request_error",
+      "scenario": "X",
+      "sha256": "228b6f71183f22fce9a876578cbb8a14b4f000f4300b4dfb068ef0dbac3df8af"
+    },
+    "x_session_create.json": {
+      "argv": [
+        "post",
+        "/v1/checkout/sessions",
+        "-v",
+        "2026-10-28.endive",
+        "-i",
+        "checkout:68ff648b-7bf2-4b89-babc-a1fba067aad1",
+        "-d",
+        "mode=subscription",
+        "-d",
+        "line_items[0][price]=price_1UaZSmFk6HuOfbR4CTwnqF48",
+        "-d",
+        "line_items[0][quantity]=1",
+        "-d",
+        "success_url=[REDACTED]",
+        "-d",
+        "cancel_url=[REDACTED]",
+        "-d",
+        "client_reference_id=68ff648b-7bf2-4b89-babc-a1fba067aad1",
+        "-d",
+        "metadata[agafari_checkout_id]=68ff648b-7bf2-4b89-babc-a1fba067aad1",
+        "-d",
+        "metadata[agafari_business_id]=1957d07f-75e7-4037-8c9c-9298bb3a999b",
+        "-d",
+        "subscription_data[metadata][agafari_business_id]=1957d07f-75e7-4037-8c9c-9298bb3a999b",
+        "-d",
+        "allowed_payment_method_types[0]=card",
+        "-d",
+        "allow_promotion_codes=false",
+        "-d",
+        "automatic_tax[enabled]=false",
+        "-d",
+        "expires_at=1794400308"
+      ],
+      "body": "ok:checkout.session",
+      "captured_at": "2026-11-11T11:31:49Z",
+      "exit": 0,
+      "expect": "ok:checkout.session",
+      "scenario": "X",
+      "sha256": "a790e5909fac7d69cfddced248b877862e5502770d7b327b9dd280d243555ba7"
+    },
+    "x_session_expire.json": {
+      "argv": [
+        "post",
+        "/v1/checkout/sessions/cs_test_a07CPIANzibkJrQCEyrZAGiBJCTuCI3212fd7mGCXFTRti5FmekpCpw9ZP/expire",
+        "-v",
+        "2026-10-28.endive",
+        "-i",
+        "expire:68ff648b-7bf2-4b89-babc-a1fba067aad1"
+      ],
+      "body": "ok:checkout.session",
+      "captured_at": "2026-11-11T11:31:50Z",
+      "exit": 0,
+      "expect": "ok:checkout.session",
+      "scenario": "X",
+      "sha256": "0146a9b27d302df769a5cc3bd50b433bc96e22e1296031bfeed9c8075e95efb3"
+    }
+  },
+  "fixture_ids": {
+    "BIZ_A": "1957d07f-75e7-4037-8c9c-9298bb3a999b",
+    "BIZ_B": "73f6bc1b-ba60-4163-acfb-6d1bd29c634d",
+    "CHK_A": "5de7bd4e-1018-4c1d-93f3-3844339932d4",
+    "CHK_B": "a98cf1d8-a4b1-4255-9bb9-36bdbff1e7aa",
+    "CHK_B2": "d84f0fa3-20ca-44b9-8c5c-a876ebbef011",
+    "CHK_HIST": "63c91801-4d7b-4609-a42d-10e23364e2bc",
+    "CHK_X": "68ff648b-7bf2-4b89-babc-a1fba067aad1"
+  },
+  "guide": "AGAFARI_R5_02_Q6_SANDBOX_FIXTURE_CAPTURE_GUIDE.md revision 1",
+  "implementation": "5e09fc5228370b16d3e1868057a73b4b445998fa",
+  "requested_api_version": "2026-10-28.endive",
+  "sandbox_confirmed": "Agafari sandbox (CLI banner in V; PO Dashboard confirmation 2026-11-11)",
+  "sdk": "com.stripe:stripe-java:34.1.0",
+  "stopped": {},
+  "stripe_cli_version": "1.55.10 (stripe version, scenario V)",
+  "supplementary_b": "B run 1 archived locally (archive/b-run1, not delivered): the mid-challenge capture was missed because 3DS was completed first. B rerun with a new CHK_B because the idempotency key checkout:<CHK_B> would return the completed run-1 session. PO approval 2026-11-11.",
+  "webhook_endpoints_configured": "none (PO, Dashboard Workbench, 2026-11-11)",
+  "working": {
+    "a_events_invoice": {
+      "argv": [
+        "get",
+        "/v1/events",
+        "-d",
+        "type=invoice.paid",
+        "-d",
+        "created[gte]=1794395679",
+        "-d",
+        "limit=10"
+      ],
+      "body": "ok:list",
+      "captured_at": "2026-11-11T11:23:06Z",
+      "exit": 0,
+      "expect": "ok:list",
+      "facts": {
+        "ids": [
+          {
+            "id": "evt_1UaZbsFk6HuOfbR4pBQ3YQqL",
+            "object_id": "in_1UaZbqFk6HuOfbR40Zy0OwJP",
+            "type": "invoice.paid"
+          }
+        ]
+      },
+      "scenario": "A"
+    },
+    "a_events_session": {
+      "argv": [
+        "get",
+        "/v1/events",
+        "-d",
+        "type=checkout.session.completed",
+        "-d",
+        "created[gte]=1794395679",
+        "-d",
+        "limit=10"
+      ],
+      "body": "ok:list",
+      "captured_at": "2026-11-11T11:23:05Z",
+      "exit": 0,
+      "expect": "ok:list",
+      "facts": {
+        "ids": [
+          {
+            "id": "evt_1UaZbsFk6HuOfbR4mBDrhbdA",
+            "object_id": "cs_test_a0CS2KHAnQy1H5hZtrxv6zcn6MHMDKmZsucyFZcxCkgJyBJXt6WcmUWEAI",
+            "type": "checkout.session.completed"
+          }
+        ]
+      },
+      "scenario": "A"
+    },
+    "b_events_invoice": {
+      "argv": [
+        "get",
+        "/v1/events",
+        "-d",
+        "type=invoice.paid",
+        "-d",
+        "created[gte]=1794396917",
+        "-d",
+        "limit=10"
+      ],
+      "body": "ok:list",
+      "captured_at": "2026-11-11T11:38:03Z",
+      "exit": 0,
+      "expect": "ok:list",
+      "facts": {
+        "ids": [
+          {
+            "id": "evt_1UaZqWFk6HuOfbR4bJOQlk4h",
+            "object_id": "in_1UaZpVFk6HuOfbR4pyzwRdnz",
+            "type": "invoice.paid"
+          }
+        ]
+      },
+      "scenario": "B"
+    },
+    "b_events_session": {
+      "argv": [
+        "get",
+        "/v1/events",
+        "-d",
+        "type=checkout.session.completed",
+        "-d",
+        "created[gte]=1794396917",
+        "-d",
+        "limit=10"
+      ],
+      "body": "ok:list",
+      "captured_at": "2026-11-11T11:38:02Z",
+      "exit": 0,
+      "expect": "ok:list",
+      "facts": {
+        "ids": [
+          {
+            "id": "evt_1UaZqVFk6HuOfbR4rzCGBzlW",
+            "object_id": "cs_test_a0uoFQSHvnys7ugL386YQvenTp7mUkVa2djrziI5C32DG19GfUNKwIE7wG",
+            "type": "checkout.session.completed"
+          }
+        ]
+      },
+      "scenario": "B"
+    },
+    "preflight_balance": {
+      "argv": [
+        "get",
+        "/v1/balance",
+        "-v",
+        "2026-10-28.endive"
+      ],
+      "body": "ok:balance",
+      "captured_at": "2026-11-11T11:06:48Z",
+      "exit": 0,
+      "expect": "ok:balance",
+      "facts": {
+        "object": "balance",
+        "status": null
+      },
+      "scenario": "V"
+    },
+    "r_clock_adv1": {
+      "argv": [
+        "post",
+        "/v1/test_helpers/test_clocks/clock_1UaZiXFk6HuOfbR4pMAGgvUU/advance",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "frozen_time=1796988628"
+      ],
+      "body": "ok:test_helpers.test_clock",
+      "captured_at": "2026-11-11T11:29:35Z",
+      "exit": 0,
+      "expect": "ok:test_helpers.test_clock",
+      "facts": {
+        "object": "test_helpers.test_clock",
+        "status": "advancing"
+      },
+      "scenario": "R"
+    },
+    "r_clock_adv2": {
+      "argv": [
+        "post",
+        "/v1/test_helpers/test_clocks/clock_1UaZiXFk6HuOfbR4pMAGgvUU/advance",
+        "-v",
+        "2026-10-28.endive",
+        "-d",
+        "frozen_time=1796995828"
+      ],
+      "body": "ok:test_helpers.test_clock",
+      "captured_at": "2026-11-11T11:29:42Z",
+      "exit": 0,
+      "expect": "ok:test_helpers.test_clock",
+      "facts": {
+        "object": "test_helpers.test_clock",
+        "status": "advancing"
+      },
+      "scenario": "R"
+    },
+    "r_events_invoice": {
+      "argv": [
+        "get",
+        "/v1/events",
+        "-d",
+        "type=invoice.paid",
+        "-d",
+        "limit=20"
+      ],
+      "body": "ok:list",
+      "captured_at": "2026-11-11T11:29:57Z",
+      "exit": 0,
+      "expect": "ok:list",
+      "facts": {
+        "ids": [
+          {
+            "id": "evt_1UaZisFk6HuOfbR4XPJQitsa",
+            "object_id": "in_1UaZigFk6HuOfbR4amapMaJu",
+            "type": "invoice.paid"
+          },
+          {
+            "id": "evt_1UaZidFk6HuOfbR4LcciQXEo",
+            "object_id": "in_1UaZiaFk6HuOfbR4OUtw2lFf",
+            "type": "invoice.paid"
+          },
+          {
+            "id": "evt_1UaZgXFk6HuOfbR4TXZ90Asv",
+            "object_id": "in_1UaZgHFk6HuOfbR4UO8A3raj",
+            "type": "invoice.paid"
+          },
+          {
+            "id": "evt_1UaZbsFk6HuOfbR4pBQ3YQqL",
+            "object_id": "in_1UaZbqFk6HuOfbR40Zy0OwJP",
+            "type": "invoice.paid"
+          }
+        ]
+      },
+      "scenario": "R"
+    }
+  }
+}

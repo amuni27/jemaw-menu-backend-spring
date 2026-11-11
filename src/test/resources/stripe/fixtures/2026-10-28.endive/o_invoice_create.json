@@ -1,0 +1,57 @@
+{
+  "amount_due": 100,
+  "amount_overpaid": 0,
+  "amount_paid": 0,
+  "amount_remaining": 100,
+  "billing_reason": "manual",
+  "collection_method": "send_invoice",
+  "created": 1794396647,
+  "currency": "usd",
+  "customer": "cus_VbnCjwuXH0WhUX",
+  "ending_balance": null,
+  "id": "in_1UaZjnFk6HuOfbR4T98tQaIB",
+  "lines": {
+    "data": [
+      {
+        "amount": 100,
+        "currency": "usd",
+        "id": "il_1UaZjmFk6HuOfbR4UZXPnLR4",
+        "object": "line_item",
+        "period": {
+          "end": 1794396646,
+          "start": 1794396646
+        },
+        "pricing": {
+          "price_details": {
+            "price": "price_1UaZjmFk6HuOfbR4CC2VJVF1",
+            "product": "prod_VbnKtnGiiQrgrn"
+          },
+          "type": "price_details"
+        },
+        "quantity": 1
+      }
+    ],
+    "has_more": false,
+    "object": "list"
+  },
+  "livemode": false,
+  "object": "invoice",
+  "parent": null,
+  "period_end": 1796988154,
+  "period_start": 1794396154,
+  "post_payment_credit_notes_amount": 0,
+  "pre_payment_credit_notes_amount": 0,
+  "starting_balance": 0,
+  "status": "draft",
+  "status_transitions": {
+    "finalized_at": null,
+    "marked_uncollectible_at": null,
+    "paid_at": null,
+    "voided_at": null
+  },
+  "subtotal": 100,
+  "test_clock": null,
+  "total": 100,
+  "total_discount_amounts": [],
+  "total_taxes": []
+}

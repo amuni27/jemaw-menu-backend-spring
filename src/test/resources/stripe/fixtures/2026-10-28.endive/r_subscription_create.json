@@ -1,0 +1,49 @@
+{
+  "cancel_at_period_end": false,
+  "canceled_at": null,
+  "created": 1794396568,
+  "customer": "cus_VbnJw27gFrcKPo",
+  "ended_at": null,
+  "id": "sub_1UaZiaFk6HuOfbR4BrBuu83k",
+  "items": {
+    "data": [
+      {
+        "current_period_end": 1796988568,
+        "current_period_start": 1794396568,
+        "id": "si_VbnJlkLcrfYZKh",
+        "object": "subscription_item",
+        "price": {
+          "active": true,
+          "currency": "usd",
+          "id": "price_1UaZSmFk6HuOfbR4CTwnqF48",
+          "livemode": false,
+          "lookup_key": "agafari:MODEL_4:MONTH:q6-v1",
+          "metadata": {
+            "agafari_plan": "MODEL_4"
+          },
+          "object": "price",
+          "product": "prod_Vbn2bimLj8AJ7s",
+          "recurring": {
+            "interval": "month",
+            "interval_count": 1,
+            "usage_type": "licensed"
+          },
+          "tax_behavior": "unspecified",
+          "type": "recurring",
+          "unit_amount": 2500
+        },
+        "quantity": 1
+      }
+    ],
+    "has_more": false,
+    "object": "list"
+  },
+  "livemode": false,
+  "metadata": {
+    "agafari_business_id": "1957d07f-75e7-4037-8c9c-9298bb3a999b",
+    "agafari_checkout_id": "63c91801-4d7b-4609-a42d-10e23364e2bc"
+  },
+  "object": "subscription",
+  "status": "active",
+  "test_clock": "clock_1UaZiXFk6HuOfbR4pMAGgvUU"
+}

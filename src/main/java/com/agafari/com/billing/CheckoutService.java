@@ -191,7 +191,7 @@ public class CheckoutService {
         MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElseThrow(MonetizationNotConfiguredException::new);
         BusinessSubscription current = subscriptions.findCurrentByBusinessId(businessId).orElse(null);
         CheckoutPlan plan = strategy.planCheckout(new CheckoutRequest(businessId, priceId),
-                new CurrentState(current == null ? null : current.getId(), current == null ? null : current.getPlanCode()));
+                new CurrentState(current == null ? null : current.getId(), current == null ? null : current.getPlanCode(), current == null ? null : current.getSource()));
         String hash = hash(priceId, plan);
 
         List<Row> sameKey = jdbc.query("select " + COLUMNS + " from checkout_session where business_id = ? and idempotency_key = ?", MAPPER, businessId, key);
@@ -280,8 +280,12 @@ public class CheckoutService {
         return new CheckoutRefusedException(HttpStatus.CONFLICT, CheckoutRefusedException.CANCELLED, "This checkout was cancelled.");
     }
 
-    private static ProviderSessionRequest sessionRequest(BillingStrategy strategy, Row row) {
-        return strategy.sessionRequest(new CheckoutSession(row.id(), row.businessId(), row.kind(), row.expected(), row.expiresAt()));
+    /** AGF SUB-R5-02 (Q1): with the quoted price's interval and provider reference, and the expected current row. */
+    private ProviderSessionRequest sessionRequest(BillingStrategy strategy, Row row) {
+        Map<String, Object> quote = jdbc.queryForMap("select p.billing_interval, p.provider_price_ref, c.replaces_subscription_id from checkout_session c "
+                + "join plan_price p on p.id = c.price_id where c.id = ?", row.id());
+        return strategy.sessionRequest(new CheckoutSession(row.id(), row.businessId(), row.kind(), row.expected(), row.expiresAt(), row.priceId(),
+                PriceInterval.valueOf((String) quote.get("billing_interval")), (String) quote.get("provider_price_ref"), (String) quote.get("replaces_subscription_id")));
     }
 
     private static String providerKey(String checkoutId) {

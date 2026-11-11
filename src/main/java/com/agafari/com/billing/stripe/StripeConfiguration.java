@@ -2,12 +2,15 @@ package com.agafari.com.billing.stripe;
 
 import com.agafari.com.billing.UsBillingStrategy;
 import com.agafari.com.billing.port.BillingStrategy;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.PropertySource;
 import org.springframework.core.env.StandardEnvironment;
+
+import java.time.Clock;
 
 /**
  * AGF SUB-R5-01: wires the Stripe adapter as the US market's strategy, <b>only</b> when {@code app.billing.stripe.enabled=true}
@@ -28,9 +31,16 @@ public class StripeConfiguration {
         });
     }
 
+    /** AGF SUB-R5-02 (PO D7): environment-specific, no defaults; validated when a checkout is attempted. */
     @Bean
-    StripeProviderClient stripeProviderClient(StripeCredentials credentials) {
-        return new StripeProviderClient(credentials);
+    StripeSettings stripeSettings(@Value("${app.billing.stripe.success-url:}") String successUrl, @Value("${app.billing.stripe.cancel-url:}") String cancelUrl,
+                                  @Value("${app.billing.stripe.trusted-origins:}") String trustedOrigins) {
+        return new StripeSettings(successUrl, cancelUrl, trustedOrigins);
+    }
+
+    @Bean
+    StripeProviderClient stripeProviderClient(StripeCredentials credentials, StripeSettings settings) {
+        return new StripeProviderClient(credentials, settings, null, Clock.systemUTC());
     }
 
     @Bean

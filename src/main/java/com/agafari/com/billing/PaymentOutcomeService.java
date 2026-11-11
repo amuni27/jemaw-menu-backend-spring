@@ -6,7 +6,9 @@ import com.agafari.com.billing.port.PaymentProviderClient;
 import com.agafari.com.billing.port.ProviderCapabilities;
 import com.agafari.com.billing.port.ProviderTimeoutException;
 import com.agafari.com.billing.port.VerifiedPayment;
+import com.agafari.com.billing.port.ProviderBilling;
 import com.agafari.com.config.BillingFlags;
+import com.agafari.com.jobs.JobQueue;
 import com.agafari.com.jobs.PermanentJobException;
 import com.agafari.com.jobs.ProviderCallGuard;
 import com.agafari.com.jobs.TransientJobException;
@@ -25,6 +27,7 @@ import com.agafari.com.subscription.PeriodExtension;
 import com.agafari.com.subscription.SubscriptionLifecycle;
 import com.agafari.com.subscription.TransitionReason;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -119,11 +122,21 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
     private final Set<Market> enabled = ConcurrentHashMap.newKeySet();
     private final ExceptionService exceptions;
     private final RefundService refunds;
+    private final JobQueue jobs; // AGF SUB-R5-02 (D4); null in the R4 constructor: no provider subscription is ever cancelled
 
     public PaymentOutcomeService(JdbcTemplate jdbc, BillingStrategyRegistry registry, MonetizationLocks locks, SubscriptionLifecycle lifecycle,
                                  BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs, MonetizationClock clock,
                                  PlatformTransactionManager transactions, AdminAuditService audit, ObjectMapper mapper, BillingFlags flags, ExceptionService exceptions,
                                  RefundService refunds) {
+        this(jdbc, registry, locks, lifecycle, subscriptions, configs, clock, transactions, audit, mapper, flags, exceptions, refunds, null);
+    }
+
+    @Autowired
+    public PaymentOutcomeService(JdbcTemplate jdbc, BillingStrategyRegistry registry, MonetizationLocks locks, SubscriptionLifecycle lifecycle,
+                                 BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs, MonetizationClock clock,
+                                 PlatformTransactionManager transactions, AdminAuditService audit, ObjectMapper mapper, BillingFlags flags, ExceptionService exceptions,
+                                 RefundService refunds, JobQueue jobs) {
+        this.jobs = jobs;
         this.exceptions = exceptions;
         this.refunds = refunds;
         this.jdbc = jdbc;
@@ -280,7 +293,9 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
             return finish(event, "PROCESSED", differences.isEmpty() ? null : LEDGER_FACTS_MISMATCH, Result.PROCESSED);
         }
 
-        boolean verifiedAsExpected = verified.amount().equals(c.expected());
+        // AGF SUB-R5-02 (Q1, U1): provider billing facts must qualify and match the quoted price, or this is row 0 (nothing recorded)
+        String billingProblem = billingProblem(c, verified);
+        boolean verifiedAsExpected = verified.amount().equals(c.expected()) && billingProblem == null;
         Map<String, Object> price = jdbc.queryForMap("select plan_code, billing_interval, amount_minor, currency from plan_price where id = ?", c.priceId());
         String planCode = (String) price.get("plan_code");
         BusinessSubscription current = subscriptions.findCurrentByBusinessId(businessId).orElse(null);
@@ -300,6 +315,7 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
         Map<String, Object> snapshot = facts(event, c, verified, decision);
         if (downgradeNotFundable) snapshot.put("downgradeNotFundable", "the scheduled change could not be funded by this payment");
         snapshot.put("eligibleAtPayment", eligible);
+        if (billingProblem != null) snapshot.put("providerBillingProblem", billingProblem);
         snapshot.put("completedByAnotherPayment", completedByAnother);
         snapshot.put("currentSubscriptionId", current == null ? null : current.getId());
 
@@ -308,9 +324,11 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
             case EXCEPTION -> {
                 if (decision.row() == 0) {
                     exception(businessId, decision.code(), null, c.id(), event.id(), null, verified, true, "OPEN", snapshot, now);
+                    providerSubscriptionDisposition(verified, capabilities, decision, null, c.id());
                 } else {
                     String paymentId = insertCharge(event, strategy.provider(), verified, c, businessId, null, tPay, now);
                     exception(businessId, decision.code(), paymentId, c.id(), event.id(), null, verified, true, "OPEN", snapshot, now);
+                    providerSubscriptionDisposition(verified, capabilities, decision, paymentId, c.id());
                 }
                 return finish(event, "PROCESSED", decision.code(), Result.PROCESSED);
             }
@@ -318,6 +336,7 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
                 String paymentId = insertCharge(event, strategy.provider(), verified, c, businessId, null, tPay, now);
                 String refundId = refunds.request(businessId, paymentId, decision.cause(), "outcome:" + decision.cause()); // AGF SUB-R4-13: B3 checks
                 exception(businessId, decision.code(), paymentId, c.id(), event.id(), refundId, verified, true, "AUTO_HANDLING", snapshot, now);
+                providerSubscriptionDisposition(verified, capabilities, decision, paymentId, c.id());
                 return finish(event, "PROCESSED", decision.code(), Result.PROCESSED);
             }
             default -> {
@@ -332,20 +351,34 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
                        Map<String, Object> price, Instant tPay, Instant now) {
         try {
             if (decision.action() == PaymentOutcome.Action.EXTEND && current == null) throw new ExpectedSubscriptionChangedException(); // nothing to renew
-            Instant start = switch (decision.action()) {
-                case EXTEND -> current.getPeriodEnd(); // PD-3 open: a renewal starts exactly at period_end (R4-09 D2)
-                default -> tPay; // R8: an initial or replacement period starts at the verified payment time
-            };
-            if (start == null) throw new EvidenceInvalidException(EvidenceInvalidException.Code.PERIOD_MISMATCH);
-            Instant end = oneInterval(start, PriceInterval.valueOf((String) price.get("billing_interval")));
+            ProviderBilling billing = verified.billing();
+            // AGF SUB-R5-02 (F2): provider-initiated renewals are R5-03; a provider-billed payment never extends a row here
+            if (billing != null && decision.action() == PaymentOutcome.Action.EXTEND) throw new ExpectedSubscriptionChangedException();
+            Instant start, end;
+            if (billing != null) {
+                // AGF SUB-R5-02 (Q2): the verified invoice line's service period is the paid period; Agafari never recomputes it
+                start = micros(billing.periodStart());
+                end = micros(billing.periodEnd());
+                // PO D3: no entitlement for a provider period that has already ended; the evidence is kept with an exception
+                if (!end.isAfter(now)) throw new EvidenceInvalidException(EvidenceInvalidException.Code.PERIOD_MISMATCH);
+            } else {
+                start = switch (decision.action()) {
+                    case EXTEND -> current.getPeriodEnd(); // PD-3 open: a renewal starts exactly at period_end (R4-09 D2)
+                    default -> tPay; // R8: an initial or replacement period starts at the verified payment time
+                };
+                if (start == null) throw new EvidenceInvalidException(EvidenceInvalidException.Code.PERIOD_MISMATCH);
+                end = oneInterval(start, PriceInterval.valueOf((String) price.get("billing_interval")));
+            }
             String invoiceId = UUID.randomUUID().toString();
-            jdbc.update("insert into billing_invoice (id, business_id, checkout_session_id, price_id, period_start, period_end, amount_minor, currency, status) "
-                            + "values (?, ?, ?, ?, ?, ?, ?, ?, 'PAID')", invoiceId, businessId, c.id(), c.priceId(), Timestamp.from(start), Timestamp.from(end),
-                    price.get("amount_minor"), price.get("currency"));
+            jdbc.update("insert into billing_invoice (id, business_id, checkout_session_id, price_id, period_start, period_end, amount_minor, currency, status, provider_invoice_ref) "
+                            + "values (?, ?, ?, ?, ?, ?, ?, ?, 'PAID', ?)", invoiceId, businessId, c.id(), c.priceId(), Timestamp.from(start), Timestamp.from(end),
+                    price.get("amount_minor"), price.get("currency"), billing == null ? null : billing.invoiceRef());
             String paymentId = insertCharge(event, strategy.provider(), verified, c, businessId, invoiceId, tPay, now);
             VerifiedPaymentRef ref = new VerifiedPaymentRef(paymentId, invoiceId);
             String planCode = (String) price.get("plan_code");
-            PaidActivation activation = new PaidActivation(planCode, c.configVersion(), c.priceId(), strategy.provider(), null, null, start, end, ref, now);
+            PaidActivation activation = new PaidActivation(planCode, c.configVersion(), c.priceId(), strategy.provider(), billing == null ? null : billing.subscriptionRef(), null,
+                    start, end, ref, now);
+            if (billing != null) rememberCustomer(businessId, strategy.provider(), billing.customerRef());
             switch (decision.action()) {
                 case ACTIVATE -> lifecycle.activatePaid(businessId, activation);
                 case EXTEND -> lifecycle.renew(current.getId(), new PeriodExtension(start, end, ref, now));
@@ -378,6 +411,7 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
         Map<String, Object> facts = facts(event, c, verified, null);
         facts.put("refusal", refused.reason);
         exception(businessId, refused.code, paymentId, c.id(), event.id(), null, verified, true, "OPEN", facts, now);
+        if (verified.billing() != null) reviewProviderSubscription(verified.billing(), paymentId, c.id(), "refused: " + refused.code); // PO U3
         return finish(event, "PROCESSED", refused.code, Result.PROCESSED);
     }
 
@@ -486,12 +520,71 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
         f.put("expiresAt", String.valueOf(c.expiresAt()));
         f.put("cancelRequestedAt", String.valueOf(c.cancelRequestedAt()));
         f.put("replacesSubscriptionId", c.replaces());
+        ProviderBilling b = verified.billing();
+        if (b != null) {
+            f.put("providerInvoiceRef", b.invoiceRef());
+            f.put("providerSubscriptionRef", b.subscriptionRef());
+            f.put("providerCustomerRef", b.customerRef());
+            f.put("providerPriceRef", b.priceRef());
+            f.put("providerMoneyMovementRef", b.moneyMovementRef());
+            f.put("providerPeriod", b.periodStart() + "/" + b.periodEnd());
+        }
         if (decision != null) {
             f.put("row", decision.row());
             f.put("action", decision.action().name());
             f.put("cause", decision.cause());
         }
         return f;
+    }
+
+    // ---- AGF SUB-R5-02: provider-billed subscriptions (Stripe) ----
+
+    static final String CANCEL_JOB = ProviderSubscriptionCancelHandler.TYPE;
+    private static final String REVIEW_REQUIRED = "PROVIDER_SUBSCRIPTION_REVIEW_REQUIRED";
+    private static final String TARGET_PROVIDER_SUBSCRIPTION = "PROVIDER_SUBSCRIPTION";
+
+    /** Null when the payment carries no provider billing facts, or they qualify and match the quote (PO U1, Q1). */
+    private String billingProblem(Checkout c, VerifiedPayment verified) {
+        ProviderBilling b = verified.billing();
+        if (b == null) return null;
+        if (!b.qualifying()) return b.evidenceProblem();
+        Map<String, Object> quote = jdbc.queryForMap("select billing_interval, provider_price_ref from plan_price where id = ?", c.priceId());
+        if (!Objects.equals(quote.get("provider_price_ref"), b.priceRef())) return "the provider price charged isn't the quoted price";
+        if (!b.interval().name().equals(quote.get("billing_interval"))) return "the provider billing interval isn't the quoted interval";
+        return null;
+    }
+
+    /**
+     * PO U2/U3: after a decision that doesn't activate, a provider subscription the payment created is cancelled only for the
+     * terminal rows 2–5 and only with a confirmed capability, through a durable job in this transaction. Any other outcome
+     * leaves it to an operator, with the evidence in the audit trail.
+     */
+    private void providerSubscriptionDisposition(VerifiedPayment verified, ProviderCapabilities capabilities, PaymentOutcome decision, String paymentId, String checkoutId) {
+        ProviderBilling b = verified.billing();
+        if (b == null || !b.qualifying()) {
+            if (b != null) reviewProviderSubscription(b, paymentId, checkoutId, "row " + decision.row() + " (" + decision.cause() + ")");
+            return;
+        }
+        boolean terminal = decision.row() >= 2 && decision.row() <= 5;
+        if (terminal && paymentId != null && capabilities.cancelSubscription() && jobs != null) {
+            jobs.enqueue(CANCEL_JOB, "payment:" + paymentId, new ProviderSubscriptionCancelHandler.Payload(paymentId));
+            return;
+        }
+        reviewProviderSubscription(b, paymentId, checkoutId, "row " + decision.row() + " (" + decision.cause() + ")" + (terminal ? ", cancellation capability not confirmed" : ""));
+    }
+
+    private void reviewProviderSubscription(ProviderBilling b, String paymentId, String checkoutId, String why) {
+        String target = b.subscriptionRef() != null ? b.subscriptionRef() : b.invoiceRef();
+        audit.success(REVIEW_REQUIRED, null, AdminAuditService.SYSTEM, TARGET_PROVIDER_SUBSCRIPTION, target,
+                clip("invoice=" + b.invoiceRef() + " payment=" + paymentId + " checkout=" + checkoutId + " " + why + "; not cancelled automatically"));
+    }
+
+    /** PO U5: stored once, never overwritten; a different later value is only logged. */
+    private void rememberCustomer(String businessId, String provider, String customerRef) {
+        if (jdbc.update("update billing_account set provider_customer_ref = ? where business_id = ? and provider = ? and provider_customer_ref is null", customerRef, businessId, provider) == 0) {
+            List<String> stored = jdbc.queryForList("select provider_customer_ref from billing_account where business_id = ? and provider = ?", String.class, businessId, provider);
+            if (!stored.isEmpty() && !customerRef.equals(stored.get(0))) log.info("event=billing.provider_customer_kept businessId={} provider={}", businessId, provider);
+        }
     }
 
     static Instant oneInterval(Instant start, PriceInterval interval) {

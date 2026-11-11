@@ -81,7 +81,9 @@ class BillingPortsTest {
                 Map.entry("submitRefund", c -> c.submitRefund("p", TEN, "k", META)),
                 Map.entry("findRefund", c -> c.findRefund("p", "r1")),
                 Map.entry("listSince", c -> c.listSince(T, RecordType.PAYMENT)),
-                Map.entry("signatureVerifier", PaymentProviderClient::signatureVerifier)
+                Map.entry("signatureVerifier", PaymentProviderClient::signatureVerifier),
+                Map.entry("subscriptionOfPayment", c -> c.subscriptionOfPayment("p")), // AGF SUB-R5-02 (D4)
+                Map.entry("cancelSubscription", c -> c.cancelSubscription("s"))
         ).map(e -> Arguments.of(e.getKey(), e.getValue()));
     }
 

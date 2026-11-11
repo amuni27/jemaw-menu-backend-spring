@@ -119,6 +119,29 @@ public class ExceptionService {
      * resolution. Code and facts don't change; the reason is in the audit trail. In the caller's transaction, under the
      * restaurant lock; repeating it changes nothing.
      */
+    /**
+     * AGF SUB-R5-02 (PO U2/U4): a provider subscription created by this payment couldn't be cancelled safely, so the payment's
+     * own outcome exception goes to an operator: {@code AUTO_HANDLING → OPEN}; an exception already with an operator gets an
+     * audit note. Never a second exception for the payment; code and facts never change. In the caller's transaction, under
+     * the restaurant lock; repeating it changes nothing new. Returns the exception's id, or null if the payment has none.
+     */
+    String handBackPayment(String paymentId, String reason, String detail) {
+        List<Map<String, Object>> rows = jdbc.queryForList("select id, status from billing_exception where payment_id = ? and code <> 'LEDGER_FACTS_MISMATCH' order by created_at for update",
+                paymentId);
+        if (rows.isEmpty()) return null;
+        String id = (String) rows.get(0).get("id");
+        String text = clip("reason=" + reason + " payment=" + paymentId + " " + detail);
+        if (jdbc.update("update billing_exception set status = 'OPEN', row_version = row_version + 1 where id = ? and status = 'AUTO_HANDLING'", id) == 1) {
+            audit.success(HANDED_BACK, null, AdminAuditService.SYSTEM, TARGET, id, text + " AUTO_HANDLING -> OPEN");
+        } else {
+            audit.success(PROVIDER_SUBSCRIPTION_HANDED_BACK, null, AdminAuditService.SYSTEM, TARGET, id, text);
+        }
+        org.slf4j.LoggerFactory.getLogger(ExceptionService.class).warn("event=billing.provider_subscription_handed_back exceptionId={} paymentId={} reason={}", id, paymentId, reason);
+        return id;
+    }
+
+    static final String PROVIDER_SUBSCRIPTION_HANDED_BACK = "PROVIDER_SUBSCRIPTION_HANDED_BACK";
+
     void handBack(String refundRequestId, String reason, String refundStatus) {
         List<String> ids = jdbc.queryForList("select id from billing_exception where refund_request_id = ? and status = 'AUTO_HANDLING' for update", String.class, refundRequestId);
         for (String id : ids) {

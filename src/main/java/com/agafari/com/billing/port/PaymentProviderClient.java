@@ -26,4 +26,18 @@ public interface PaymentProviderClient {
     List<ProviderRecord> listSince(Instant since, RecordType type);
 
     SignatureVerifier signatureVerifier();
+
+    /**
+     * AGF SUB-R5-02 (D4): re-fetches the subscription the verified payment {@code providerPaymentRef} created, with the
+     * ownership facts its provider-side checkout record carries. Unsupported unless the provider declares
+     * {@code cancelSubscription}.
+     */
+    default ProviderSubscriptionState subscriptionOfPayment(String providerPaymentRef) {
+        throw new UnsupportedOperationException("This provider can't report a payment's subscription");
+    }
+
+    /** AGF SUB-R5-02 (D4): cancels immediately, with no final invoice, proration, refund or credit. */
+    default SubscriptionCancelResult cancelSubscription(String subscriptionRef) {
+        throw new UnsupportedOperationException("This provider can't cancel a subscription");
+    }
 }

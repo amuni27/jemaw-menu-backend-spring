@@ -79,7 +79,7 @@ class StripeConfigurationTest {
     // ---- enabled with valid synthetic test-mode credentials ----
 
     @Test
-    void enabledWithTestModeCredentialsWiresTheUsStrategyWithEveryCapabilityOff() {
+    void enabledWithTestModeCredentialsWiresTheUsStrategyWithTheDocumentedCapabilities() {
         enabledWith(env(TEST_KEY, WEBHOOK, WEBHOOK_PREVIOUS)).run(ctx -> {
             assertThat(ctx).hasNotFailed();
             BillingStrategy strategy = ctx.getBean(BillingStrategy.class);
@@ -89,7 +89,8 @@ class StripeConfigurationTest {
             PaymentProviderClient client = strategy.client();
             assertThat(client).isInstanceOf(StripeProviderClient.class);
             assertThat(((StripeProviderClient) client).sdkClientReady()).isTrue();
-            assertThat(client.capabilities()).as("no Stripe semantics verified yet: all off").isEqualTo(ProviderCapabilities.none());
+            // realigned by SUB-R5-02 (I1): only the capabilities Stripe documents; refunds stay off until R5-05
+            assertThat(client.capabilities()).isEqualTo(new ProviderCapabilities(true, true, false, java.time.Duration.ofHours(24), false, true));
             assertThat(ctx.getBean(StripeCredentials.class).previousWebhookSecret()).isPresent();
         });
         enabledWith(env(RESTRICTED_TEST_KEY, WEBHOOK, null)).run(ctx -> {
@@ -99,20 +100,27 @@ class StripeConfigurationTest {
         });
     }
 
+    /**
+     * Realigned by SUB-R5-02: refunds (R5-05), listing (R5-06), renewal interpretation (R5-03) and schedules (R5-04) still
+     * refuse. With no Checkout URLs configured (PO D7), planning and session creation refuse before any network call.
+     */
     @Test
-    void everyStripeOperationRefusesUntilItsStoryIsAuthorized() {
+    void operationsOutsideR502RefuseAndCheckoutNeedsItsUrls() {
         enabledWith(env(TEST_KEY, WEBHOOK, null)).run(ctx -> {
             BillingStrategy strategy = ctx.getBean(BillingStrategy.class);
             PaymentProviderClient c = strategy.client();
             List<Runnable> calls = List.of(
-                    () -> c.createSession(null, "k"), () -> c.expireSession("cs", "k"), () -> c.verifyPayment("pi"),
                     () -> c.submitRefund("pi", new Money(100, Currency.USD), "k", Map.of()), () -> c.findRefund("pi", "r"),
-                    () -> c.listSince(Instant.now(), RecordType.PAYMENT), c::signatureVerifier,
-                    () -> strategy.planCheckout(null, null), () -> strategy.sessionRequest(null), () -> strategy.interpret(null, null),
-                    () -> strategy.onScheduleChange(null));
+                    () -> c.listSince(Instant.now(), RecordType.PAYMENT), () -> strategy.interpret(null, null), () -> strategy.onScheduleChange(null));
             for (Runnable call : calls) {
                 assertThatThrownBy(call::run).isInstanceOf(UnsupportedOperationException.class).hasMessageContaining("not authorized").hasMessageContaining("SUB-R5-0");
             }
+            assertThatThrownBy(() -> strategy.planCheckout(new com.agafari.com.billing.port.CheckoutRequest("b", "p"), new com.agafari.com.billing.port.CurrentState(null, null)))
+                    .isInstanceOf(com.agafari.com.exception.CheckoutRefusedException.class).hasMessageContaining("isn't available");
+            assertThatThrownBy(() -> c.createSession(new com.agafari.com.billing.port.ProviderSessionRequest("c", "b", new Money(100, Currency.USD), Instant.now().plusSeconds(7200),
+                    com.agafari.com.billing.PriceInterval.MONTH, "price_x", null, Map.of("agafari_checkout_id", "c", "agafari_business_id", "b")), "k"))
+                    .isInstanceOf(com.agafari.com.billing.port.ProviderRejectedException.class).hasMessageContaining("not configured");
+            assertThatThrownBy(() -> c.verifyPayment("pi_not_an_invoice")).isInstanceOf(com.agafari.com.billing.port.ProviderRejectedException.class);
         });
     }
 

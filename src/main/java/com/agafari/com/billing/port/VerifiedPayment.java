@@ -11,14 +11,22 @@ import java.util.Map;
  *
  * @param providerPaymentRef identifies one money movement (PO D4); never a checkout, event or refund reference
  * @param paidAt             the provider's authoritative successful-payment time (PD-2a); null unless SUCCEEDED
+ * @param billing            AGF SUB-R5-02: the verified provider billing facts of a provider-billed subscription; null for one-off
+ *                           providers and the fakes, whose behaviour is unchanged
  */
-public record VerifiedPayment(String providerPaymentRef, ProviderPaymentStatus status, Money amount, Instant paidAt, Map<String, String> metadata) {
+public record VerifiedPayment(String providerPaymentRef, ProviderPaymentStatus status, Money amount, Instant paidAt, Map<String, String> metadata, ProviderBilling billing) {
 
     public VerifiedPayment {
         if (providerPaymentRef == null || providerPaymentRef.isBlank()) throw new IllegalArgumentException("A provider payment reference is required");
         if (status == null) throw new IllegalArgumentException("A status is required");
         if ((status == ProviderPaymentStatus.SUCCEEDED) != (paidAt != null)) throw new IllegalArgumentException("Only a successful payment has a payment time");
         if (status == ProviderPaymentStatus.SUCCEEDED && amount == null) throw new IllegalArgumentException("A successful payment needs its amount");
+        if (billing != null && status != ProviderPaymentStatus.SUCCEEDED) throw new IllegalArgumentException("Billing facts belong to a successful payment only");
         metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
+    }
+
+    /** The R4 shape: no provider billing facts. */
+    public VerifiedPayment(String providerPaymentRef, ProviderPaymentStatus status, Money amount, Instant paidAt, Map<String, String> metadata) {
+        this(providerPaymentRef, status, amount, paidAt, metadata, null);
     }
 }

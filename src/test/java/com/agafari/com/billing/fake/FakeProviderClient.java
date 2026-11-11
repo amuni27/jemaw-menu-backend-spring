@@ -243,6 +243,17 @@ public final class FakeProviderClient extends GuardedProviderClient {
         return nextSession;
     }
 
+    /** AGF SUB-R5-02: the fake has no provider subscriptions (one-off payments); it reports none and cancels nothing. */
+    @Override
+    protected com.agafari.com.billing.port.ProviderSubscriptionState doSubscriptionOfPayment(String providerPaymentRef) {
+        return new com.agafari.com.billing.port.ProviderSubscriptionState(null, null, com.agafari.com.billing.port.ProviderSubscriptionState.Status.NOT_FOUND, null, null, false, false);
+    }
+
+    @Override
+    protected com.agafari.com.billing.port.SubscriptionCancelResult doCancelSubscription(String subscriptionRef) {
+        return com.agafari.com.billing.port.SubscriptionCancelResult.ALREADY_CANCELLED;
+    }
+
     @Override
     protected ProviderCapabilities doCapabilities() {
         return capabilities;

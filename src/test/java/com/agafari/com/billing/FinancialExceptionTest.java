@@ -254,6 +254,25 @@ class FinancialExceptionTest extends PaymentOutcomeTestBase {
         assertThat(httpStatus(owner, "k-after-" + KEYS.incrementAndGet(), price)).as("checkouts open again").isNotEqualTo(409);
     }
 
+    /** AGF BE-5a (register §49): a payment under review counts as chosen; once resolved without a plan, the choice is open again. */
+    @Test
+    void aPaymentUnderReviewMeansChosenForANewRestaurant() throws Exception {
+        planRequests.setSelectionRequiredFrom(Instant.EPOCH);
+        try {
+            assertThat(planView(owner).path("selectionRequired").asBoolean(false)).isTrue();
+            String id = row0(owner, null);
+            assertThat(planView(owner).path("paymentUnderReview").isMissingNode()).isFalse();
+            assertThat(planView(owner).path("current").isMissingNode()).as("no plan").isTrue();
+            assertThat(planView(owner).path("selectionRequired").asBoolean(true)).isFalse();
+
+            assertThat(act(id, "resolve", actionBody(id, "\"resolution\":\"FUNDS_HANDLED_EXTERNALLY\",\"note\":\"Refunded by bank transfer\"")).getStatus()).isEqualTo(200);
+
+            assertThat(planView(owner).path("selectionRequired").asBoolean(false)).isTrue();
+        } finally {
+            planRequests.setSelectionRequiredFrom(null);
+        }
+    }
+
     @Test
     void anOwnerNeverSeesAnotherRestaurantsReview() throws Exception {
         row6(data.tenant("exception-other-owner"));

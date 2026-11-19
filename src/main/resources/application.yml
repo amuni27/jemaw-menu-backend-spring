@@ -65,6 +65,10 @@ app:
   monetization:
     entitlements-enabled: ${APP_MONETIZATION_ENTITLEMENTS_ENABLED:false}
     owner-plans-visible: ${APP_MONETIZATION_OWNER_PLANS_VISIBLE:false}
+    # AGF BE-5a (register §49 Q3): ISO-8601 cut-over instant, e.g. 2026-12-01T00:00:00Z. Restaurants created at or after it
+    # that have never chosen a plan get selectionRequired=true in GET /api/plan (navigation only; nothing is restricted).
+    # Empty (default): the field is absent and existing restaurants are never asked.
+    plan-selection-required-from: ${APP_MONETIZATION_PLAN_SELECTION_REQUIRED_FROM:}
     # AGF E4-M5: 30-day Model 1 trials for new registrations under Setting 1, only when trials-enabled is true (default
     # false; separate PO approval for any shared environment). Expiry changes nothing for owners or guests.
     trials-enabled: ${APP_MONETIZATION_TRIALS_ENABLED:false}

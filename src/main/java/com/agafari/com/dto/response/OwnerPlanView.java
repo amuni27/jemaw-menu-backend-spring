@@ -9,15 +9,20 @@ import java.util.List;
  * AGF E4-M4: what an owner sees about plans. Only {@code visible=false} while the owner visibility flag is off or
  * monetization isn't configured. No prices, payment or trial data exist; {@code featuresUnaffected} is always true (no
  * enforcement). {@code configVersion} is sent back with a request; the UI doesn't show it.
+ * <p>AGF BE-5a (register §49): {@code selectionRequired} is present only while the cut-over instant
+ * ({@code app.monetization.plan-selection-required-from}) is configured. True only for a restaurant created at or after it
+ * that has never had a subscription or trial, has no pending plan request and no payment under review. Navigation only:
+ * nothing (publishing, drafts, requests, trials) is restricted by it.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record OwnerPlanView(boolean visible, String setting, Integer configVersion, List<Plan> plans, Subscription current,
                             PlanRequestSummary pendingRequest, Boolean canRequest, Boolean trialAvailable, Boolean featuresUnaffected,
                             Trial trial, EndedPlan endedPlan, SelfService selfService, List<Price> prices,
-                            PaymentUnderReview paymentUnderReview, Boolean trialEligible) {
+                            PaymentUnderReview paymentUnderReview, Boolean trialEligible,
+                            Boolean selectionRequired) {
 
     public static OwnerPlanView hidden() {
-        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**

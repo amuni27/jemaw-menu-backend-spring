@@ -94,6 +94,7 @@ public class PlanRequestService {
     private final PlanPriceService planPrices;
     private final com.agafari.com.billing.PaymentReview paymentReview;
     private final TrialService trials;
+    private volatile Instant selectionRequiredFrom;
 
     public PlanRequestService(PlanRequestRepository requests, BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs,
                               SubscriptionPlanRepository plans, BusinessRepository businesses, UserRepository users,
@@ -102,7 +103,9 @@ public class PlanRequestService {
                               @Value("${app.monetization.owner-plans-visible:false}") boolean ownerPlansVisible,
                               GrandfatheringService grandfathering, EmailVerificationService emailVerification,
                               @Value("${app.monetization.self-service-enabled:false}") boolean selfServiceEnabled, SubscriptionLifecycle lifecycle, PlanPriceService planPrices,
-                              com.agafari.com.billing.PaymentReview paymentReview, TrialService trials) {
+                              com.agafari.com.billing.PaymentReview paymentReview, TrialService trials,
+                              @Value("${app.monetization.plan-selection-required-from:}") String selectionRequiredFrom) {
+        this.selectionRequiredFrom = parseSelectionRequiredFrom(selectionRequiredFrom);
         this.trials = trials;
         this.planPrices = planPrices;
         this.paymentReview = paymentReview;
@@ -146,6 +149,24 @@ public class PlanRequestService {
                 .map(u -> !emailVerification.verified(u)).orElse(true);
     }
 
+    /**
+     * AGF BE-5a (register §49 Q3): restaurants created at or after this instant are new and must choose how to start;
+     * earlier ones (P-6) never are. Empty (the default): {@code selectionRequired} is absent. An invalid value stops startup.
+     */
+    public static Instant parseSelectionRequiredFrom(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return Instant.parse(value.trim());
+        } catch (java.time.format.DateTimeParseException e) {
+            throw new IllegalStateException("app.monetization.plan-selection-required-from must be an ISO-8601 instant such as 2026-12-01T00:00:00Z", e);
+        }
+    }
+
+    /** Tests only: the cut-over itself comes from configuration. */
+    public void setSelectionRequiredFrom(Instant from) {
+        this.selectionRequiredFrom = from;
+    }
+
     /** Tests only: the flag itself comes from configuration. */
     public void setOwnerPlansVisible(boolean visible) {
         this.ownerPlansVisible = visible;
@@ -179,11 +200,26 @@ public class PlanRequestService {
         // AGF Self-Service Phase A: a free enabled plan can be started while there is no current subscription
         OwnerPlanView.SelfService selfService = !selfServiceEnabled ? null : new OwnerPlanView.SelfService(
                 setting2 && currentRow == null && eligible.stream().anyMatch(p -> !p.paid()), verificationRequired(businessId));
+        OwnerPlanView.PaymentUnderReview review = paymentReview.current(businessId).orElse(null);
         return new OwnerPlanView(true, config.getSetting().name(), config.getVersion(), eligible, current, pending,
                 setting2 && currentRow == null && pending == null, trial != null, true, trial, endedPlan, selfService, priceView(businessId, config, now),
-                paymentReview.current(businessId).orElse(null),
+                review,
                 // AGF BE-1: present only while trials are enabled, so the response is unchanged with the flag off
-                trials.isEnabled() ? trials.eligibleForOwner(businessId, config, currentRow != null, pending != null) : null);
+                trials.isEnabled() ? trials.eligibleForOwner(businessId, config, currentRow != null, pending != null) : null,
+                selectionRequired(businessId, currentRow != null || pending != null || review != null));
+    }
+
+    /**
+     * AGF BE-5a (register §49): absent without a cut-over. A pending request or a payment under review counts as chosen;
+     * any earlier subscription or trial too (D-6: after it ended the owner gets a reminder, never "required" again).
+     */
+    private Boolean selectionRequired(String businessId, boolean chosenNow) {
+        Instant from = selectionRequiredFrom;
+        if (from == null) return null;
+        if (chosenNow) return false;
+        Instant createdAt = businesses.findById(businessId).map(Business::getCreatedAt).orElse(null);
+        if (createdAt == null || createdAt.isBefore(from)) return false; // P-6: existing restaurants are never asked
+        return !subscriptions.existsByBusinessId(businessId);
     }
 
     /** AGF SUB-R3-02: null (absent from the response) unless prices are visible in the market of this restaurant's stored country. */

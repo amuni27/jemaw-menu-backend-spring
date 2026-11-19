@@ -57,6 +57,9 @@ public interface BusinessSubscriptionRepository extends Repository<BusinessSubsc
 
     boolean existsByBusinessIdAndSource(String businessId, String source);
 
+    /** AGF BE-5a: whether the restaurant has ever had a subscription or trial, in any state. */
+    boolean existsByBusinessId(String businessId);
+
     /** AGF E4-M6: current non-trial subscriptions (the only ones that can be grandfathered). */
     @Query("select s from BusinessSubscription s where s.status <> 'EXPIRED' and s.source <> 'TRIAL'")
     List<BusinessSubscription> findCurrentNonTrial();

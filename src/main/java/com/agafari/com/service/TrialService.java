@@ -5,6 +5,7 @@ import com.agafari.com.subscription.ManualRecord;
 import com.agafari.com.subscription.SubscriptionLifecycle;
 import com.agafari.com.dto.request.TrialConvertRequest;
 import com.agafari.com.dto.request.TrialStartRequest;
+import com.agafari.com.dto.response.SubscriptionActivationResponse;
 import com.agafari.com.dto.response.SubscriptionResponse;
 import com.agafari.com.dto.response.TrialIntentOverview;
 import com.agafari.com.dto.response.TrialIntentSummary;
@@ -13,6 +14,7 @@ import com.agafari.com.exception.ConfigVersionConflictException;
 import com.agafari.com.exception.FieldValidationException;
 import com.agafari.com.exception.ForbiddenException;
 import com.agafari.com.exception.NotFoundException;
+import com.agafari.com.exception.OwnerTrialRefusedException;
 import com.agafari.com.exception.PlanNotEnabledException;
 import com.agafari.com.exception.PlanRequestPendingException;
 import com.agafari.com.exception.SubscriptionExistsException;
@@ -30,6 +32,7 @@ import com.agafari.com.security.AdminAuditService;
 import com.agafari.com.security.LogMasking;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -45,6 +48,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * AGF E4-M5: Model 1 trials (approved E4-Q2/Q4, D-M5-1…13).
@@ -330,6 +334,54 @@ public class TrialService {
         }
     }
 
+    /**
+     * AGF BE-1 (register §45 D-3, §46): the owner starts the restaurant's Model 1 trial themselves. The caller
+     * ({@link OwnerTrialService}) has checked the flags and email verification and passes the restaurant and the owner from
+     * the session. The same rules and lock order as the admin start: the current configuration is Setting 1 at the version
+     * the owner saw, no current subscription, no pending plan request, one trial per restaurant ever; the trial is created
+     * by the single writer and audited as the owner's, and a pending registration intent is resolved by it (Q1; MANUAL,
+     * the resolution V16 allows for a start outside the intent's own paths). A repeated or concurrent click returns the
+     * restaurant's current trial (created = false); the one-trial and one-current indexes are the last guard.
+     */
+    public SubscriptionActivationResponse startForOwner(String businessId, int expectedConfigVersion, String ownerId, String ownerLabel) {
+        expirer.expireDueOnTouch(businessId); // an effectively ended trial is no longer current (and stays used)
+        grandfathering.expireDueOnTouch(businessId);
+        try {
+            return transaction.execute(status -> {
+                locks.configShared();
+                locks.restaurant(businessId);
+                MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElseThrow(OwnerTrialRefusedException::notConfigured);
+                if (!config.getVersion().equals(expectedConfigVersion)) throw OwnerTrialRefusedException.versionConflict();
+                if (config.getSetting() != MonetizationSetting.SETTING_1) throw OwnerTrialRefusedException.notOffered();
+                lifecycle.materialize(businessId);
+                Optional<BusinessSubscription> current = subscriptions.findCurrentByBusinessId(businessId);
+                if (current.isPresent()) {
+                    if (current.get().isTrial()) return activation(current.get(), false); // a repeated click
+                    throw OwnerTrialRefusedException.exists();
+                }
+                if (planRequests.findPendingByBusinessId(businessId).isPresent()) throw OwnerTrialRefusedException.pending();
+                if (subscriptions.existsByBusinessIdAndSource(businessId, BusinessSubscription.TRIAL)) throw OwnerTrialRefusedException.used();
+                BusinessSubscription trial = insertTrial(businessId, config, ownerId, ownerId, ownerLabel, " by owner");
+                intents.resolve(businessId, TrialIntent.STARTED, TrialIntent.MANUAL, trial.getId(), clock.now()); // Q1: a pending intent, if any
+                return activation(trial, true);
+            });
+        } catch (DataIntegrityViolationException e) {
+            // a concurrent start won the one-trial / one-current index: the same click
+            return subscriptions.findCurrentByBusinessId(businessId).filter(BusinessSubscription::isTrial).map(s -> activation(s, false))
+                    .orElseThrow(OwnerTrialRefusedException::used);
+        }
+    }
+
+    private static SubscriptionActivationResponse activation(BusinessSubscription s, boolean created) {
+        return new SubscriptionActivationResponse(s.getId(), s.getPlanCode(), s.getStatus(), created, null);
+    }
+
+    /** AGF BE-1: whether the owner could start the trial now (shown as {@code trialEligible} while trials are enabled). */
+    public boolean eligibleForOwner(String businessId, MonetizationConfig config, boolean hasCurrent, boolean hasPending) {
+        return config.getSetting() == MonetizationSetting.SETTING_1 && !hasCurrent && !hasPending
+                && !subscriptions.existsByBusinessIdAndSource(businessId, BusinessSubscription.TRIAL);
+    }
+
     private MonetizationConfig currentSetting1(int expectedConfigVersion) {
         MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElseThrow(ConfigVersionConflictException::new);
         if (!config.getVersion().equals(expectedConfigVersion)) throw new ConfigVersionConflictException();
@@ -342,7 +394,8 @@ public class TrialService {
         Instant now = clock.now();
         BusinessSubscription trial = lifecycle.startTrial(businessId, config.getVersion(), now, now.plus(duration), new Actor(createdBy)); // AGF SUB-R2-04
         audit.success(STARTED, actorId, actorLabel, TARGET, trial.getId(), "MODEL_1 TRIAL config=" + config.getVersion() + " periodEnd=" + trial.getPeriodEnd() + detail);
-        log.info("event=trial.started businessId={} subscriptionId={} by={}", businessId, trial.getId(), actorId == null ? "system" : "admin");
+        log.info("event=trial.started businessId={} subscriptionId={} by={}", businessId, trial.getId(),
+                actorId == null ? "system" : actorId.equals(createdBy) && detail.startsWith(" by owner") ? "owner" : "admin");
         return trial;
     }
 

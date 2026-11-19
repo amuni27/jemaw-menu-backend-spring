@@ -14,10 +14,10 @@ import java.util.List;
 public record OwnerPlanView(boolean visible, String setting, Integer configVersion, List<Plan> plans, Subscription current,
                             PlanRequestSummary pendingRequest, Boolean canRequest, Boolean trialAvailable, Boolean featuresUnaffected,
                             Trial trial, EndedPlan endedPlan, SelfService selfService, List<Price> prices,
-                            PaymentUnderReview paymentUnderReview) {
+                            PaymentUnderReview paymentUnderReview, Boolean trialEligible) {
 
     public static OwnerPlanView hidden() {
-        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**

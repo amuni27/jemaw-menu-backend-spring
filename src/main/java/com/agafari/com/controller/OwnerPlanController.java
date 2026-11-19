@@ -6,8 +6,10 @@ import com.agafari.com.dto.response.OwnerPlanView;
 import com.agafari.com.dto.response.PlanRequestResponse;
 import com.agafari.com.security.CurrentUser;
 import com.agafari.com.dto.request.SubscriptionActivationRequest;
+import com.agafari.com.dto.request.TrialStartRequest;
 import com.agafari.com.dto.response.SubscriptionActivationResponse;
 import com.agafari.com.service.PlanRequestService;
+import com.agafari.com.service.OwnerTrialService;
 import com.agafari.com.service.SelfServiceActivationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -31,6 +33,7 @@ public class OwnerPlanController {
     private final CurrentUser currentUser;
     private final PlanRequestService service;
     private final SelfServiceActivationService selfService;
+    private final OwnerTrialService ownerTrial;
 
     @GetMapping
     public ResponseEntity<OwnerPlanView> view() {
@@ -47,6 +50,16 @@ public class OwnerPlanController {
     @PostMapping("/activations")
     public ResponseEntity<SubscriptionActivationResponse> activate(@RequestBody SubscriptionActivationRequest request) {
         SubscriptionActivationResponse response = selfService.activate(currentUser.businessId(), request, currentUser.userId(), currentUser.email());
+        return ResponseEntity.status(response.created() ? HttpStatus.CREATED : HttpStatus.OK).body(response);
+    }
+
+    /**
+     * AGF BE-1: the owner starts the restaurant's free trial (201), or repeats the click (200, the same trial). The
+     * restaurant and the owner come from the token only; the body carries just the configuration version the owner saw.
+     */
+    @PostMapping("/trial")
+    public ResponseEntity<SubscriptionActivationResponse> startTrial(@RequestBody(required = false) TrialStartRequest request) {
+        SubscriptionActivationResponse response = ownerTrial.start(currentUser.businessId(), request, currentUser.userId(), currentUser.email());
         return ResponseEntity.status(response.created() ? HttpStatus.CREATED : HttpStatus.OK).body(response);
     }
 

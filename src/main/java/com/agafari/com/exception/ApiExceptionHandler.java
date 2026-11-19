@@ -186,6 +186,12 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(HttpStatus.CONFLICT, ScheduledChangeRefusedException.CODE, e.getMessage()));
     }
 
+    /** AGF BE-1: an owner's free-trial start refused. */
+    @ExceptionHandler(OwnerTrialRefusedException.class)
+    public ResponseEntity<ApiError> ownerTrialRefused(OwnerTrialRefusedException e) {
+        return ResponseEntity.status(e.status()).body(ApiError.of(e.status(), e.code(), e.getMessage()));
+    }
+
     @ExceptionHandler(SelfServiceRefusedException.class)
     public ResponseEntity<ApiError> selfServiceRefused(SelfServiceRefusedException e) {
         return ResponseEntity.status(e.status()).body(ApiError.of(e.status(), e.code(), e.getMessage()));

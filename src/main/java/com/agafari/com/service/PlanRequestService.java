@@ -93,6 +93,7 @@ public class PlanRequestService {
     private final SubscriptionLifecycle lifecycle;
     private final PlanPriceService planPrices;
     private final com.agafari.com.billing.PaymentReview paymentReview;
+    private final TrialService trials;
 
     public PlanRequestService(PlanRequestRepository requests, BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs,
                               SubscriptionPlanRepository plans, BusinessRepository businesses, UserRepository users,
@@ -101,7 +102,8 @@ public class PlanRequestService {
                               @Value("${app.monetization.owner-plans-visible:false}") boolean ownerPlansVisible,
                               GrandfatheringService grandfathering, EmailVerificationService emailVerification,
                               @Value("${app.monetization.self-service-enabled:false}") boolean selfServiceEnabled, SubscriptionLifecycle lifecycle, PlanPriceService planPrices,
-                              com.agafari.com.billing.PaymentReview paymentReview) {
+                              com.agafari.com.billing.PaymentReview paymentReview, TrialService trials) {
+        this.trials = trials;
         this.planPrices = planPrices;
         this.paymentReview = paymentReview;
         this.lifecycle = lifecycle;
@@ -179,7 +181,9 @@ public class PlanRequestService {
                 setting2 && currentRow == null && eligible.stream().anyMatch(p -> !p.paid()), verificationRequired(businessId));
         return new OwnerPlanView(true, config.getSetting().name(), config.getVersion(), eligible, current, pending,
                 setting2 && currentRow == null && pending == null, trial != null, true, trial, endedPlan, selfService, priceView(businessId, config, now),
-                paymentReview.current(businessId).orElse(null));
+                paymentReview.current(businessId).orElse(null),
+                // AGF BE-1: present only while trials are enabled, so the response is unchanged with the flag off
+                trials.isEnabled() ? trials.eligibleForOwner(businessId, config, currentRow != null, pending != null) : null);
     }
 
     /** AGF SUB-R3-02: null (absent from the response) unless prices are visible in the market of this restaurant's stored country. */

@@ -9,7 +9,11 @@ import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
-/** AGF E4-M5: registers a restaurant through the real API (where trials start) and reads it back. */
+/**
+ * AGF E4-M5: registers a restaurant through the real API and reads it back. AGF BE-2 (register §45 D-3, §48): registration
+ * no longer starts trials or records intents, so recovery tests seed the PENDING intents that registrations recorded before
+ * BE-2 (Q1: those are still recovered).
+ */
 final class TrialTestSupport {
 
     private TrialTestSupport() {
@@ -22,6 +26,12 @@ final class TrialTestSupport {
                  "businessPhone":"+2519%s","customSubdomain":"%s","open24_7":true,"country":"ET",
                  "locationUrl":"https://maps.app.goo.gl/AbC123xyz"}""".formatted(suffix, suffix,
                 String.valueOf(System.nanoTime()).substring(0, 8), suffix)));
+    }
+
+    /** AGF BE-2: a PENDING intent as a registration recorded it before BE-2 (its after-commit step never ran). */
+    static void legacyPendingIntent(JdbcTemplate jdbc, String businessId, int configVersion) {
+        jdbc.update("insert into trial_intent (business_id, config_version, status, failed_attempts, created_at, row_version) "
+                + "values (?, ?, 'PENDING', 0, clock_timestamp(), 0)", businessId, configVersion);
     }
 
     static String businessOf(JdbcTemplate jdbc, String label) {

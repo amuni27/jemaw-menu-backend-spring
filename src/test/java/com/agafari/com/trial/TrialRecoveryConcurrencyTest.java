@@ -2,13 +2,16 @@ package com.agafari.com.trial;
 
 import com.agafari.com.jpa.entity.User;
 import com.agafari.com.service.MonetizationLocks;
+import com.agafari.com.service.PlanRequestService;
 import com.agafari.com.service.TrialService;
 import com.agafari.com.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import com.jayway.jsonpath.JsonPath;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -22,24 +25,30 @@ import java.util.concurrent.TimeUnit;
 
 import static com.agafari.com.support.MonetizationFixtures.config;
 import static com.agafari.com.trial.TrialTestSupport.businessOf;
+import static com.agafari.com.trial.TrialTestSupport.legacyPendingIntent;
 import static com.agafari.com.trial.TrialTestSupport.register;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * AGF E4-M5 recovery (AC-R6), real PostgreSQL, deterministic: connection A holds the lock the application takes and an
  * uncommitted change; the job's retry waits on it; A commits. Fulfilment in progress elsewhere, a trial created
  * elsewhere, a configuration change, and a second job instance: always exactly one consistent outcome, never two trials.
+ * AGF BE-2 (§48): the pending intent is one recorded at registration before BE-2 (Q1); an owner start (BE-1) racing the
+ * recovery of that intent also ends with exactly one trial.
  */
 class TrialRecoveryConcurrencyTest extends AbstractIntegrationTest {
 
     @Autowired private JdbcTemplate jdbc;
     @Autowired private DataSource dataSource;
     @Autowired private TrialService trials;
+    @Autowired private PlanRequestService planRequests;
 
     private User admin;
     private String businessId;
+    private String ownerToken;
     private ExecutorService pool;
 
     @BeforeEach
@@ -47,20 +56,31 @@ class TrialRecoveryConcurrencyTest extends AbstractIntegrationTest {
         trials.setEnabled(true);
         admin = data.admin("recovery-racer");
         config(jdbc, 1, "SETTING_1", false, false, false, admin.getId());
-        trials.setAfterCommitEnabled(false); // a registration whose after-commit step never ran
-        try {
-            register(mockMvc, "recovery-race").andExpect(status().isCreated());
-        } finally {
-            trials.setAfterCommitEnabled(true);
-        }
+        ownerToken = JsonPath.read(register(mockMvc, "recovery-race").andExpect(status().isCreated()).andReturn().getResponse().getContentAsString(), "$.token");
         businessId = businessOf(jdbc, "recovery-race");
-        pool = Executors.newFixedThreadPool(1);
+        legacyPendingIntent(jdbc, businessId, 1); // recorded before BE-2; its after-commit step never ran
+        pool = Executors.newFixedThreadPool(2);
     }
 
     @AfterEach
     void tearDown() {
         pool.shutdownNow();
         trials.setEnabled(false);
+        planRequests.setOwnerPlansVisible(false);
+    }
+
+    private int ownerStart() throws Exception {
+        return mockMvc.perform(post("/api/plan/trial").header("Authorization", "Bearer " + ownerToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedConfigVersion\":1}")).andReturn().getResponse().getStatus();
+    }
+
+    private void waitForWaiters(String what, String condition, int waiters) throws InterruptedException {
+        for (int i = 0; i < 200; i++) {
+            Integer n = jdbc.queryForObject("select count(*) from pg_stat_activity where wait_event_type = 'Lock' and " + condition, Integer.class);
+            if (n != null && n >= waiters) return;
+            Thread.sleep(50);
+        }
+        fail("never saw " + waiters + " waiting on " + what);
     }
 
     private void waitFor(String what, String condition) throws InterruptedException {
@@ -171,5 +191,44 @@ class TrialRecoveryConcurrencyTest extends AbstractIntegrationTest {
         assertThat(intentStatus()).isEqualTo("PENDING/-");
         assertThat(trials.runRecovery()).isEqualTo(1);
         assertThat(trials()).isEqualTo(1);
+    }
+
+    @Test
+    void anOwnerStartRacingTheRecoveryOfALegacyIntentCreatesExactlyOneTrial() throws Exception {
+        planRequests.setOwnerPlansVisible(true);
+        jdbc.update("update users set email_verified_at = now() where id = (select owner_user_id from business where id = ?)", businessId);
+        Future<Integer> owner, job;
+        try (Connection a = dataSource.getConnection()) {
+            a.setAutoCommit(false);
+            lockRestaurant(a); // both writers queue on the restaurant lock, then race
+            owner = pool.submit(this::ownerStart);
+            job = pool.submit(() -> trials.runRecovery());
+            waitForWaiters("the restaurant lock", "query like 'select id from business where id%'", 2);
+            a.commit();
+        }
+        int ownerStatus = owner.get(30, TimeUnit.SECONDS), recovered = job.get(30, TimeUnit.SECONDS);
+        assertThat(trials()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from business_subscription where business_id = ? and source = 'TRIAL'", Integer.class, businessId)).isEqualTo(1);
+        // whichever wins, the other sees its trial: the owner gets it back (200), or the job finds the intent resolved (0)
+        if (ownerStatus == 201) {
+            assertThat(recovered).isZero();
+            assertThat(intentStatus()).isEqualTo("STARTED/MANUAL");
+        } else {
+            assertThat(ownerStatus).isEqualTo(200);
+            assertThat(recovered).isEqualTo(1);
+            assertThat(intentStatus()).isEqualTo("STARTED/RETRY");
+        }
+        assertThat(jdbc.queryForObject("select count(*) from admin_audit_event where action = 'TRIAL_STARTED'", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from admin_audit_event where action = 'TRIAL_START_FAILED'", Integer.class)).isZero();
+    }
+
+    @Test
+    void eitherOrderSequentiallyAlsoEndsWithOneTrial() throws Exception {
+        planRequests.setOwnerPlansVisible(true);
+        jdbc.update("update users set email_verified_at = now() where id = (select owner_user_id from business where id = ?)", businessId);
+        assertThat(trials.runRecovery()).isEqualTo(1); // the legacy intent is recovered first
+        assertThat(ownerStart()).isEqualTo(200); // the owner's click returns that trial
+        assertThat(trials()).isEqualTo(1);
+        assertThat(intentStatus()).isEqualTo("STARTED/RETRY");
     }
 }

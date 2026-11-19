@@ -173,11 +173,15 @@ class TrialEndDateTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void automaticTrialsKeepTheirThirtyDaysAndCarryTheRestaurantsTimeZone() throws Exception {
+    void ownerStartedTrialsKeepTheirThirtyDaysAndCarryTheRestaurantsTimeZone() throws Exception {
+        // AGF BE-2: registration no longer starts trials (it did here before); the owner starts it (BE-1)
         planRequests.setOwnerPlansVisible(true);
         String token = com.jayway.jsonpath.JsonPath.read(TrialTestSupport.register(mockMvc, "end-auto").andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString(), "$.token");
         String businessId = TrialTestSupport.businessOf(jdbc, "end-auto");
+        jdbc.update("update users set email_verified_at = now() where id = (select owner_user_id from business where id = ?)", businessId);
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/plan/trial").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"expectedConfigVersion\":1}")).andExpect(status().isCreated());
         assertThat(jdbc.queryForObject("select period_end - created_at = interval '30 days' from business_subscription where business_id = ?",
                 Boolean.class, businessId)).isTrue();
         mockMvc.perform(get("/api/plan").header("Authorization", "Bearer " + token))

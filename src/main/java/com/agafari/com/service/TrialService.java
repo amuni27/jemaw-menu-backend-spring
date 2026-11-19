@@ -38,8 +38,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
@@ -53,10 +51,10 @@ import java.util.Optional;
 /**
  * AGF E4-M5: Model 1 trials (approved E4-Q2/Q4, D-M5-1…13).
  * <ul>
- *   <li>Start: an eligible registration (trials enabled, Setting 1 current) commits a durable intent; the trial is created
- *   after the commit in its own transaction, or by the daily retry after a failure or a process stop (D-M5-3 and the
- *   recovery correction; failures are audited as TRIAL_START_FAILED and never fail the registration). Or by the Super
- *   Admin for one eligible restaurant (D-M5-8). At most one trial per restaurant, ever.</li>
+ *   <li>Start: by the owner (BE-1, {@link #startForOwner}) or by the Super Admin (D-M5-8) for one eligible restaurant. At
+ *   most one trial per restaurant, ever. AGF BE-2 (register §45 D-3 B, §48): registration no longer starts trials or
+ *   records intents; the intents registrations recorded before BE-2 are still created by the daily retry
+ *   ({@link #runRecovery}, Q1; failures are audited as TRIAL_START_FAILED).</li>
  *   <li>Expiry: the daily job (one run at a time) and expire-on-touch, both through {@link TrialExpirer}. Expiry changes
  *   nothing for owners, QR menus or guests (status and in-app notice only).</li>
  *   <li>Convert: one transaction ends the trial (kept, frozen) and records a MANUAL Model 1 subscription, "no payment
@@ -93,7 +91,6 @@ public class TrialService {
     private final GrandfatheringService grandfathering;
     private final SubscriptionLifecycle lifecycle;
     private volatile boolean enabled;
-    private volatile boolean afterCommitEnabled = true;
     private volatile int recoveryBatchSize;
 
     public TrialService(BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs, PlanRequestRepository planRequests,
@@ -129,37 +126,6 @@ public class TrialService {
     /** Tests only: the flag itself comes from configuration. */
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
-    }
-
-    /**
-     * Called by registration inside its transaction, after the restaurant row exists (D-M5-3 and the recovery correction,
-     * 2026-11-02). With trials disabled it does nothing (no lock, no query, no callback). Otherwise, under the configuration
-     * lock, an eligible registration (Setting 1 current) commits a durable PENDING intent with it; the trial itself is
-     * created after the commit in its own transaction, or later by the daily retry. A registration that rolls back leaves
-     * no intent and no trial; a trial failure never fails the registration.
-     */
-    public void startAtRegistration(String businessId) {
-        if (!enabled) return;
-        locks.configShared();
-        MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElse(null);
-        if (config == null || config.getSetting() != MonetizationSetting.SETTING_1) return;
-        intents.saveAndFlush(TrialIntent.pending(businessId, config.getVersion(), clock.now()));
-        if (!afterCommitEnabled) return;
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            fulfil(businessId, TrialIntent.AFTER_COMMIT);
-            return;
-        }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                fulfil(businessId, TrialIntent.AFTER_COMMIT);
-            }
-        });
-    }
-
-    /** Tests only: simulates a process that stops right after the registration commits (the after-commit step never runs). */
-    public void setAfterCommitEnabled(boolean afterCommitEnabled) {
-        this.afterCommitEnabled = afterCommitEnabled;
     }
 
     /** Tests only: the batch size comes from configuration. */

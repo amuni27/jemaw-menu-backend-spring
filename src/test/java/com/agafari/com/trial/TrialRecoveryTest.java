@@ -22,6 +22,7 @@ import java.util.UUID;
 
 import static com.agafari.com.support.MonetizationFixtures.config;
 import static com.agafari.com.trial.TrialTestSupport.businessOf;
+import static com.agafari.com.trial.TrialTestSupport.legacyPendingIntent;
 import static com.agafari.com.trial.TrialTestSupport.register;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
@@ -31,8 +32,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * AGF E4-M5 recovery (V16, AC-R1…AC-R9): an eligible registration commits a durable trial intent; the trial is created
- * after the commit or, after a failure or a process stop, by the existing daily job. Exactly one trial, starting when it
+ * AGF E4-M5 recovery (V16, AC-R1…AC-R9): an eligible registration committed a durable trial intent; the trial was created
+ * after the commit or, after a failure or a process stop, by the existing daily job. AGF BE-2 (§48): new registrations record
+ * no intent; the intents recorded before BE-2 are seeded here and are still recovered by the daily job (Q1). Exactly one trial, starting when it
  * is created. Pending intents are kept while Setting 2 is current or trials are disabled; failing intents can't starve
  * newer ones. Failures are made real by a temporary database trigger that refuses trials for restaurants named
  * "Trial fail…" (dropped after each test).
@@ -58,7 +60,6 @@ class TrialRecoveryTest extends AbstractIntegrationTest {
         jdbc.execute("drop trigger if exists test_failing_trial on business_subscription");
         jdbc.execute("drop function if exists test_failing_trial()");
         trials.setEnabled(false);
-        trials.setAfterCommitEnabled(true);
         trials.setRecoveryBatchSize(100);
         planRequests.setOwnerPlansVisible(false);
         clock.reset();
@@ -81,15 +82,11 @@ class TrialRecoveryTest extends AbstractIntegrationTest {
         jdbc.execute("drop trigger test_failing_trial on business_subscription");
     }
 
-    /** A registration whose process stops right after the commit: the after-commit trial step never runs. */
+    /** A restaurant registered before BE-2 whose intent is still pending (the after-commit trial step never ran). */
     private String interruptedRegistration(String label) throws Exception {
-        trials.setAfterCommitEnabled(false);
-        try {
-            register(mockMvc, label).andExpect(status().isCreated());
-        } finally {
-            trials.setAfterCommitEnabled(true);
-        }
-        return businessOf(jdbc, label);
+        String businessId = registered(label);
+        legacyPendingIntent(jdbc, businessId, 1);
+        return businessId;
     }
 
     private String registered(String label) throws Exception {
@@ -114,12 +111,24 @@ class TrialRecoveryTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void acR1R2AnEligibleRegistrationCommitsAnIntentThatTheAfterCommitStepStarts() throws Exception {
-        String businessId = registered("intent-ok");
-        assertThat(intent(businessId)).containsEntry("status", "STARTED").containsEntry("resolution", "AFTER_COMMIT")
-                .containsEntry("config_version", 1).containsEntry("failed_attempts", 0).containsEntry("subscription_id", trialIdOf(businessId));
-        assertThat(jdbc.queryForObject("select detail from admin_audit_event where action = 'TRIAL_STARTED'", String.class))
-                .contains("path=AFTER_COMMIT").contains("intentConfig=1");
+    void acR1R2NewRegistrationsRecordNoIntentAndStartNoTrialWhileEarlierAfterCommitStartsStayAsTheyAre() throws Exception {
+        String businessId = registered("intent-ok"); // eligible before BE-2: trials enabled, Setting 1 current
+        assertThat(count("select count(*) from trial_intent where business_id = ?", businessId)).isZero();
+        assertThat(trialsOf(businessId)).isZero();
+        assertThat(count("select count(*) from admin_audit_event where action like 'TRIAL%'")).isZero();
+
+        String earlier = registered("intent-earlier"); // started after its commit before BE-2: kept untouched
+        String trialId = UUID.randomUUID().toString();
+        jdbc.update("insert into business_subscription (id, business_id, plan_code, status, config_version, period_end, source, created_at, "
+                + "created_by_user_id, updated_at, updated_by_user_id, row_version) values (?, ?, 'MODEL_1', 'TRIAL', 1, now() + interval '30 days', "
+                + "'TRIAL', now(), 'system', now(), 'system', 0)", trialId, earlier);
+        legacyPendingIntent(jdbc, earlier, 1); // recorded at registration, then resolved by the after-commit step (V16 allows only PENDING inserts)
+        jdbc.update("update trial_intent set status = 'STARTED', resolution = 'AFTER_COMMIT', subscription_id = ?, resolved_at = now(), "
+                + "row_version = row_version + 1 where business_id = ?", trialId, earlier);
+        Map<String, Object> before = intent(earlier);
+        assertThat(trials.runRecovery()).isZero();
+        assertThat(intent(earlier)).isEqualTo(before);
+        assertThat(trialsOf(earlier)).isEqualTo(1);
     }
 
     @Test
@@ -153,7 +162,8 @@ class TrialRecoveryTest extends AbstractIntegrationTest {
     @Test
     void acR4AFailedStartStaysPendingIsAuditedAndIsRetriedUntilItSucceeds() throws Exception {
         failTrialsForRestaurantsNamedFail();
-        String businessId = registered("fail-retry"); // the after-commit attempt fails; the registration doesn't
+        String businessId = interruptedRegistration("fail-retry");
+        assertThat(trials.runRecovery()).isZero(); // the first attempt fails
 
         assertThat(intent(businessId)).containsEntry("status", "PENDING").containsEntry("failed_attempts", 1);
         assertThat((String) intent(businessId).get("last_error")).isNotBlank().doesNotContain("test: trial insert refused");
@@ -172,9 +182,9 @@ class TrialRecoveryTest extends AbstractIntegrationTest {
 
     @Test
     void acR5RetryingAgainChangesNothing() throws Exception {
-        String started = registered("idempotent-started");
+        String started = interruptedRegistration("idempotent-started");
         String recovered = interruptedRegistration("idempotent-recovered");
-        assertThat(trials.runRecovery()).isEqualTo(1);
+        assertThat(trials.runRecovery()).isEqualTo(2);
         Map<String, Object> before = intent(recovered);
         int audits = count("select count(*) from admin_audit_event");
 
@@ -282,7 +292,8 @@ class TrialRecoveryTest extends AbstractIntegrationTest {
     @Test
     void acR9TheSuperAdminSeesPendingIntentsAndThoseThatNeedAttentionButOwnersSeeNothing() throws Exception {
         failTrialsForRestaurantsNamedFail();
-        String failing = registered("fail-visible"); // 1 failed attempt
+        String failing = interruptedRegistration("fail-visible");
+        trials.runRecovery(); // 1 failed attempt
         trials.runRecovery();
         trials.runRecovery(); // 3 failed attempts
         String waiting = interruptedRegistration("pending-visible");

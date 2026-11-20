@@ -151,6 +151,12 @@ class AuthenticStripeContractTest {
         stub.on("GET", "/v1/invoices/" + str("r_invoice_cycle_verify", "id"), c -> ok("r_invoice_cycle_verify"));
         stub.on("GET", "/v1/invoices/" + str("r_invoice_create_verify", "id"), c -> ok("r_invoice_create_verify"));
         stub.on("GET", "/v1/checkout/sessions", c -> sub.equals(c.params().get("subscription")) ? ok("r_sessions_by_sub") : StripeStub.error(400, "invalid_request_error", "unexpected"));
+        // AGF SUB-R5-03: a renewal's evidence re-fetches its PaymentIntent and subscription. Q6 captured neither for the cycle
+        // invoice, so the PaymentIntent is SYNTHETIC (authentic id, amount, customer) and the subscription is the authentic one.
+        String pi = str("r_invoice_cycle_verify", "payments.data[0].payment.payment_intent");
+        stub.on("GET", "/v1/payment_intents/" + pi, c -> StripeStub.ok(RenewalFixtures.succeededPaymentIntent(pi, num("r_invoice_cycle_verify", "amount_paid"),
+                str("r_invoice_cycle_verify", "customer"))));
+        stub.on("GET", "/v1/subscriptions/" + sub, c -> ok("r_subscription_create"));
     }
 
     @Test
@@ -160,8 +166,10 @@ class AuthenticStripeContractTest {
         assertThat(str("r_invoice_cycle_verify", "billing_reason")).isEqualTo("subscription_cycle");
         VerifiedPayment v = client.verifyPayment(cycle);
         assertThat(v.status()).isEqualTo(ProviderPaymentStatus.SUCCEEDED);
-        assertThat(v.metadata()).as("D6: a renewal → quarantine").isEmpty();
-        assertThat(v.billing()).isNull();
+        assertThat(v.metadata()).as("D6/§37: never a checkout identity").isEmpty();
+        // AGF SUB-R5-03 (supersedes the R5-02 F2 quarantine): renewal evidence, owned only through its subscription
+        assertThat(v.billing().renewal()).isTrue();
+        assertThat(v.billing().subscriptionRef()).isEqualTo(str("r_subscription_create", "id"));
         assertThat(stub.calls("GET", "/v1/checkout/sessions")).as("not even correlated").isEmpty();
     }
 

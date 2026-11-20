@@ -123,20 +123,29 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
     private final ExceptionService exceptions;
     private final RefundService refunds;
     private final JobQueue jobs; // AGF SUB-R5-02 (D4); null in the R4 constructor: no provider subscription is ever cancelled
+    private final RenewalOutcomes renewals; // AGF SUB-R5-03; null in the older constructors: a renewal is quarantined as before
 
     public PaymentOutcomeService(JdbcTemplate jdbc, BillingStrategyRegistry registry, MonetizationLocks locks, SubscriptionLifecycle lifecycle,
                                  BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs, MonetizationClock clock,
                                  PlatformTransactionManager transactions, AdminAuditService audit, ObjectMapper mapper, BillingFlags flags, ExceptionService exceptions,
                                  RefundService refunds) {
-        this(jdbc, registry, locks, lifecycle, subscriptions, configs, clock, transactions, audit, mapper, flags, exceptions, refunds, null);
+        this(jdbc, registry, locks, lifecycle, subscriptions, configs, clock, transactions, audit, mapper, flags, exceptions, refunds, null, null);
+    }
+
+    public PaymentOutcomeService(JdbcTemplate jdbc, BillingStrategyRegistry registry, MonetizationLocks locks, SubscriptionLifecycle lifecycle,
+                                 BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs, MonetizationClock clock,
+                                 PlatformTransactionManager transactions, AdminAuditService audit, ObjectMapper mapper, BillingFlags flags, ExceptionService exceptions,
+                                 RefundService refunds, JobQueue jobs) {
+        this(jdbc, registry, locks, lifecycle, subscriptions, configs, clock, transactions, audit, mapper, flags, exceptions, refunds, jobs, null);
     }
 
     @Autowired
     public PaymentOutcomeService(JdbcTemplate jdbc, BillingStrategyRegistry registry, MonetizationLocks locks, SubscriptionLifecycle lifecycle,
                                  BusinessSubscriptionRepository subscriptions, MonetizationConfigRepository configs, MonetizationClock clock,
                                  PlatformTransactionManager transactions, AdminAuditService audit, ObjectMapper mapper, BillingFlags flags, ExceptionService exceptions,
-                                 RefundService refunds, JobQueue jobs) {
+                                 RefundService refunds, JobQueue jobs, RenewalOutcomes renewals) {
         this.jobs = jobs;
+        this.renewals = renewals;
         this.exceptions = exceptions;
         this.refunds = refunds;
         this.jdbc = jdbc;
@@ -190,6 +199,11 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
         PaymentProviderClient client = strategy.client();
         byte[] body = event.payload().getBytes(StandardCharsets.UTF_8);
         String ref = event.internal() ? internalReference(event) : client.signatureVerifier().paymentReference(body).orElse(null);
+        if (ref == null && !event.internal() && renewals != null) {
+            // AGF SUB-R5-03: a state event (failed renewal, subscription change or deletion) names what to re-fetch, never a payment
+            var trigger = client.signatureVerifier().stateTrigger(body);
+            if (trigger.isPresent()) return renewals.applyState(renewalRef(event), strategy, trigger.get());
+        }
         if (ref == null) throw unprocessed(event, "the event names no payment");
 
         VerifiedPayment verified;
@@ -215,6 +229,9 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
             }
         }
 
+        // AGF SUB-R5-03 (§37 Q7/F2): a provider-initiated renewal is matched by its verified subscription, never by a checkout
+        if (renewals != null && verified.billing() != null && verified.billing().renewal()) return renewals.applyPayment(renewalRef(event), strategy, verified, capabilities);
+
         String mismatch = matchCheckout(event, strategy, verified);
         Checkout checkout = mismatch == null ? loadCheckout(verified.metadata().get(PaymentMetadata.CHECKOUT_ID), false) : null;
         if (checkout == null) {
@@ -235,6 +252,10 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
     }
 
     // ---- outside the transaction ----
+
+    private static RenewalOutcomes.EventRef renewalRef(Event event) {
+        return new RenewalOutcomes.EventRef(event.id(), event.provider(), event.status(), event.replay(), event.verification());
+    }
 
     /** AGF SUB-R4-14: the payment an internal reconciliation event names; null if it names none. */
     private String internalReference(Event event) {

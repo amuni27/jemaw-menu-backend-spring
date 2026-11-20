@@ -1,0 +1,24 @@
+{
+  "amount": 2500,
+  "amount_received": 0,
+  "created": 1795181814,
+  "currency": "usd",
+  "customer": "cus_VfCMf9712uMhVf",
+  "id": "pi_3UdrzmFk6HuOfbR40OSxxMQd",
+  "last_payment_error": {
+    "code": "card_declined",
+    "decline_code": "generic_decline",
+    "type": "card_error"
+  },
+  "latest_charge": "ch_3UdrzmFk6HuOfbR40ccfr3yy",
+  "livemode": false,
+  "object": "payment_intent",
+  "payment_method_types": [
+    "amazon_pay",
+    "card",
+    "cashapp",
+    "klarna",
+    "link"
+  ],
+  "status": "requires_payment_method"
+}

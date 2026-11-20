@@ -127,8 +127,9 @@ class FinancialAtomicityTest extends FinancialSuiteBase {
         Tenant t = data.tenant("a2b");
         String sub = paidRow(t, Duration.ofMinutes(5));
         String change = paidDowngrade(t, sub);
-        String co = downgradeCheckout(t, change, sub);
-        String e = event(paid(co, periodEnd(sub).plusSeconds(1))); // N5: after the deadline, the old row still current
+        String co = downgradeCheckoutOpenedAt(t, change, sub, Instant.now().plus(Duration.ofDays(7)));
+        // N5: after the deadline (AGF SUB-R5-03: period_end + AD-7's 7 days), the old row still current
+        String e = event(paid(co, periodEnd(sub).plus(Duration.ofDays(7)).plusSeconds(1)));
         Fault f = fault("a2b", "billing_exception", "insert", cond(t), "(select count(*) from payment where business_id = new.business_id)");
         Map<String, Object> before = businessState(t);
 
@@ -281,7 +282,7 @@ class FinancialAtomicityTest extends FinancialSuiteBase {
         Tenant t = data.tenant("a7");
         evaluator.setPeriodEndEnabled(true);
         String sub = paidRow(t, Duration.ofSeconds(30));
-        clock.setOffset(Duration.ofMinutes(2));
+        clock.setOffset(Duration.ofDays(7).plusMinutes(2)); // AGF SUB-R5-03: past AD-7's 7-day grace
         Fault f = fault("a7", "admin_audit_event", "insert", "new.target_id = '" + sub + "'", "(select status from business_subscription where id = '" + sub + "')");
         Map<String, Object> before = businessState(t);
 

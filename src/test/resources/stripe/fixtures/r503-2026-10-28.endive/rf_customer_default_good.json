@@ -1,0 +1,9 @@
+{
+  "id": "cus_VfCMf9712uMhVf",
+  "invoice_settings": {
+    "default_payment_method": "pm_1Udry5Fk6HuOfbR4T4Zy999f"
+  },
+  "livemode": false,
+  "object": "customer",
+  "test_clock": "clock_1UdrxmFk6HuOfbR4J2t4K2Ho"
+}

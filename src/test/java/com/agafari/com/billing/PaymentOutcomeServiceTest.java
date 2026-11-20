@@ -49,7 +49,7 @@ class PaymentOutcomeServiceTest extends PaymentOutcomeTestBase {
         assertThat(s.get("plan_code")).isEqualTo("MODEL_4");
         assertThat(s.get("provider")).isEqualTo(PROVIDER);
         assertThat(s.get("price_id")).isEqualTo(price);
-        assertThat(s.get("grace_days")).as("AD-7 is open: no grace is invented").isNull();
+        assertThat(s.get("grace_days")).as("AGF SUB-R5-03, AD-7: 7 days recorded on a new PROVIDER row").isEqualTo(7);
         assertThat(((Timestamp) s.get("period_end")).toInstant()).isEqualTo(oneMonth(tPay));
 
         Map<String, Object> pay = jdbc.queryForMap("select * from payment where business_id = ?", owner.businessId());

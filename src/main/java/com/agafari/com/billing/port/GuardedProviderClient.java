@@ -73,6 +73,28 @@ public abstract class GuardedProviderClient implements PaymentProviderClient {
         return doCancelSubscription(subscriptionRef);
     }
 
+    /** AGF SUB-R5-03. */
+    @Override
+    public final ProviderInvoiceState invoiceState(String invoiceRef) {
+        ProviderCallGuard.assertNoTransaction();
+        return doInvoiceState(invoiceRef);
+    }
+
+    /** AGF SUB-R5-03. */
+    @Override
+    public final ProviderSubscriptionSnapshot subscriptionState(String subscriptionRef) {
+        ProviderCallGuard.assertNoTransaction();
+        return doSubscriptionState(subscriptionRef);
+    }
+
+    protected ProviderInvoiceState doInvoiceState(String invoiceRef) {
+        throw new UnsupportedOperationException("This provider can't report an invoice's state");
+    }
+
+    protected ProviderSubscriptionSnapshot doSubscriptionState(String subscriptionRef) {
+        throw new UnsupportedOperationException("This provider can't report a subscription's state");
+    }
+
     /** Not abstract: providers without the capability (the fakes, Chapa) need nothing. */
     protected ProviderSubscriptionState doSubscriptionOfPayment(String providerPaymentRef) {
         throw new UnsupportedOperationException("This provider can't report a payment's subscription");

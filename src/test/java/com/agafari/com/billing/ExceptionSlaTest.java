@@ -108,39 +108,43 @@ class ExceptionSlaTest extends PaymentOutcomeTestBase {
     }
 
     @Test
-    void g4APaidRowWithoutRecordedGraceUsesTheSlaAndKeepsTheGraceGapVisible() {
+    void g4APaidRowNowRecordsAd7GraceSoTheSlaKnowsTheGraceEnd() {
+        // AGF SUB-R5-03: was "a paid row without recorded grace"; under AD-7 every new PROVIDER row records 7 days. The unknown-grace
+        // branch itself stays covered by BusinessCalendarTest (billing was never enabled, so no such row exists outside tests).
         String c = checkout(owner, CheckoutKind.NEW, null);
         process(event(paid(c, soon())));
-        assertThat(jdbc.queryForObject("select grace_days from business_subscription where business_id = ? and source = 'PROVIDER'", Integer.class, owner.businessId())).isNull();
+        assertThat(jdbc.queryForObject("select grace_days from business_subscription where business_id = ? and source = 'PROVIDER'", Integer.class, owner.businessId())).isEqualTo(7);
+        Instant periodEnd = jdbc.queryForObject("select period_end from business_subscription where business_id = ? and source = 'PROVIDER'", Timestamp.class, owner.businessId()).toInstant();
         process(event(paid(c, soon().plusSeconds(1)))); // row 2: a duplicate payment, AUTO_HANDLING
         String id = jdbc.queryForObject("select id from billing_exception where business_id = ?", String.class, owner.businessId());
 
         Instant expected = BusinessCalendar.twoBusinessDaysAfter(instant(row(id).get("created_at")), ADDIS, y -> rules()).due();
-        assertThat(instant(row(id).get("due_at"))).as("not period_end − 24 h: null grace isn't zero grace").isEqualTo(expected);
-        assertThat(sla(id).path("graceUnknown").asBoolean()).isTrue();
-        assertThat(sla(id).path("graceUntil").isNull() || sla(id).path("graceUntil").isMissingNode()).isTrue();
-        assertThat(jdbc.queryForObject("select detail from admin_audit_event where target_id = ? and action = 'BILLING_EXCEPTION_OPENED'", String.class, id)).contains("graceUnknown=true");
+        assertThat(instant(row(id).get("due_at"))).as("the grace end is a month away, so the two-business-day SLA decides").isEqualTo(expected);
+        assertThat(sla(id).path("graceUnknown").asBoolean()).isFalse();
+        assertThat(Instant.parse(sla(id).path("graceUntil").asString())).isEqualTo(periodEnd.plus(Duration.ofDays(7)));
     }
 
     @ParameterizedTest
     @ValueSource(ints = {30, 10})
     void ac2RecordedGraceBringsTheDeadlineForwardOrMakesItImmediate(int hoursOfGraceLeft) {
         enableModel4Since(Instant.now().minus(Duration.ofDays(60)));
-        // explicit fixture grace recorded on the row (one day, or zero days so the paid period still lies ahead); grace ends in hoursOfGraceLeft
-        int graceDays = hoursOfGraceLeft >= 24 ? 1 : 0;
-        Instant periodEnd = micros(Instant.now().plus(Duration.ofHours(hoursOfGraceLeft - 24L * graceDays)));
+        // AGF SUB-R5-03: the row records AD-7's 7 days (was a 1- or 0-day fixture written onto the row). A row's period can't end
+        // before it is created, so the row's period ends in an hour and the clock then moves to hoursOfGraceLeft before its grace end.
+        int graceDays = 7;
+        Instant periodEnd = micros(Instant.now().plus(Duration.ofHours(1)));
         Instant tPay = periodEnd.atZone(java.time.ZoneOffset.UTC).minusMonths(1).toInstant();
         String c = checkout(owner, CheckoutKind.NEW, null);
         process(event(paid(c, tPay)));
         String sub = current(owner);
         assertThat(jdbc.queryForObject("select period_end from business_subscription where id = ?", Timestamp.class, sub).toInstant()).isEqualTo(periodEnd);
-        jdbc.update("update business_subscription set grace_days = ? where id = ?", graceDays, sub);
+        assertThat(jdbc.queryForObject("select grace_days from business_subscription where id = ?", Integer.class, sub)).isEqualTo(graceDays);
+        clock.setOffset(Duration.between(Instant.now(), periodEnd.plus(Duration.ofDays(graceDays)).minus(Duration.ofHours(hoursOfGraceLeft))));
         process(event(paid(c, soon()))); // row 2: under review
         String id = jdbc.queryForObject("select id from billing_exception where business_id = ?", String.class, owner.businessId());
         Map<String, Object> r = row(id);
 
         if (hoursOfGraceLeft == 30) {
-            assertThat(instant(r.get("due_at"))).as("graceUntil − 24 h").isEqualTo(periodEnd);
+            assertThat(instant(r.get("due_at"))).as("graceUntil − 24 h").isEqualTo(periodEnd.plus(Duration.ofDays(graceDays)).minus(Duration.ofHours(24)));
             assertThat(sla(id).path("immediate").asBoolean()).isFalse();
         } else {
             assertThat(instant(r.get("due_at"))).as("due now").isEqualTo(instant(r.get("created_at")));

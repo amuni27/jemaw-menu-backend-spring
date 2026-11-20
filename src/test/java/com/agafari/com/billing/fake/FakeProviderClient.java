@@ -93,6 +93,9 @@ public final class FakeProviderClient extends GuardedProviderClient {
     private final Set<String> timedOut = new HashSet<>();
     private final List<ProviderRecord> records = new ArrayList<>();
     private final Map<String, VerifiedPayment> payments = new java.util.concurrent.ConcurrentHashMap<>();
+    // AGF SUB-R5-03: scripted provider invoice and subscription state re-fetches (SYNTHETIC)
+    private final Map<String, com.agafari.com.billing.port.ProviderInvoiceState> invoiceStates = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, com.agafari.com.billing.port.ProviderSubscriptionSnapshot> subscriptionStates = new java.util.concurrent.ConcurrentHashMap<>();
     private volatile Runnable onVerify = () -> { };
     private volatile boolean verifyRanInTransaction;
     private final java.util.concurrent.atomic.AtomicInteger refundSubmitCalls = new java.util.concurrent.atomic.AtomicInteger();
@@ -142,6 +145,30 @@ public final class FakeProviderClient extends GuardedProviderClient {
     public FakeProviderClient payment(String ref, VerifiedPayment value) {
         payments.put(ref, value);
         return this;
+    }
+
+    /** AGF SUB-R5-03: the provider's current state of an invoice, as a re-fetch would report it. */
+    public FakeProviderClient invoiceState(com.agafari.com.billing.port.ProviderInvoiceState value) {
+        invoiceStates.put(value.invoiceRef(), value);
+        return this;
+    }
+
+    /** AGF SUB-R5-03: the provider's current state of a subscription, as a re-fetch would report it. */
+    public FakeProviderClient subscriptionState(com.agafari.com.billing.port.ProviderSubscriptionSnapshot value) {
+        subscriptionStates.put(value.subscriptionRef(), value);
+        return this;
+    }
+
+    @Override
+    protected com.agafari.com.billing.port.ProviderInvoiceState doInvoiceState(String ref) {
+        var s = invoiceStates.get(ref); // unscripted: an invoice that is no renewal, so it decides nothing
+        return s != null ? s : new com.agafari.com.billing.port.ProviderInvoiceState(ref, com.agafari.com.billing.port.ProviderInvoiceState.Status.OTHER, null, null, null, null, null, false, false);
+    }
+
+    @Override
+    protected com.agafari.com.billing.port.ProviderSubscriptionSnapshot doSubscriptionState(String ref) {
+        var s = subscriptionStates.get(ref); // unscripted: the provider has no such subscription
+        return s != null ? s : new com.agafari.com.billing.port.ProviderSubscriptionSnapshot(ref, null, com.agafari.com.billing.port.ProviderSubscriptionState.Status.NOT_FOUND, null, null, false);
     }
 
     public FakeProviderClient onVerify(Runnable value) {
@@ -203,6 +230,8 @@ public final class FakeProviderClient extends GuardedProviderClient {
     }
 
     public synchronized void reset() {
+        invoiceStates.clear();
+        subscriptionStates.clear();
         script = Script.SUCCESS;
         capabilities = ALL;
         onCreate = () -> { };
@@ -375,6 +404,19 @@ public final class FakeProviderClient extends GuardedProviderClient {
                 return new InboundEvent(node.path("id").asString(""), node.path("type").asString(""));
             } catch (JacksonException e) {
                 throw new IllegalArgumentException("Not JSON", e);
+            }
+        }
+
+        /** AGF SUB-R5-03: a fake state event names the object to re-fetch in {@code state_kind} and {@code state_ref}. */
+        @Override
+        public Optional<com.agafari.com.billing.port.StateTrigger> stateTrigger(byte[] body) {
+            try {
+                JsonNode node = new ObjectMapper().readTree(body);
+                String kind = node.path("state_kind").asString(""), ref = node.path("state_ref").asString("");
+                if (kind.isBlank() || ref.isBlank()) return Optional.empty();
+                return Optional.of(new com.agafari.com.billing.port.StateTrigger(com.agafari.com.billing.port.StateTrigger.Kind.valueOf(kind), ref));
+            } catch (JacksonException e) {
+                return Optional.empty();
             }
         }
 

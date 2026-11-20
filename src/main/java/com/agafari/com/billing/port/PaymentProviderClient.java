@@ -36,6 +36,16 @@ public interface PaymentProviderClient {
         throw new UnsupportedOperationException("This provider can't report a payment's subscription");
     }
 
+    /** AGF SUB-R5-03: re-fetches an invoice's current state (a renewal failure is decided on it, never on the event). */
+    default ProviderInvoiceState invoiceState(String invoiceRef) {
+        throw new UnsupportedOperationException("This provider can't report an invoice's state");
+    }
+
+    /** AGF SUB-R5-03: re-fetches a subscription's current state (deletion and dunning are decided on it, never on the event). */
+    default ProviderSubscriptionSnapshot subscriptionState(String subscriptionRef) {
+        throw new UnsupportedOperationException("This provider can't report a subscription's state");
+    }
+
     /** AGF SUB-R5-02 (D4): cancels immediately, with no final invoice, proration, refund or credit. */
     default SubscriptionCancelResult cancelSubscription(String subscriptionRef) {
         throw new UnsupportedOperationException("This provider can't cancel a subscription");

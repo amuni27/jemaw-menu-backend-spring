@@ -8,6 +8,8 @@ import com.agafari.com.billing.port.ExpireResult;
 import com.agafari.com.billing.port.GuardedProviderClient;
 import com.agafari.com.billing.port.ProviderBilling;
 import com.agafari.com.billing.port.ProviderCapabilities;
+import com.agafari.com.billing.port.ProviderInvoiceState;
+import com.agafari.com.billing.port.ProviderSubscriptionSnapshot;
 import com.agafari.com.billing.port.ProviderPaymentStatus;
 import com.agafari.com.billing.port.ProviderRecord;
 import com.agafari.com.billing.port.ProviderRefund;
@@ -57,9 +59,10 @@ import java.util.Optional;
  * AGF SUB-R5-01/R5-02 (BD-13): the Stripe adapter behind {@code PaymentProviderClient}. Every call goes through
  * {@link GuardedProviderClient}, so none can run inside a transaction; SDK types never leave {@code billing.stripe}.
  *
- * <p>R5-02 implements Agafari-initiated initial checkout only: session creation and expiry, webhook signatures, the
- * re-fetch of a first invoice (PO U1, D6) and the subscription re-fetch and immediate cancellation behind D4. Refunds
- * (R5-05) and listing (R5-06) still refuse. Renewals and plan changes on an existing Stripe subscription are R5-03/R5-04.
+ * <p>R5-02 implements Agafari-initiated initial checkout: session creation and expiry, webhook signatures, the re-fetch of a
+ * first invoice (PO U1, D6) and the subscription re-fetch and immediate cancellation behind D4. R5-03 adds provider-initiated
+ * renewals ({@code subscription_cycle} invoices, identified by their subscription) and the invoice and subscription state
+ * re-fetches behind dunning and deletion. Refunds (R5-05) and listing (R5-06) still refuse; plan changes are R5-04.
  *
  * <p><b>Capabilities</b> (each from Stripe's API reference for API {@code 2026-10-28.endive}, recorded in the R5-02 report):
  * <ul>
@@ -220,6 +223,10 @@ public final class StripeProviderClient extends GuardedProviderClient {
         Money amount = new Money(invoice.getAmountPaid(), currency);
         Instant tPay = Instant.ofEpochSecond(paidAt);
         String subscription = subscriptionOf(invoice);
+        // AGF SUB-R5-03: a provider-initiated renewal is identified by its subscription, never by a checkout (§37 Q7/F2)
+        if (ProviderInvoiceState.RENEWAL_REASON.equals(invoice.getBillingReason()) && subscription != null) {
+            return new VerifiedPayment(providerRef, ProviderPaymentStatus.SUCCEEDED, amount, tPay, Map.of(), renewalEvidence(invoice, subscription, amount));
+        }
         if (!"subscription_create".equals(invoice.getBillingReason()) || subscription == null) {
             return new VerifiedPayment(providerRef, ProviderPaymentStatus.SUCCEEDED, amount, tPay, Map.of()); // D6: not an initial invoice → quarantine
         }
@@ -232,37 +239,44 @@ public final class StripeProviderClient extends GuardedProviderClient {
         return new VerifiedPayment(providerRef, ProviderPaymentStatus.SUCCEEDED, amount, tPay, metadata, evidence(invoice, subscription, amount));
     }
 
+    /** The invoice-level part of PO U1, shared by initial and renewal invoices; {@code problem} is null when it qualifies. */
+    private record ChargeCheck(String problem, InvoiceLineItem line, String price, String paymentIntentRef) {
+
+        static ChargeCheck failed(String problem) {
+            return new ChargeCheck(problem, null, null, null);
+        }
+    }
+
     /** PO U1: the invoice must represent exactly one successful, qualifying card payment for its whole amount. */
-    private ProviderBilling evidence(Invoice inv, String subscriptionRef, Money amount) {
-        String ref = inv.getId();
+    private ChargeCheck chargeCheck(Invoice inv, Money amount) {
         long paid = amount.minor();
         if (!Objects.equals(inv.getTotal(), paid) || !zero(inv.getAmountRemaining()) || !zero(inv.getStartingBalance()) || !zero(inv.getAmountPaidOffStripe())
                 || !zero(inv.getAmountOverpaid()) || !zero(inv.getPrePaymentCreditNotesAmount()) || !zero(inv.getPostPaymentCreditNotesAmount())) {
-            return ProviderBilling.notQualifying(ref, "the invoice isn't paid in full by one charge (credit, off-Stripe payment, balance or credit note)");
+            return ChargeCheck.failed("the invoice isn't paid in full by one charge (credit, off-Stripe payment, balance or credit note)");
         }
-        if (inv.getTotalTaxes() != null && !inv.getTotalTaxes().isEmpty()) return ProviderBilling.notQualifying(ref, "the invoice carries tax (tax is off, AD-16)");
+        if (inv.getTotalTaxes() != null && !inv.getTotalTaxes().isEmpty()) return ChargeCheck.failed("the invoice carries tax (tax is off, AD-16)");
         if (inv.getTotalDiscountAmounts() != null && inv.getTotalDiscountAmounts().stream().anyMatch(d -> d.getAmount() != null && d.getAmount() != 0)) {
-            return ProviderBilling.notQualifying(ref, "the invoice carries a discount");
+            return ChargeCheck.failed("the invoice carries a discount");
         }
         List<InvoiceLineItem> lines = inv.getLines() == null ? List.of() : inv.getLines().getData();
-        if (lines.size() != 1 || Boolean.TRUE.equals(inv.getLines().getHasMore())) return ProviderBilling.notQualifying(ref, "the invoice doesn't have exactly one line");
+        if (lines.size() != 1 || Boolean.TRUE.equals(inv.getLines().getHasMore())) return ChargeCheck.failed("the invoice doesn't have exactly one line");
         InvoiceLineItem line = lines.get(0);
         String price = line.getPricing() == null || line.getPricing().getPriceDetails() == null ? null : line.getPricing().getPriceDetails().getPrice();
         if (price == null || !Objects.equals(line.getQuantity(), 1L) || line.getPeriod() == null || line.getPeriod().getStart() == null || line.getPeriod().getEnd() == null
                 || !Objects.equals(line.getAmount(), paid)) {
-            return ProviderBilling.notQualifying(ref, "the invoice line isn't one unit of one price for the whole amount");
+            return ChargeCheck.failed("the invoice line isn't one unit of one price for the whole amount");
         }
         // exactly one paid payment record; any other record must be cancelled (never ambiguous)
         List<InvoicePayment> payments = inv.getPayments() == null ? List.of() : inv.getPayments().getData();
         List<InvoicePayment> paidRecords = payments.stream().filter(p -> "paid".equals(p.getStatus())).toList();
         if (paidRecords.size() != 1 || payments.stream().anyMatch(p -> !"paid".equals(p.getStatus()) && !"canceled".equals(p.getStatus()))
                 || (inv.getPayments() != null && Boolean.TRUE.equals(inv.getPayments().getHasMore()))) {
-            return ProviderBilling.notQualifying(ref, "the invoice doesn't have exactly one unambiguous paid payment record");
+            return ChargeCheck.failed("the invoice doesn't have exactly one unambiguous paid payment record");
         }
         InvoicePayment record = paidRecords.get(0);
         if (record.getPayment() == null || !"payment_intent".equals(record.getPayment().getType()) || record.getPayment().getPaymentIntent() == null
                 || !Objects.equals(record.getAmountPaid(), paid) || !amount.currency().name().equalsIgnoreCase(String.valueOf(record.getCurrency()))) {
-            return ProviderBilling.notQualifying(ref, "the paid record isn't one PaymentIntent for the whole amount");
+            return ChargeCheck.failed("the paid record isn't one PaymentIntent for the whole amount");
         }
         String paymentIntentRef = record.getPayment().getPaymentIntent();
         PaymentIntent intent = call("payment intent lookup", () -> stripe.v1().paymentIntents().retrieve(paymentIntentRef,
@@ -270,25 +284,40 @@ public final class StripeProviderClient extends GuardedProviderClient {
         Charge charge = intent.getLatestChargeObject();
         if (!"succeeded".equals(intent.getStatus()) || !Objects.equals(intent.getAmountReceived(), paid) || Boolean.TRUE.equals(intent.getLivemode())
                 || !amount.currency().name().equalsIgnoreCase(String.valueOf(intent.getCurrency()))) {
-            return ProviderBilling.notQualifying(ref, "the PaymentIntent didn't succeed for the whole amount");
+            return ChargeCheck.failed("the PaymentIntent didn't succeed for the whole amount");
         }
         if (charge == null || !"succeeded".equals(charge.getStatus()) || !Boolean.TRUE.equals(charge.getPaid()) || !Boolean.TRUE.equals(charge.getCaptured())
                 || Boolean.TRUE.equals(charge.getRefunded()) || !Objects.equals(charge.getAmount(), paid) || charge.getPaymentMethodDetails() == null
                 || !"card".equals(charge.getPaymentMethodDetails().getType())) {
-            return ProviderBilling.notQualifying(ref, "the charge isn't one captured, unrefunded card charge for the whole amount");
+            return ChargeCheck.failed("the charge isn't one captured, unrefunded card charge for the whole amount");
         }
+        return new ChargeCheck(null, line, price, paymentIntentRef);
+    }
+
+    /** The monthly or yearly interval of a single-unit recurring price, or null. */
+    private static PriceInterval interval(SubscriptionItem item) {
+        return item.getPrice() == null || item.getPrice().getRecurring() == null || !Objects.equals(item.getPrice().getRecurring().getIntervalCount(), 1L)
+                ? null : switch (String.valueOf(item.getPrice().getRecurring().getInterval())) {
+                    case "month" -> PriceInterval.MONTH;
+                    case "year" -> PriceInterval.YEAR;
+                    default -> null;
+                };
+    }
+
+    /** PO U1 for an initial invoice: the R5-02 rules, unchanged. */
+    private ProviderBilling evidence(Invoice inv, String subscriptionRef, Money amount) {
+        String ref = inv.getId();
+        ChargeCheck charged = chargeCheck(inv, amount);
+        if (charged.problem() != null) return ProviderBilling.notQualifying(ref, charged.problem());
+        InvoiceLineItem line = charged.line();
+        String price = charged.price();
         Subscription sub = call("subscription lookup", () -> stripe.v1().subscriptions().retrieve(subscriptionRef));
         List<SubscriptionItem> items = sub.getItems() == null ? List.of() : sub.getItems().getData();
         if (Boolean.TRUE.equals(sub.getLivemode()) || items.size() != 1 || !"active".equals(sub.getStatus()) || !Objects.equals(sub.getCustomer(), inv.getCustomer())) {
             return ProviderBilling.notQualifying(ref, "the subscription isn't one active test-mode item of this customer");
         }
         SubscriptionItem item = items.get(0);
-        PriceInterval interval = item.getPrice() == null || item.getPrice().getRecurring() == null || !Objects.equals(item.getPrice().getRecurring().getIntervalCount(), 1L)
-                ? null : switch (String.valueOf(item.getPrice().getRecurring().getInterval())) {
-                    case "month" -> PriceInterval.MONTH;
-                    case "year" -> PriceInterval.YEAR;
-                    default -> null;
-                };
+        PriceInterval interval = interval(item);
         if (interval == null || !price.equals(item.getPrice().getId()) || !Objects.equals(item.getQuantity(), 1L)) {
             return ProviderBilling.notQualifying(ref, "the subscription item isn't the invoiced monthly or yearly price");
         }
@@ -297,7 +326,33 @@ public final class StripeProviderClient extends GuardedProviderClient {
             return ProviderBilling.notQualifying(ref, "the invoice period isn't the subscription's current period");
         }
         return new ProviderBilling(ref, subscriptionRef, inv.getCustomer(), price, interval, Instant.ofEpochSecond(line.getPeriod().getStart()),
-                Instant.ofEpochSecond(line.getPeriod().getEnd()), paymentIntentRef, null);
+                Instant.ofEpochSecond(line.getPeriod().getEnd()), charged.paymentIntentRef(), null);
+    }
+
+    /**
+     * AGF SUB-R5-03 (addendum §1, §2): PO U1 for a renewal invoice. The invoice-level rules are the initial ones. The
+     * subscription is re-fetched only to confirm it is this customer's single item of the invoiced price; its status and
+     * {@code current_period_*} are <b>not</b> evidence (a recovered or later-cancelled subscription can have paid this invoice), and
+     * the invoice line's period is the paid period. The core matches the subscription to exactly one Agafari row.
+     */
+    private ProviderBilling renewalEvidence(Invoice inv, String subscriptionRef, Money amount) {
+        String ref = inv.getId(), customer = inv.getCustomer();
+        ChargeCheck charged = chargeCheck(inv, amount);
+        if (charged.problem() != null) return ProviderBilling.renewalNotQualifying(ref, subscriptionRef, customer, charged.problem());
+        Subscription sub = call("subscription lookup", () -> stripe.v1().subscriptions().retrieve(subscriptionRef));
+        List<SubscriptionItem> items = sub.getItems() == null ? List.of() : sub.getItems().getData();
+        if (Boolean.TRUE.equals(sub.getLivemode()) || items.size() != 1 || !subscriptionRef.equals(sub.getId()) || customer == null || !customer.equals(sub.getCustomer())) {
+            return ProviderBilling.renewalNotQualifying(ref, subscriptionRef, customer, "the subscription isn't one test-mode item of this customer");
+        }
+        SubscriptionItem item = items.get(0);
+        PriceInterval interval = interval(item);
+        if (interval == null || !charged.price().equals(item.getPrice().getId()) || !Objects.equals(item.getQuantity(), 1L)) {
+            return ProviderBilling.renewalNotQualifying(ref, subscriptionRef, customer, "the subscription item isn't the invoiced monthly or yearly price");
+        }
+        InvoiceLineItem line = charged.line();
+        if (line.getPeriod().getEnd() <= line.getPeriod().getStart()) return ProviderBilling.renewalNotQualifying(ref, subscriptionRef, customer, "the invoice period is empty");
+        return ProviderBilling.renewal(ref, subscriptionRef, customer, charged.price(), interval, Instant.ofEpochSecond(line.getPeriod().getStart()),
+                Instant.ofEpochSecond(line.getPeriod().getEnd()), charged.paymentIntentRef());
     }
 
     /** D6: Stripe's own record of which checkout created the subscription: exactly one complete session whose invoice is this one. */
@@ -338,6 +393,41 @@ public final class StripeProviderClient extends GuardedProviderClient {
         boolean others = Boolean.TRUE.equals(open.getHasMore()) || open.getData().stream().anyMatch(i -> !subscriptionRef.equals(subscriptionOf(i)));
         return new ProviderSubscriptionState(subscriptionRef, sub.getCustomer(), status(sub.getStatus()), origin.map(s -> s.getMetadata().get(META_CHECKOUT)).orElse(null),
                 origin.map(s -> s.getMetadata().get(META_BUSINESS)).orElse(null), others, Boolean.TRUE.equals(sub.getLivemode()) || Boolean.TRUE.equals(inv.getLivemode()));
+    }
+
+    // ---- AGF SUB-R5-03: state re-fetches for renewal failure, dunning and deletion ----
+
+    @Override
+    protected ProviderInvoiceState doInvoiceState(String invoiceRef) {
+        if (invoiceRef == null || !invoiceRef.startsWith("in_")) throw new ProviderRejectedException("Not a Stripe invoice");
+        Invoice inv = call("invoice lookup", () -> stripe.v1().invoices().retrieve(invoiceRef));
+        if (!invoiceRef.equals(inv.getId())) throw new ProviderRejectedException("Stripe returned another invoice");
+        List<InvoiceLineItem> lines = inv.getLines() == null ? List.of() : inv.getLines().getData();
+        InvoiceLineItem line = lines.size() == 1 && !Boolean.TRUE.equals(inv.getLines().getHasMore()) ? lines.get(0) : null;
+        Instant start = line == null || line.getPeriod() == null || line.getPeriod().getStart() == null ? null : Instant.ofEpochSecond(line.getPeriod().getStart());
+        Instant end = line == null || line.getPeriod() == null || line.getPeriod().getEnd() == null ? null : Instant.ofEpochSecond(line.getPeriod().getEnd());
+        ProviderInvoiceState.Status status = switch (String.valueOf(inv.getStatus())) {
+            case "draft" -> ProviderInvoiceState.Status.DRAFT;
+            case "open" -> ProviderInvoiceState.Status.OPEN;
+            case "paid" -> ProviderInvoiceState.Status.PAID;
+            case "void" -> ProviderInvoiceState.Status.VOID;
+            case "uncollectible" -> ProviderInvoiceState.Status.UNCOLLECTIBLE;
+            default -> ProviderInvoiceState.Status.OTHER;
+        };
+        return new ProviderInvoiceState(invoiceRef, status, inv.getBillingReason(), subscriptionOf(inv), inv.getCustomer(), start, end, Boolean.TRUE.equals(inv.getAttempted()),
+                Boolean.TRUE.equals(inv.getLivemode()));
+    }
+
+    @Override
+    protected ProviderSubscriptionSnapshot doSubscriptionState(String subscriptionRef) {
+        if (subscriptionRef == null || !subscriptionRef.startsWith("sub_")) throw new ProviderRejectedException("Not a Stripe subscription");
+        Subscription sub = call("subscription lookup", () -> stripe.v1().subscriptions().retrieve(subscriptionRef));
+        if (!subscriptionRef.equals(sub.getId())) throw new ProviderRejectedException("Stripe returned another subscription");
+        Long ended = sub.getEndedAt() != null ? sub.getEndedAt() : sub.getCanceledAt();
+        ProviderSubscriptionState.Status status = status(sub.getStatus());
+        return new ProviderSubscriptionSnapshot(subscriptionRef, sub.getCustomer(), status,
+                status == ProviderSubscriptionState.Status.CANCELED || status == ProviderSubscriptionState.Status.INCOMPLETE_EXPIRED ? (ended == null ? null : Instant.ofEpochSecond(ended)) : null,
+                sub.getLatestInvoice(), Boolean.TRUE.equals(sub.getLivemode()));
     }
 
     @Override

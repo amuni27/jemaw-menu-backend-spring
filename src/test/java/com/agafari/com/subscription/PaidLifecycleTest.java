@@ -183,7 +183,7 @@ class PaidLifecycleTest extends AbstractIntegrationTest {
     void aVerifiedPaymentActivatesAProviderRowWithItsPeriod() {
         BusinessSubscription s = active();
         Map<String, Object> row = jdbc.queryForMap("select * from business_subscription where id = ?", s.getId());
-        assertThat(row).containsEntry("source", "PROVIDER").containsEntry("status", "ACTIVE").containsEntry("plan_code", "MODEL_4").containsEntry("provider", "P1").containsEntry("price_id", price).containsEntry("grace_days", null);
+        assertThat(row).containsEntry("source", "PROVIDER").containsEntry("status", "ACTIVE").containsEntry("plan_code", "MODEL_4").containsEntry("provider", "P1").containsEntry("price_id", price).containsEntry("grace_days", 7); // AGF SUB-R5-03, AD-7
         assertThat(periods()).isEqualTo(1);
         assertThat(jdbc.queryForObject("select count(*) from admin_audit_event where action = 'SUBSCRIPTION_PAID_ACTIVATED' and target_id = ?", Integer.class, s.getId())).isEqualTo(1);
     }

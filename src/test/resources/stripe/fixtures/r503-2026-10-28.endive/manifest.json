@@ -1,0 +1,80 @@
+{
+  "api_version": "2026-10-28.endive",
+  "captured_by": "Product Owner, 2026-11-20, guide AGAFARI_SUB_R5_03_RENEWAL_CAPTURE_GUIDE.md revision 1",
+  "deviations": [
+    "DEV-RF-01 operator paste error, record set aside, one read re-run",
+    "DEV-RF-02 empty payment_method rejected by Stripe validation, no charge, resumed"
+  ],
+  "environment": "Agafari Stripe sandbox (test mode, livemode false)",
+  "files": {
+    "rf_clock.json": {
+      "sha256": "4028432b2efb213ec4fc5e8613825a61ab669a262780fffd51032c6cacbf9fb0"
+    },
+    "rf_customer.json": {
+      "sha256": "8620633687e85562f72f60f7a753682f64bd9a59e250b11b3a4e24bdeb677621"
+    },
+    "rf_customer_default_fail.json": {
+      "sha256": "26232b1f5374e7f016fbf3d1f7937d2972722ebeec7a7d9b40e7f413cd3b7b8a"
+    },
+    "rf_customer_default_good.json": {
+      "sha256": "58ee626a21ff58b47d31dadf40fb12ee324c0eb54337d0e1dfc73f35b34b4493"
+    },
+    "rf_event_invoice_paid.json": {
+      "sha256": "b863794bf5c492525edd1f6a51c64e8ddabde66b9e53d0c7b5c235faf5214e4d"
+    },
+    "rf_event_payment_failed.json": {
+      "sha256": "f5c69938ed3e78617b716adfb0f6bfaa30477b5510ece86e1dffbca8ea01e430"
+    },
+    "rf_event_subscription_updated.json": {
+      "sha256": "a820f1f231b951b8e57b3837fd54ae237a511ddb836e7fc001b0d451a858beee"
+    },
+    "rf_invoice_failed.json": {
+      "sha256": "99d18c9ffb1e735d04595acbf2b5c0b3079766f314bd07cbaea06af9173947b4"
+    },
+    "rf_invoice_pay.json": {
+      "sha256": "c35cdd9f1a858ca3211179aa2ce3eb384276714d810926cd275ac7db882e355e"
+    },
+    "rf_invoice_recovered.json": {
+      "sha256": "91ec1492053d3f51bec5ca4a9005c2a5f81db0851e9a5856ecf9f1a963d2f86c"
+    },
+    "rf_invoices_failed.json": {
+      "sha256": "c4ea84f57ec0a01cd30e0cfdb6db43c2d9454a650a25c9e9bb18c7e6cd04dd00"
+    },
+    "rf_payment_intent_failed.json": {
+      "sha256": "a7654813a5c5336c774bfa2059194891049e1cce796768c5a05a3d85967d6015"
+    },
+    "rf_payment_intents.json": {
+      "sha256": "fa747fea993cce1b877befd22f57a67288e5f3157bb8105608b1153c86ec6403"
+    },
+    "rf_pm_fail.json": {
+      "sha256": "95c00021ad2bc406937096953fecc1420d69d285e28992c4d3ed7846e7dc0d42"
+    },
+    "rf_pm_good.json": {
+      "sha256": "ceaf0177eee5db8c73ef6d1fabea0b3529c8a6fc23b1815e4ceada69765d50a2"
+    },
+    "rf_pm_recover.json": {
+      "sha256": "174cee67401a527ee4c5b05367e9bdbb7415bd5235145ab8f49359b46b57c6af"
+    },
+    "rf_subscription_create.json": {
+      "sha256": "746c505b70862eebfad09b9252f19279b9e9a97cd3db4e1323c5e82d5f59bc92"
+    },
+    "rf_subscription_past_due.json": {
+      "sha256": "82794ccf189849260f33b6e6bebc5d22feca9b3efef6c0026f924a7da6ff3a06"
+    },
+    "rf_subscription_recovered.json": {
+      "sha256": "377837da0cc2d1f62fe44b22754b44bd607da0a524068929069e296c1504801e"
+    }
+  },
+  "gates": {
+    "capture_gate_RF": "COMPLETE",
+    "capture_gate_overall": "INCOMPLETE (RX, CLRF, CLRX, A5)",
+    "security": "PASS (27 files)"
+  },
+  "observations": [
+    "O-RF-1 the recovery payment reuses the failed PaymentIntent",
+    "O-RF-2 a manual /pay leaves attempt_count unchanged"
+  ],
+  "redaction": "tools/r503.py redact (q6.py allowlist + R5-03 delta), run on a copy of the capture workspace",
+  "set": "R5-03 renewal capture, scenario RF (failure -> recovery within grace)",
+  "status": "AUTHENTIC, PARTIAL CAPTURE: RF only. RX (retries exhausted), CLRF/CLRX cleanup and A5 retry-settings restoration are NOT complete; final PO fixture review pending"
+}

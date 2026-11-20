@@ -1,0 +1,87 @@
+{
+  "amount_due": 2500,
+  "amount_overpaid": 0,
+  "amount_paid": 0,
+  "amount_paid_off_stripe": 0,
+  "amount_remaining": 2500,
+  "attempt_count": 1,
+  "attempted": true,
+  "auto_advance": true,
+  "billing_reason": "subscription_cycle",
+  "collection_method": "charge_automatically",
+  "created": 1797773687,
+  "currency": "usd",
+  "customer": "cus_VfCMf9712uMhVf",
+  "ending_balance": 0,
+  "id": "in_1UdrzkFk6HuOfbR4PaF4PNG1",
+  "lines": {
+    "data": [
+      {
+        "amount": 2500,
+        "currency": "usd",
+        "id": "il_1UokGBFk6HuOfbR4fZGRCScZ",
+        "object": "line_item",
+        "period": {
+          "end": 1800452087,
+          "start": 1797773687
+        },
+        "pricing": {
+          "price_details": {
+            "price": "price_1UaZSmFk6HuOfbR4CTwnqF48",
+            "product": "prod_Vbn2bimLj8AJ7s"
+          },
+          "type": "price_details"
+        },
+        "quantity": 1
+      }
+    ],
+    "has_more": false,
+    "object": "list"
+  },
+  "livemode": false,
+  "next_payment_attempt": 1797930557,
+  "object": "invoice",
+  "parent": {
+    "subscription_details": {
+      "metadata": {},
+      "subscription": "sub_1Udry9Fk6HuOfbR4twZwbpdt"
+    },
+    "type": "subscription_details"
+  },
+  "payments": {
+    "data": [
+      {
+        "amount_paid": null,
+        "amount_requested": 2500,
+        "currency": "usd",
+        "id": "inpay_1UdrznFk6HuOfbR4NYYpIAfG",
+        "is_default": true,
+        "object": "invoice_payment",
+        "payment": {
+          "payment_intent": "pi_3UdrzmFk6HuOfbR40OSxxMQd",
+          "type": "payment_intent"
+        },
+        "status": "open"
+      }
+    ],
+    "has_more": false,
+    "object": "list"
+  },
+  "period_end": 1797773687,
+  "period_start": 1795181687,
+  "post_payment_credit_notes_amount": 0,
+  "pre_payment_credit_notes_amount": 0,
+  "starting_balance": 0,
+  "status": "open",
+  "status_transitions": {
+    "finalized_at": 1797777287,
+    "marked_uncollectible_at": null,
+    "paid_at": null,
+    "voided_at": null
+  },
+  "subtotal": 2500,
+  "test_clock": "clock_1UdrxmFk6HuOfbR4J2t4K2Ho",
+  "total": 2500,
+  "total_discount_amounts": [],
+  "total_taxes": []
+}

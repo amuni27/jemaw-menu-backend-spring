@@ -235,6 +235,12 @@ class AuthenticStripeFlowTest extends AbstractIntegrationTest {
     void f3_theAuthenticRenewalEventIsQuarantinedWithoutAnyFinancialEffect() throws Exception {
         String cycle = rk.id(str("r_invoice_cycle_verify", "id"));
         stub.on("GET", "/v1/invoices/" + cycle, c -> ok("r_invoice_cycle_verify"));
+        // AGF SUB-R5-03: renewal evidence re-fetches the PaymentIntent (SYNTHETIC, not captured by Q6) and the authentic subscription;
+        // the subscription belongs to no Agafari row, so the outcome is still a quarantine (row R1) with no financial effect
+        String pi = rk.id(str("r_invoice_cycle_verify", "payments.data[0].payment.payment_intent"));
+        stub.on("GET", "/v1/payment_intents/" + pi, c -> StripeStub.ok(RenewalFixtures.succeededPaymentIntent(pi, num("r_invoice_cycle_verify", "amount_paid"),
+                rk.id(str("r_invoice_cycle_verify", "customer")))));
+        stub.on("GET", "/v1/subscriptions/" + rk.id(str("r_subscription_create", "id")), c -> ok("r_subscription_create"));
         at(epoch("r_invoice_cycle_verify", "status_transitions.paid_at").plusSeconds(60));
         String event = deliver("r_event_invoice_paid_cycle");
         assertThat(outcomes.process(event)).isEqualTo(PaymentOutcomeService.Result.QUARANTINED);

@@ -157,10 +157,9 @@ class FinancialDrillTest extends FinancialSuiteBase {
         Instant expiresA = micros(start.plus(30, ChronoUnit.MINUTES));
         String ca = checkout(a, CheckoutKind.NEW, null, price, ET_AMOUNT, expiresA);
         assertThat(deliverSigned("evt_down_a", paid(ca, micros(start.plus(1, ChronoUnit.MINUTES)))).getStatus()).isEqualTo(200);
-        // B: a paid row whose period ends during the downtime (no grace); G: one with a 1-day fixture grace (AD-7 open)
+        // B and G: paid rows whose periods end during the downtime; AGF SUB-R5-03: both record AD-7's 7 days (B had none, G a 1-day fixture)
         Tenant b = data.tenant("down-b"), g = data.tenant("down-g");
         String subB = paidRow(b, Duration.ofMinutes(20)), subG = paidRow(g, Duration.ofMinutes(20));
-        jdbc.update("update business_subscription set grace_days = 1 where id = ?", subG); // explicit fixture grace
         // C: a funded downgrade whose boundary passes during the downtime
         Tenant c = data.tenant("down-c");
         String subC = paidRow(c, Duration.ofMinutes(25));
@@ -179,7 +178,7 @@ class FinancialDrillTest extends FinancialSuiteBase {
         during.put("G", view(subG, now));
         during.put("C from-row", view(subC, now));
         assertThat(current(a)).as("not activated before its verified event is processed").isNull();
-        assertThat(view(subB, now).entitledToPlan()).as("MT-05: expired at read time").isFalse();
+        assertThat(view(subB, now).entitledToPlan()).as("MT-05: in AD-7 grace at read time").isTrue();
         assertThat(view(subG, now).entitledToPlan()).as("MT-05: in recorded grace at read time").isTrue();
         assertThat(view(subG, now).status().name()).isEqualTo("PAST_DUE");
         assertThat(count("select count(*) from business_subscription where business_id = ? and plan_code = 'MODEL_3'", c.businessId())).as("reads never create the target").isZero();
@@ -192,13 +191,13 @@ class FinancialDrillTest extends FinancialSuiteBase {
 
         assertThat(providerSubscriptions(a)).as("A: judged by t_pay, activated although processed after expiry").isEqualTo(1);
         assertThat(exceptions(a)).isZero();
-        assertThat(subRow(subB)).containsEntry("status", "EXPIRED");
+        assertThat(subRow(subB)).containsEntry("status", "PAST_DUE");
         assertThat(count("select count(*) from admin_audit_event where target_id = ? and action like 'SUBSCRIPTION_%EXPIRED%'", subB)).as("B: persisted once").isLessThanOrEqualTo(1);
         assertThat(subRow(subG)).containsEntry("status", "PAST_DUE");
         assertThat(changeRow(change)).containsEntry("status", "APPLIED");
         assertThat(subRow(subC)).containsEntry("ended_reason", "CHANGED");
         assertThat(checkoutStatus(cd)).isEqualTo("EXPIRED");
-        assertThat(view(subB, now).entitledToPlan()).as("the persisted state equals what reads showed").isFalse();
+        assertThat(view(subB, now).entitledToPlan()).as("the persisted state equals what reads showed").isTrue();
 
         Map<String, Object> second = restart();
         for (Tenant t : List.of(a, b, g, c, d)) {

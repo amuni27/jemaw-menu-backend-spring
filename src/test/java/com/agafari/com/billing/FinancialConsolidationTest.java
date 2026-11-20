@@ -247,7 +247,7 @@ class FinancialConsolidationTest extends FinancialSuiteBase {
         evaluator.setPeriodEndEnabled(true);
         Tenant t = data.tenant("mt03-expiry");
         String sub = paidRow(t, Duration.ofSeconds(30));
-        clock.setOffset(Duration.ofMinutes(2));
+        clock.setOffset(Duration.ofDays(7).plusMinutes(2)); // AGF SUB-R5-03: past AD-7's 7-day grace
         assertThat(periodEndJob.enqueueDue()).isGreaterThanOrEqualTo(1);
         JobRunner w1 = runner(null, null), w2 = runner(null, null);
         Gate gate = restaurantGate(t);
@@ -393,31 +393,32 @@ class FinancialConsolidationTest extends FinancialSuiteBase {
     void mt05ProviderRowsAndAHeldDowngradeWithEveryJobStopped() throws Exception {
         evaluator.setPeriodEndEnabled(true);
         Tenant graceT = data.tenant("mt05-grace"), plain = data.tenant("mt05-plain"), held = data.tenant("mt05-held");
+        // AGF SUB-R5-03: every new PROVIDER row records AD-7's 7 days (was a 1-day fixture and a row without grace)
         String inGrace = paidRow(graceT, Duration.ofMinutes(10));
-        jdbc.update("update business_subscription set grace_days = 1 where id = ?", inGrace); // fixture grace (AD-7 open)
         String noGrace = paidRow(plain, Duration.ofMinutes(10));
         String from = paidRow(held, Duration.ofMinutes(10));
         String change = paidDowngrade(held, from);
         process(event(paid(downgradeCheckout(held, change, from), soon().minusSeconds(50))));
-        Instant end = periodEnd(inGrace), graceUntil = end.plus(Duration.ofDays(1));
+        Instant end = periodEnd(inGrace), graceUntil = end.plus(Duration.ofDays(7));
 
         Map<String, Object> views = new LinkedHashMap<>();
         Map<String, Object> before = Map.of("g", businessState(graceT), "p", businessState(plain), "h", businessState(held));
         EffectiveView inGraceView = view(inGrace, end.plusSeconds(1));
         EffectiveView atGraceUntil = view(inGrace, graceUntil);
         EffectiveView justBefore = view(inGrace, graceUntil.minusNanos(1000));
-        EffectiveView plainAfter = view(noGrace, periodEnd(noGrace));
+        EffectiveView plainAfter = view(noGrace, periodEnd(noGrace).plus(Duration.ofDays(7)));
         EffectiveView heldAfter = view(from, periodEnd(from).plusSeconds(1));
         views.put("PROVIDER in grace", inGraceView);
         views.put("PROVIDER 1 µs before graceUntil", justBefore);
         views.put("PROVIDER at graceUntil", atGraceUntil);
-        views.put("PROVIDER no grace at period_end", plainAfter);
+        views.put("PROVIDER second row at its grace end", plainAfter);
         views.put("funded downgrade's row after its boundary, before any job", heldAfter);
         assertThat(inGraceView.entitledToPlan()).isTrue();
         assertThat(inGraceView.status().name()).isEqualTo("PAST_DUE");
         assertThat(justBefore.entitledToPlan()).isTrue();
         assertThat(atGraceUntil.entitledToPlan()).isFalse();
-        assertThat(plainAfter.entitledToPlan()).as("expired exactly at period_end").isFalse();
+        assertThat(plainAfter.entitledToPlan()).as("expired exactly at period_end + 7 d").isFalse();
+        assertThat(view(noGrace, periodEnd(noGrace)).entitledToPlan()).as("AD-7: never expired at period_end").isTrue();
         assertThat(Map.of("g", businessState(graceT), "p", businessState(plain), "h", businessState(held))).as("reads never write").isEqualTo(before);
 
         // restart: the jobs persist the same states, once
@@ -425,13 +426,13 @@ class FinancialConsolidationTest extends FinancialSuiteBase {
         periodEndJob.enqueueDue();
         drain(runner(null, null), "period-end.persist", "scheduled-change.apply");
         assertThat(subRow(inGrace).get("status")).isEqualTo("PAST_DUE");
-        assertThat(subRow(noGrace).get("status")).isEqualTo("EXPIRED");
+        assertThat(subRow(noGrace).get("status")).as("AD-7: in grace").isEqualTo("PAST_DUE");
         assertThat(changeRow(change).get("status")).as("the funded downgrade is applied by the first job").isEqualTo("APPLIED");
         Map<String, Object> once = Map.of("g", businessState(graceT), "p", businessState(plain), "h", businessState(held));
         periodEndJob.enqueueDue();
         drain(runner(null, null), "period-end.persist", "scheduled-change.apply");
         assertThat(Map.of("g", businessState(graceT), "p", businessState(plain), "h", businessState(held))).as("idempotent, one audit each").isEqualTo(once);
-        evidence("consolidation.txt", "MT-05 jobs stopped | " + views + " | restart persisted: in-grace PAST_DUE, no-grace EXPIRED, funded downgrade APPLIED; second run unchanged");
+        evidence("consolidation.txt", "MT-05 jobs stopped | " + views + " | restart persisted: both rows PAST_DUE (AD-7 grace), funded downgrade APPLIED; second run unchanged");
     }
 
     private EffectiveView view(String subscriptionId, Instant now) {
@@ -460,7 +461,7 @@ class FinancialConsolidationTest extends FinancialSuiteBase {
             rows.add(paidRow(t, Duration.ofSeconds(20)));
             ending.add(t);
         }
-        clock.setOffset(Duration.ofMinutes(1));
+        clock.setOffset(Duration.ofDays(7).plusMinutes(1)); // AGF SUB-R5-03: past AD-7's 7-day grace
         periodEndJob.enqueueDue();
         jdbc.update("update job set run_at = now() + interval '1 day' where status = 'PENDING' and type not in ('inbox.process', 'refund.execute', 'period-end.persist')");
         int jobs = count("select count(*) from job where status = 'PENDING' and run_at <= now()");

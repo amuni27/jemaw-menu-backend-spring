@@ -39,7 +39,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * AGF PROVIDER grace-end correction, against PostgreSQL. The rows are real PROVIDER rows with test-only payment evidence, so
- * the V23.2 guards stay active. Amounts and the seven-day grace are fixtures, not prices or a decision (AD-10 and AD-7 are open).
+ * the V23.2 guards stay active. Amounts are fixtures (AD-10 open). AGF SUB-R5-03: AD-7 is approved, so the lifecycle records 7 days
+ * on every new PROVIDER row; the two tests about other persisted values use an explicit pre-R5-03 row ({@link #recordedBeforeR503}).
  */
 class ProviderGraceEndJobTest extends AbstractIntegrationTest {
 
@@ -51,6 +52,8 @@ class ProviderGraceEndJobTest extends AbstractIntegrationTest {
     private static final String PAST_DUE_AUDIT = "SUBSCRIPTION_PAST_DUE";
 
     @Autowired private SubscriptionLifecycle lifecycle;
+
+    @Autowired private com.agafari.com.jpa.repository.BusinessSubscriptionRepository subscriptionRepository;
     @Autowired private MonetizationLocks locks;
     @Autowired private MonetizationClock clock;
     @Autowired private JdbcTemplate jdbc;
@@ -106,6 +109,20 @@ class ProviderGraceEndJobTest extends AbstractIntegrationTest {
     private String activate(Integer graceDays) {
         Ev e = evidence(START, END);
         return locked(() -> lifecycle.activatePaid(owner.businessId(), new PaidActivation("MODEL_4", 1, price, "P1", null, graceDays, START, END, TestEvidence.ref(e.payment(), e.invoice()), Instant.now()))).getId();
+    }
+
+    /**
+     * AGF SUB-R5-03: a PROVIDER row as recorded before AD-7 was applied (null or another grace), written with the entity factory
+     * and real evidence, because the lifecycle now refuses anything but 7 days. The job must keep using what the row persisted.
+     */
+    private String recordedBeforeR503(Integer graceDays) {
+        Ev e = evidence(START, END);
+        return locked(() -> {
+            com.agafari.com.jpa.entity.BusinessSubscription s = subscriptionRepository.saveAndFlush(com.agafari.com.jpa.entity.BusinessSubscription.provider(owner.businessId(),
+                    "MODEL_4", 1, price, "P1", null, graceDays, START, END, Instant.now(), "system"));
+            subscriptionRepository.insertPeriod(UUID.randomUUID().toString(), s.getId(), owner.businessId(), START, END, e.invoice(), e.payment());
+            return s.getId();
+        });
     }
 
     private void renew(String id) {
@@ -253,7 +270,7 @@ class ProviderGraceEndJobTest extends AbstractIntegrationTest {
 
     @Test
     void noRecordedGraceExpiresAtThePeriodEnd() throws Exception {
-        String id = activate(null);
+        String id = recordedBeforeR503(null);
         inGrace();
         job.enqueueDue();
         run();
@@ -263,7 +280,7 @@ class ProviderGraceEndJobTest extends AbstractIntegrationTest {
 
     @Test
     void theRowsPersistedGraceIsUsed() throws Exception {
-        String id = activate(3);
+        String id = recordedBeforeR503(3);
         at(END.plus(Duration.ofDays(4)));
         job.enqueueDue();
         run();

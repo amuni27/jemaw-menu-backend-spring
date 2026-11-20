@@ -465,11 +465,12 @@ class FinancialRaceTest extends FinancialSuiteBase {
             Round r = new Round(data.tenant("r9b-" + n));
             String sub = paidRow(r.t, Duration.ofSeconds(30));
             String change = paidDowngrade(r.t, sub);
-            String co = downgradeCheckout(r.t, change, sub);
+            String co = downgradeCheckoutOpenedAt(r.t, change, sub, Instant.now().plus(Duration.ofDays(7)));
             r.ids.put("sub", sub);
             r.ids.put("change", change);
-            r.ids.put("event", event(paid(co, periodEnd(sub).minusSeconds(1)))); // paid on time, not yet processed
-            clock.setOffset(Duration.ofMinutes(2));
+            // paid on time (AGF SUB-R5-03: the deadline is period_end + AD-7's 7 days), not yet processed
+            r.ids.put("event", event(paid(co, periodEnd(sub).plus(Duration.ofDays(7)).minusSeconds(1))));
+            clock.setOffset(Duration.ofDays(7).plusMinutes(2));
             return r;
         }, actors, (r, results) -> {
             String status = (String) changeRow(r.id("change")).get("status");

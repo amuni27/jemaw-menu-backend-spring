@@ -42,6 +42,8 @@ class ProviderActivationUnavailableTest {
     private static final String OUTCOME_SERVICE = "billing/PaymentOutcomeService.java";
     private static final String HANDLER = "billing/InboxProcessHandler.java";
     private static final String EXCEPTIONS = "billing/ExceptionService.java";
+    /** AGF SUB-R5-03: the renewal half of the same outcome path, reached only from {@code PaymentOutcomeService} (checked below). */
+    private static final String RENEWALS = "billing/RenewalOutcomes.java";
 
     @Test
     void theEntitysFactoriesAreKnown() {
@@ -62,7 +64,8 @@ class ProviderActivationUnavailableTest {
                 .filter(m -> Modifier.isPublic(m.getModifiers()) && !m.isSynthetic()).map(Method::getName).distinct().toList();
         assertThat(commands).containsExactlyInAnyOrder("startOwnerFree", "recordManual", "requireAdminPeriodEditable", "applyAdminChange", "changeTransitionDate",
                 "startTrial", "replace", "expireTrialIfDue", "endGrandfathered", "applyScheduledCancel", "applyScheduledDowngrade", "materialize",
-                "activatePaid", "renew", "markPastDue", "replacePaid");
+                "activatePaid", "renew", "markPastDue", "replacePaid",
+                "endForFailedPayment", "paidWithinGrace", "graceEnd"); // AGF SUB-R5-03
     }
 
     @Test
@@ -76,7 +79,7 @@ class ProviderActivationUnavailableTest {
             String lower = code.toLowerCase();
             return lower.contains("'provider'") || lower.contains("subscriptionsource.provider.name()") || lower.contains("insert into payment")
                     || lower.contains("insert into billing_invoice");
-        }, OUTCOME_SERVICE)).isEmpty();
+        }, OUTCOME_SERVICE, RENEWALS)).isEmpty();
         assertThat(offenders(code -> code.toLowerCase().contains("insert into refund_request"), "billing/RefundService.java")).as("SUB-R4-13: one refund-request writer").isEmpty();
         assertThat(offenders(code -> withoutComments(code).contains(".submitRefund(") || withoutComments(code).contains(".findRefund("),
                 "billing/RefundService.java", "billing/port/GuardedProviderClient.java")).as("SUB-R4-13: only RefundService calls the provider about refunds").isEmpty();
@@ -87,15 +90,18 @@ class ProviderActivationUnavailableTest {
     @Test
     void onlyThePaymentOutcomeServiceBuildsEvidenceOrCallsAPaidCommand() throws IOException {
         assertThat(offenders(code -> code.contains("new VerifiedPaymentRef(") || code.contains(".activatePaid(") || code.contains(".renew(") || code.contains(".replacePaid("),
-                OUTCOME_SERVICE)).isEmpty();
-        assertThat(offenders(code -> code.contains(".markPastDue("), "subscription/SubscriptionLifecycle.java")).as("no production caller of markPastDue yet").isEmpty();
+                OUTCOME_SERVICE, RENEWALS)).isEmpty();
+        // AGF SUB-R5-03: the event-driven failure path (addendum §5) is the only production caller of markPastDue and endForFailedPayment
+        assertThat(offenders(code -> code.contains(".markPastDue(") || code.contains(".endForFailedPayment("), "subscription/SubscriptionLifecycle.java", RENEWALS)).isEmpty();
         assertThat(offenders(code -> code.contains("BusinessSubscription.provider("), "subscription/SubscriptionLifecycle.java")).isEmpty();
     }
 
     @Test
     void onlyTheInboxHandlerAndAnExceptionReplayCallThePaymentOutcomeService() throws IOException {
         assertThat(offenders(code -> withoutComments(code).contains("PaymentOutcomeService"), OUTCOME_SERVICE, HANDLER, EXCEPTIONS, "billing/RefundService.java",
-                "billing/ReconciliationService.java")).isEmpty();
+                "billing/ReconciliationService.java", "billing/RenewalSweep.java", RENEWALS)).isEmpty();
+        // AGF SUB-R5-03: the renewal path is entered only from PaymentOutcomeService, so inbox.process stays the one way in
+        assertThat(offenders(code -> withoutComments(code).contains("RenewalOutcomes"), OUTCOME_SERVICE, RENEWALS)).as("only PaymentOutcomeService calls RenewalOutcomes").isEmpty();
         assertThat(offenders(code -> java.util.regex.Pattern.compile("outcomes\\.(process|replay)\\(").matcher(withoutComments(code)).find(), HANDLER, EXCEPTIONS))
                 .as("SUB-R4-13: RefundService only reads the billing gate").isEmpty();
         assertThat(offenders(code -> java.util.regex.Pattern.compile("\\.replay\\([^)]").matcher(withoutComments(code)).find(), EXCEPTIONS, "controller/AdminBillingExceptionController.java")).as("SUB-R4-11: replay only from an exception").isEmpty();

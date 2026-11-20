@@ -30,4 +30,9 @@ public final class RotatingSignatureVerifier implements SignatureVerifier {
     public Optional<String> paymentReference(byte[] rawBody) {
         return current.paymentReference(rawBody);
     }
+
+    @Override
+    public Optional<StateTrigger> stateTrigger(byte[] rawBody) {
+        return current.stateTrigger(rawBody);
+    }
 }

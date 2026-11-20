@@ -16,9 +16,18 @@ import java.time.Instant;
  *                          trustworthy lookup a refund (R5-05) starts from
  * @param evidenceProblem   null when the invoice is qualifying evidence (PO U1); otherwise why it isn't. The core then
  *                          treats the payment as unverified (matrix row 0): no charge is recorded and nothing is granted
+ * @param renewal           AGF SUB-R5-03: a provider-initiated renewal ({@code subscription_cycle}) of an existing provider
+ *                          subscription, identified by the subscription, never by a checkout. A renewal that doesn't qualify
+ *                          still names its subscription and customer, so its restaurant is known (addendum §1)
  */
 public record ProviderBilling(String invoiceRef, String subscriptionRef, String customerRef, String priceRef, PriceInterval interval, Instant periodStart, Instant periodEnd,
-                              String moneyMovementRef, String evidenceProblem) {
+                              String moneyMovementRef, String evidenceProblem, boolean renewal) {
+
+    /** An initial (checkout) invoice: the R5-02 shape. */
+    public ProviderBilling(String invoiceRef, String subscriptionRef, String customerRef, String priceRef, PriceInterval interval, Instant periodStart, Instant periodEnd,
+                           String moneyMovementRef, String evidenceProblem) {
+        this(invoiceRef, subscriptionRef, customerRef, priceRef, interval, periodStart, periodEnd, moneyMovementRef, evidenceProblem, false);
+    }
 
     public ProviderBilling {
         if (invoiceRef == null || invoiceRef.isBlank()) throw new IllegalArgumentException("An invoice reference is required");
@@ -35,6 +44,18 @@ public record ProviderBilling(String invoiceRef, String subscriptionRef, String 
     public static ProviderBilling notQualifying(String invoiceRef, String problem) {
         if (problem == null || problem.isBlank()) throw new IllegalArgumentException("A reason is required");
         return new ProviderBilling(invoiceRef, null, null, null, null, null, null, null, problem);
+    }
+
+    /** AGF SUB-R5-03: qualifying evidence of a provider-initiated renewal. */
+    public static ProviderBilling renewal(String invoiceRef, String subscriptionRef, String customerRef, String priceRef, PriceInterval interval, Instant periodStart,
+                                          Instant periodEnd, String moneyMovementRef) {
+        return new ProviderBilling(invoiceRef, subscriptionRef, customerRef, priceRef, interval, periodStart, periodEnd, moneyMovementRef, null, true);
+    }
+
+    /** AGF SUB-R5-03: a renewal whose evidence doesn't qualify; it keeps the subscription and customer that identify the restaurant. */
+    public static ProviderBilling renewalNotQualifying(String invoiceRef, String subscriptionRef, String customerRef, String problem) {
+        if (problem == null || problem.isBlank()) throw new IllegalArgumentException("A reason is required");
+        return new ProviderBilling(invoiceRef, subscriptionRef, customerRef, null, null, null, null, null, problem, true);
     }
 
     public boolean qualifying() {

@@ -589,12 +589,26 @@ abstract class FinancialSuiteBase extends PaymentOutcomeTestBase {
 
     /** The downgrade-renewal checkout made for {@code change}. */
     protected String downgradeCheckout(Tenant t, String change, String sub) {
+        return downgradeCheckout(t, change, sub, Instant.now().plus(23, ChronoUnit.HOURS));
+    }
+
+    /** AGF SUB-R5-03: a downgrade checkout opened at {@code openedAt} (near AD-7's deadline); a checkout lives at most 24 h. */
+    protected String downgradeCheckoutOpenedAt(Tenant t, String change, String sub, Instant openedAt) {
+        String id = downgradeCheckout(t, change, sub, openedAt.plus(23, ChronoUnit.HOURS), openedAt);
+        return id;
+    }
+
+    private String downgradeCheckout(Tenant t, String change, String sub, Instant expiresAt) {
+        return downgradeCheckout(t, change, sub, expiresAt, null);
+    }
+
+    private String downgradeCheckout(Tenant t, String change, String sub, Instant expiresAt, Instant createdAt) {
         String id = UUID.randomUUID().toString();
         jdbc.update("insert into checkout_session (id, business_id, owner_user_id, price_id, config_version, kind, replaces_subscription_id, provider, provider_session_ref, provider_session_url, "
                         + "status, idempotency_key, request_hash, expires_at, expected_amount_minor, expected_currency, created_at, scheduled_change_id) "
-                        + "values (?, ?, ?, ?, 3, 'DOWNGRADE_RENEWAL', ?, ?, ?, 'https://fake.test/pay', 'OPEN', ?, 'hash', ?, 1500, 'ETB', now(), ?)",
+                        + "values (?, ?, ?, ?, 3, 'DOWNGRADE_RENEWAL', ?, ?, ?, 'https://fake.test/pay', 'OPEN', ?, 'hash', ?, 1500, 'ETB', coalesce(?, now()), ?)",
                 id, t.businessId(), t.owner().getId(), price3, sub, PROVIDER, "sess_" + id, UUID.randomUUID().toString(),
-                Timestamp.from(Instant.now().plus(23, ChronoUnit.HOURS)), change);
+                Timestamp.from(expiresAt), createdAt == null ? null : Timestamp.from(createdAt), change);
         return id;
     }
 

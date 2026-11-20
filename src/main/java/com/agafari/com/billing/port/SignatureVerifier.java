@@ -22,4 +22,12 @@ public interface SignatureVerifier {
     default Optional<String> paymentReference(byte[] rawBody) {
         return Optional.empty();
     }
+
+    /**
+     * AGF SUB-R5-03 (addendum §4): the object a stored state event (a failed renewal, a subscription change or deletion) asks
+     * Agafari to re-fetch. Only what to re-fetch is read; the event body is never evidence. Empty for every other event.
+     */
+    default Optional<StateTrigger> stateTrigger(byte[] rawBody) {
+        return Optional.empty();
+    }
 }

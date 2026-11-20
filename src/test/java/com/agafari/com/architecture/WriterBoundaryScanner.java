@@ -63,6 +63,7 @@ final class WriterBoundaryScanner {
     private static final String ENTITY_MANAGER = "jakarta/persistence/EntityManager";
     private static final String FIELD = "java/lang/reflect/Field";
     private static final String PAYMENT_OUTCOME_SERVICE = "com/agafari/com/billing/PaymentOutcomeService";
+    private static final String RENEWAL_OUTCOMES = "com/agafari/com/billing/RenewalOutcomes";
     private static final String STRIPE_SDK = "com/stripe/";
     private static final List<String> PROVIDER_ADAPTERS = List.of("com/agafari/com/billing/stripe/", "com/agafari/com/billing/chapa/");
     private static final Pattern WRITE_SQL = Pattern.compile("(?is)\\b(insert\\s+into|update|delete\\s+from)\\s+(business_subscription|subscription_period|BusinessSubscription)\\b");
@@ -225,7 +226,7 @@ final class WriterBoundaryScanner {
                 if (owner.equals(ENTITY_MANAGER) && target.matches("persist|merge|remove")) persistence.putIfAbsent(method + target, new Violation("PERSISTENCE", name, method, "EntityManager." + target));
                 if (owner.equals(FIELD) && target.matches("set(Int|Long|Boolean|Byte|Short|Char|Float|Double)?")) persistence.putIfAbsent(method + target, new Violation("PERSISTENCE", name, method, "reflective field write"));
             }
-            if (target.equals("<init>") && owner.endsWith("/VerifiedPaymentRef") && !name.equals(PAYMENT_OUTCOME_SERVICE)) {
+            if (target.equals("<init>") && owner.endsWith("/VerifiedPaymentRef") && !name.equals(PAYMENT_OUTCOME_SERVICE) && !name.equals(RENEWAL_OUTCOMES)) { // AGF SUB-R5-03
                 report("VERIFIED_PAYMENT", method, "only PaymentOutcomeService constructs VerifiedPaymentRef");
             }
         }

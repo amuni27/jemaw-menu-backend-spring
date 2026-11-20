@@ -39,7 +39,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  *
  * <p>Fixture note: under the approved D1 rule no paid → paid downgrade exists in today's product (Setting 2's paid plans are
  * Model 3 and Model 4, whose transition is undecided, CHG-03/04). Changes are therefore inserted as fixtures (Model 4 →
- * Model 3), and the owner API's refusal is tested separately. Grace values are fixtures only; AD-7 is open.
+ * Model 3), and the owner API's refusal is tested separately. AGF SUB-R5-03 realigned the grace scenarios to AD-7 (approved,
+ * register §63): every new PROVIDER row records 7 days, so no row ends at its boundary and the funding deadline is
+ * {@code period_end + 7 d}. (Billing was never enabled, so no PROVIDER row without recorded grace exists outside tests.)
  */
 class PaidScheduledChangeTest extends PaymentOutcomeTestBase {
 
@@ -111,6 +113,17 @@ class PaidScheduledChangeTest extends PaymentOutcomeTestBase {
         return id;
     }
 
+    /** AGF SUB-R5-03: a downgrade checkout opened at {@code openedAt} (near AD-7's deadline); a checkout lives at most 24 h. */
+    private String downgradeCheckoutOpenedAt(Tenant t, String change, String sub, Instant openedAt) {
+        String id = UUID.randomUUID().toString();
+        jdbc.update("insert into checkout_session (id, business_id, owner_user_id, price_id, config_version, kind, replaces_subscription_id, provider, provider_session_ref, provider_session_url, "
+                        + "status, idempotency_key, request_hash, expires_at, expected_amount_minor, expected_currency, created_at, scheduled_change_id) "
+                        + "values (?, ?, ?, ?, 3, 'DOWNGRADE_RENEWAL', ?, ?, ?, 'https://fake.test/pay', 'OPEN', ?, 'hash', ?, 1500, 'ETB', ?, ?)",
+                id, t.businessId(), t.owner().getId(), price3, sub, PROVIDER, "sess_" + id, UUID.randomUUID().toString(), Timestamp.from(openedAt.plus(23, ChronoUnit.HOURS)),
+                Timestamp.from(openedAt), change);
+        return id;
+    }
+
     private String downgradeCheckout(Tenant t, String change, String sub) {
         return downgradeCheckout(t, change, sub, Instant.now().plus(23, ChronoUnit.HOURS));
     }
@@ -150,7 +163,7 @@ class PaidScheduledChangeTest extends PaymentOutcomeTestBase {
         assertThat(old).containsEntry("status", "EXPIRED").containsEntry("ended_reason", "CHANGED").containsEntry("replaced_by_id", target);
         assertThat(((Timestamp) old.get("ended_at")).toInstant()).as("ends exactly at the boundary").isEqualTo(boundary);
         assertThat(next).containsEntry("source", "PROVIDER").containsEntry("plan_code", "MODEL_3").containsEntry("price_id", price3);
-        assertThat(next.get("grace_days")).as("AD-7: no grace invented").isNull();
+        assertThat(next.get("grace_days")).as("AGF SUB-R5-03, AD-7: 7 days recorded on the new PROVIDER row").isEqualTo(7);
         assertThat(((Timestamp) next.get("period_end")).toInstant()).isEqualTo(oneMonth(boundary));
         Map<String, Object> change = changeRow(changeId);
         assertThat(change).containsEntry("status", "APPLIED").containsEntry("applied_subscription_id", target);
@@ -259,8 +272,7 @@ class PaidScheduledChangeTest extends PaymentOutcomeTestBase {
 
     @Test
     void ac2WithoutPaymentTheCurrentPlanContinuesOnlyThroughRecordedGraceThenTheChangeFails() {
-        String sub = paidRow(owner, Duration.ofMinutes(5));
-        jdbc.update("update business_subscription set grace_days = 1 where id = ?", sub); // explicit fixture grace
+        String sub = paidRow(owner, Duration.ofMinutes(5)); // AGF SUB-R5-03: AD-7's recorded 7 days (was a 1-day fixture)
         String changeId = change(owner, sub);
         passTime(Duration.ofMinutes(10));
 
@@ -271,23 +283,30 @@ class PaidScheduledChangeTest extends PaymentOutcomeTestBase {
         assertThat(current(owner)).as("the existing contract, never the target").isEqualTo(sub);
         assertThat(count("select count(*) from business_subscription where business_id = ? and plan_code = 'MODEL_3'", owner.businessId())).isZero();
 
-        passTime(Duration.ofDays(1).plusMinutes(10));
+        passTime(Duration.ofDays(7).plusMinutes(10));
         periodEndJob(owner, sub);
 
         assertThat(subRow(sub)).containsEntry("status", "EXPIRED").containsEntry("ended_reason", "PAYMENT_FAILED");
-        assertThat(((Timestamp) subRow(sub).get("ended_at")).toInstant()).isEqualTo(periodEnd(sub).plus(Duration.ofDays(1)));
+        assertThat(((Timestamp) subRow(sub).get("ended_at")).toInstant()).isEqualTo(periodEnd(sub).plus(Duration.ofDays(7)));
         assertThat(changeRow(changeId).get("status")).isEqualTo("FAILED");
         assertThat(current(owner)).isNull();
     }
 
     @Test
-    void ac2WithoutRecordedGraceTheRowEndsAtTheBoundaryAndTheChangeFails() {
+    void ac2UnderAd7TheRowNeverEndsAtTheBoundaryAndAnUnpaidChangeWaitsThenFails() {
+        // AGF SUB-R5-03: was "without recorded grace the row ends at the boundary"; every new PROVIDER row now records 7 days
         String sub = paidRow(owner, Duration.ofMinutes(5));
+        assertThat(subRow(sub).get("grace_days")).isEqualTo(7);
         String changeId = change(owner, sub);
         passTime(Duration.ofMinutes(10));
 
         periodEndJob(owner, sub);
 
+        assertThat(subRow(sub)).containsEntry("status", "PAST_DUE");
+        assertThat(changeRow(changeId).get("status")).isEqualTo("AWAITING_PAYMENT");
+
+        passTime(Duration.ofDays(7).plusMinutes(10));
+        periodEndJob(owner, sub);
         assertThat(subRow(sub)).containsEntry("status", "EXPIRED").containsEntry("ended_reason", "PAYMENT_FAILED");
         assertThat(changeRow(changeId).get("status")).isEqualTo("FAILED");
         assertThat(count("select count(*) from billing_exception where business_id = ?", owner.businessId())).as("nothing was held").isZero();
@@ -295,8 +314,7 @@ class PaidScheduledChangeTest extends PaymentOutcomeTestBase {
 
     @Test
     void d2APaymentWithinRecordedGraceAppliesTheTargetFromTheBoundary() {
-        String sub = paidRow(owner, Duration.ofMinutes(5));
-        jdbc.update("update business_subscription set grace_days = 1 where id = ?", sub);
+        String sub = paidRow(owner, Duration.ofMinutes(5)); // AGF SUB-R5-03: the row records AD-7's 7 days (was a 1-day fixture)
         String changeId = change(owner, sub);
         Instant boundary = periodEnd(sub);
         passTime(Duration.ofMinutes(10));
@@ -315,11 +333,11 @@ class PaidScheduledChangeTest extends PaymentOutcomeTestBase {
     void n5APaymentAfterTheDeadlineIsRefusedEvenBeforeTheExpiryJobRunsAndNeverActivates() {
         String sub = paidRow(owner, Duration.ofMinutes(5));
         String changeId = change(owner, sub);
-        String co = downgradeCheckout(owner, changeId, sub);
+        String co = downgradeCheckoutOpenedAt(owner, changeId, sub, Instant.now().plus(Duration.ofDays(7)));
         Instant boundary = periodEnd(sub);
-        passTime(Duration.ofMinutes(10));
+        passTime(Duration.ofDays(7).plusMinutes(10)); // AGF SUB-R5-03: the deadline is period_end + AD-7's 7 days
         assertThat(subRow(sub).get("status")).as("the expiry job hasn't run").isEqualTo("ACTIVE");
-        String ref = paid(co, boundary.plusSeconds(60));
+        String ref = paid(co, boundary.plus(Duration.ofDays(7)).plusSeconds(60));
 
         assertThat(process(event(ref))).isEqualTo(PaymentOutcomeService.Result.PROCESSED);
 
@@ -391,7 +409,7 @@ class PaidScheduledChangeTest extends PaymentOutcomeTestBase {
         String co = downgradeCheckout(owner, changeId, sub);
         Instant boundary = periodEnd(sub);
         String ref = paid(co, boundary.minusSeconds(30)); // paid in time
-        passTime(Duration.ofMinutes(10));
+        passTime(Duration.ofDays(7).plusMinutes(10)); // AGF SUB-R5-03: past AD-7's grace, so the change fails
         periodEndJob(owner, sub); // the expiry ran before the notification arrived
         assertThat(changeRow(changeId).get("status")).isEqualTo("FAILED");
 
@@ -464,7 +482,7 @@ class PaidScheduledChangeTest extends PaymentOutcomeTestBase {
         process(event(ref)); // the old payment's event again
         assertThat(changeRow(second).get("funding_payment_id")).isNull();
 
-        passTime(Duration.ofMinutes(10));
+        passTime(Duration.ofDays(7).plusMinutes(10)); // AGF SUB-R5-03: past AD-7's grace
         periodEndJob(owner, sub);
         assertThat(changeRow(second).get("status")).isEqualTo("FAILED");
         assertThat(count("select count(*) from business_subscription where business_id = ? and plan_code = 'MODEL_3'", owner.businessId())).isZero();
@@ -535,7 +553,8 @@ class PaidScheduledChangeTest extends PaymentOutcomeTestBase {
         assertThat(changeRow(changeId).get("status")).isEqualTo("APPLIED");
         Map<String, Object> target = subRow(targetRow(owner));
         assertThat(target).containsEntry("status", "EXPIRED");
-        assertThat(((Timestamp) target.get("ended_at")).toInstant()).as("not one moment beyond its paid period").isEqualTo(oneMonth(boundary));
+        assertThat(((Timestamp) target.get("ended_at")).toInstant()).as("not one moment beyond its paid period and AD-7's grace (SUB-R5-03)")
+                .isEqualTo(oneMonth(boundary).plus(Duration.ofDays(7)));
         assertThat(current(owner)).isNull();
     }
 
@@ -548,7 +567,7 @@ class PaidScheduledChangeTest extends PaymentOutcomeTestBase {
         fundEarly(owner, sub, changeId);
         String held = (String) changeRow(changeId).get("funding_payment_id");
         jdbc.update("update billing_account set provider = 'ELSEWHERE' where business_id = ?", owner.businessId()); // the market check now fails
-        passTime(Duration.ofMinutes(10));
+        passTime(Duration.ofDays(7).plusMinutes(10)); // AGF SUB-R5-03: past AD-7's grace, so the row ends once the change fails
 
         periodEndJob(owner, sub);
 

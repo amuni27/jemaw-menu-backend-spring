@@ -148,9 +148,18 @@ public class SubscriptionLifecycle {
 
     /** AGF SUB-R4-09: a verified renewal. PD-3 is open, so a period can only start where the current one ends. */
     public BusinessSubscription renew(String subscriptionId, PeriodExtension e) {
+        return renew(subscriptionId, e, null);
+    }
+
+    /**
+     * AGF SUB-R5-03 (addendum §6): a verified provider renewal paid at {@code paidAt}. The payment time decides at the grace
+     * boundary: a row still stored as current whose payment was made no later than {@code period_end + grace} is renewed
+     * before {@code materialize} can persist an expiry the late job hadn't written yet. Otherwise exactly {@link #renew(String, PeriodExtension)}.
+     */
+    public BusinessSubscription renew(String subscriptionId, PeriodExtension e, Instant paidAt) {
         BusinessSubscription s = subscriptions.findById(subscriptionId).orElseThrow(() -> new IllegalStateException("No such subscription"));
         locks.assertHeld(s.getBusinessId());
-        materialize(s.getBusinessId());
+        if (!paidWithinGrace(s, paidAt)) materialize(s.getBusinessId());
         EvidenceValidator.Result result = evidence.validate(new EvidenceValidator.Claim(e.evidence(), s.getBusinessId(), s.getPlanCode(), s.getProvider(), e.periodStart(), e.periodEnd(), subscriptionId));
         if (result.alreadyAppliedTo() != null) return s;
         LifecycleStatus status = LifecycleStatus.of(s.getStatus());
@@ -160,6 +169,31 @@ public class SubscriptionLifecycle {
         BusinessSubscription saved = subscriptions.saveAndFlush(s);
         consume(saved, e.periodStart(), e.periodEnd(), e.evidence());
         audit.success(RENEWED, null, AdminAuditService.SYSTEM, TARGET, saved.getId(), status + " -> ACTIVE");
+        return saved;
+    }
+
+    /** AGF SUB-R5-03: whether a stored current PROVIDER row's payment at {@code paidAt} was made by its grace end (AD-7). */
+    public static boolean paidWithinGrace(BusinessSubscription s, Instant paidAt) {
+        if (paidAt == null || !s.isCurrent() || SubscriptionSource.of(s.getSource()) != SubscriptionSource.PROVIDER || s.getPeriodEnd() == null) return false;
+        return !paidAt.isAfter(graceEnd(s));
+    }
+
+    /** AGF SUB-R5-03: {@code period_end} plus the row's recorded grace (none recorded: none). */
+    public static Instant graceEnd(BusinessSubscription s) {
+        return s.getPeriodEnd() == null ? null : s.getPeriodEnd().plus(GraceSettings.ofSnapshot(s.getGraceDays()).providerGrace());
+    }
+
+    /**
+     * AGF SUB-R5-03 (addendum §8, D-R3): the provider ended a PAST_DUE subscription after its retries failed. The row ends at
+     * {@code endedAt} (the caller passes the earlier of the provider's end and the grace end) with {@code PAYMENT_FAILED}.
+     */
+    public BusinessSubscription endForFailedPayment(String subscriptionId, Instant endedAt, Instant now) {
+        BusinessSubscription s = subscriptions.findById(subscriptionId).orElseThrow(() -> new IllegalStateException("No such subscription"));
+        locks.assertHeld(s.getBusinessId());
+        TransitionRules.require(LifecycleStatus.of(s.getStatus()), LifecycleStatus.EXPIRED, TransitionReason.PAYMENT_FAILED, SubscriptionSource.of(s.getSource()));
+        s.endAtEffectiveTime(endedAt, TransitionReason.PAYMENT_FAILED.name(), now, AdminAuditService.SYSTEM);
+        BusinessSubscription saved = subscriptions.saveAndFlush(s);
+        audit.success(PERIOD_ENDED, null, AdminAuditService.SYSTEM, TARGET, saved.getId(), "PAST_DUE -> EXPIRED reason=PAYMENT_FAILED (the provider ended the subscription)");
         return saved;
     }
 
@@ -194,8 +228,10 @@ public class SubscriptionLifecycle {
         return saved;
     }
 
+    /** AGF SUB-R5-03 (AD-7, D-R6): every new PROVIDER row records 7 days of grace; another value is refused. */
     private static BusinessSubscription providerRow(String businessId, PaidActivation a) {
-        return BusinessSubscription.provider(businessId, a.planCode(), a.configVersion(), a.priceId(), a.provider(), a.providerSubscriptionRef(), a.graceDays(), a.periodStart(), a.periodEnd(), a.now(), AdminAuditService.SYSTEM);
+        return BusinessSubscription.provider(businessId, a.planCode(), a.configVersion(), a.priceId(), a.provider(), a.providerSubscriptionRef(), ProviderGrace.require(a.graceDays()),
+                a.periodStart(), a.periodEnd(), a.now(), AdminAuditService.SYSTEM);
     }
 
     private void consume(BusinessSubscription s, Instant start, Instant end, com.agafari.com.billing.VerifiedPaymentRef ref) {
@@ -336,8 +372,8 @@ public class SubscriptionLifecycle {
                 SubscriptionSource.PROVIDER);
         int configVersion = subscriptions.findLatestConfig(Limit.of(1)).stream().findFirst().map(c -> c.getVersion()).orElseThrow(ExpectedSubscriptionChangedException::new);
         // The target's contract starts at the boundary, so that is when its row begins, even when processing resumes late
-        // (V13: period_end > created_at). AD-7 is open: no grace is recorded.
-        BusinessSubscription next = BusinessSubscription.provider(s.getBusinessId(), targetPlan, configVersion, targetPrice, s.getProvider(), null, null, effectiveAt, periodEnd,
+        // (V13: period_end > created_at). AGF SUB-R5-03 (AD-7): a new PROVIDER row records 7 days of grace.
+        BusinessSubscription next = BusinessSubscription.provider(s.getBusinessId(), targetPlan, configVersion, targetPrice, s.getProvider(), null, ProviderGrace.DAYS, effectiveAt, periodEnd,
                 effectiveAt, AdminAuditService.SYSTEM);
         s.endAtEffectiveTime(effectiveAt, TransitionReason.CHANGED.name(), now, AdminAuditService.SYSTEM);
         s.recordEnding(TransitionReason.CHANGED.name(), next.getId());

@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
-/** AGF SUB-R4-14: the hourly and daily triggers of {@link ReconciliationJobs}. Exist only with {@code app.jobs.enabled=true} (default false). */
+/** AGF SUB-R4-14: the hourly and daily triggers of {@link ReconciliationJobs} (and, R5-03, of the {@link RenewalSweep}). Exist only with {@code app.jobs.enabled=true} (default false). */
 @Component
 @ConditionalOnProperty(name = "app.jobs.enabled", havingValue = "true")
 public class ReconciliationCadence {
@@ -23,6 +23,13 @@ public class ReconciliationCadence {
     public void hourly() {
         String bucket = Instant.now().truncatedTo(ChronoUnit.HOURS).toString();
         queue.enqueue(ReconciliationJobs.HOURLY_TYPE, bucket, new ReconciliationJobs.Payload(bucket));
+    }
+
+    /** AGF SUB-R5-03 (P-R1): plans the renewal sweep's checks once per hour. */
+    @Scheduled(cron = "${app.jobs.renewal-sweep-cron:0 10 * * * *}", zone = "UTC")
+    public void renewalSweep() {
+        String bucket = Instant.now().truncatedTo(ChronoUnit.HOURS).toString();
+        queue.enqueue(RenewalSweep.PLAN_TYPE, bucket, new RenewalSweep.PlanPayload(bucket));
     }
 
     @Scheduled(cron = "${app.jobs.reconcile-daily-cron:0 40 3 * * *}", zone = "UTC")

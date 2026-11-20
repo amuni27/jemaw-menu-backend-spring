@@ -302,7 +302,8 @@ class StripeProviderClientTest {
         Paid p = paid();
         p.invoice.put("billing_reason", "subscription_cycle");
         assertThat(verify(p).metadata()).as("D6: a renewal is not initial").isEmpty();
-        assertThat(verify(p).billing()).isNull();
+        // AGF SUB-R5-03 (supersedes the R5-02 F2 quarantine): a renewal is identified by its subscription, still without checkout metadata
+        assertThat(verify(p).billing().renewal()).isTrue();
         p.invoice.put("billing_reason", "subscription_update");
         assertThat(verify(p).metadata()).isEmpty();
         p.invoice.put("billing_reason", "subscription_create");

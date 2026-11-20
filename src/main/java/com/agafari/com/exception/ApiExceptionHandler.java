@@ -85,6 +85,12 @@ public class ApiExceptionHandler {
                 .body(ApiError.of(HttpStatus.BAD_REQUEST, EmailVerificationLinkException.CODE, e.getMessage()));
     }
 
+    /** AGF BE-6 (register §56). */
+    @ExceptionHandler(PublishDryRunRefusedException.class)
+    public ResponseEntity<ApiError> publishDryRunRefused(PublishDryRunRefusedException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(HttpStatus.CONFLICT, e.code(), e.getMessage()));
+    }
+
     /** AGF BE-4 (register §52 B-8). */
     @ExceptionHandler(PlanRequiredToPublishException.class)
     public ResponseEntity<ApiError> planRequiredToPublish(PlanRequiredToPublishException e) {

@@ -27,9 +27,12 @@ public class FlagMatrixValidator implements SmartInitializingSingleton {
     private final DataSource dataSource;
     private final boolean jobsEnabled;
     private final ObjectProvider<PriceAvailability> prices;
+    private final ObjectProvider<PublishGateReadiness> publishReadiness;
 
-    public FlagMatrixValidator(BillingFlags flags, DataSource dataSource, @Value("${app.jobs.enabled:false}") boolean jobsEnabled, ObjectProvider<PriceAvailability> prices) {
+    public FlagMatrixValidator(BillingFlags flags, DataSource dataSource, @Value("${app.jobs.enabled:false}") boolean jobsEnabled, ObjectProvider<PriceAvailability> prices,
+                               ObjectProvider<PublishGateReadiness> publishReadiness) {
         this.prices = prices;
+        this.publishReadiness = publishReadiness;
         this.flags = flags;
         this.dataSource = dataSource;
         this.jobsEnabled = jobsEnabled;
@@ -42,8 +45,14 @@ public class FlagMatrixValidator implements SmartInitializingSingleton {
 
     /** Throws {@link FlagMatrixViolationException} if this candidate configuration can't run. */
     public void check(BillingFlags candidate, boolean candidateJobsEnabled) {
+        // AGF BE-6: the publishing-gate facts are read only when a market asks for the gate (no queries otherwise)
+        boolean anyGate = candidate.us().publishRequiresPlan() || candidate.et().publishRequiresPlan();
+        PublishGateReadiness readiness = anyGate ? publishReadiness.getIfAvailable() : null;
         List<String> violations = violations(candidate, candidateJobsEnabled, new FlagFacts(postgres(),
-                candidate.us().pricesVisible() && available(Market.US), candidate.et().pricesVisible() && available(Market.ET), false, false, false, false));
+                candidate.us().pricesVisible() && available(Market.US), candidate.et().pricesVisible() && available(Market.ET), false,
+                candidate.us().publishRequiresPlan() && readiness != null && readiness.dryRunSignedOff(Market.US),
+                candidate.et().publishRequiresPlan() && readiness != null && readiness.dryRunSignedOff(Market.ET),
+                false, false, readiness != null && readiness.ownerPlansReady()));
         if (!violations.isEmpty()) throw new FlagMatrixViolationException(violations);
     }
 

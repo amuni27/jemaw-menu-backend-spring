@@ -98,6 +98,9 @@ class FlagMatrixStartupTest {
     void publishEnforcementIsRefused() throws Exception {
         refused(postgres(), "dry run", "app.billing.us.publish-requires-plan=true", "app.billing.period-end-enabled=true", "app.billing.period-end-report-acknowledged=true");
         refused(h2(), "PostgreSQL", "app.billing.us.publish-requires-plan=true");
+        // AGF BE-6: without the dry-run sign-off and owner-plan facts (no readiness bean here), still refused, period-end or not
+        refused(postgres(), "dry run", "app.billing.et.publish-requires-plan=true");
+        refused(postgres(), "owner plans", "app.billing.et.publish-requires-plan=true");
     }
 
     /** NC-11. */

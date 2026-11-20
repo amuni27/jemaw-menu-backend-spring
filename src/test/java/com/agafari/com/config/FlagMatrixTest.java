@@ -91,9 +91,29 @@ class FlagMatrixTest {
         assertThat(check(flags(true, false, true, publish()), ALL)).isEmpty();
     }
 
+    /** AGF BE-6 (register §56 D-2, amends SUB-R2-12): period-end is required for the publish gate only while billing is on there. */
     @Test
-    void publishNeedsPeriodEnd() {
-        assertThat(check(flags(false, false, false, publish()), ALL)).singleElement().asString().contains("publish-requires-plan").contains("period-end-enabled");
+    void publishNeedsPeriodEndOnlyWhileBillingIsEnabledInThatMarket() {
+        assertThat(check(flags(false, false, false, publish()), ALL)).as("billing off: no period-end needed").isEmpty();
+        List<String> found = check(flags(false, true, false, new MarketFlags(true, true, true, false)), ALL);
+        assertThat(found).anyMatch(v -> v.contains("publish-requires-plan") && v.contains("period-end-enabled") && v.contains("while billing"));
+    }
+
+    /** AGF BE-6 (D-3): the signed dry run is per market. */
+    @Test
+    void theSignedDryRunIsPerMarket() {
+        FlagFacts onlyEt = new FlagFacts(true, true, true, true, false, true, true, true, true);
+        BillingFlags et = new BillingFlags(false, false, false, OFF, publish());
+        BillingFlags us = new BillingFlags(false, false, false, publish(), OFF);
+        assertThat(check(et, onlyEt)).isEmpty();
+        assertThat(check(us, onlyEt)).singleElement().asString().contains("publish-requires-plan (US)").contains("dry run");
+    }
+
+    /** AGF BE-6 (D-5, F-3): the gate needs owner plans visible and a monetization configuration. */
+    @Test
+    void publishNeedsOwnerPlansReady() {
+        FlagFacts hidden = new FlagFacts(true, true, true, true, true, true, true, true, false);
+        assertThat(check(flags(false, false, false, publish()), hidden)).singleElement().asString().contains("publish-requires-plan").contains("owner plans");
     }
 
     @Test

@@ -12,7 +12,10 @@ import com.agafari.com.jpa.entity.ScheduledChange;
 import com.agafari.com.jpa.repository.BusinessRepository;
 import com.agafari.com.jpa.repository.BusinessSubscriptionRepository;
 import com.agafari.com.jpa.repository.MonetizationConfigRepository;
+import com.agafari.com.subscription.EffectiveState;
 import com.agafari.com.subscription.EffectiveStateEvaluator;
+import com.agafari.com.subscription.EffectiveView;
+import com.agafari.com.subscription.GraceSettings;
 import com.agafari.com.subscription.ScheduledChangeRules;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -79,13 +82,50 @@ public class PublishEligibility {
         gate.put(market, on);
     }
 
+    /**
+     * AGF BE-6: one restaurant's evaluation as if the gate were on, with a reason. {@code reason}: EXEMPT → CREATED_BEFORE_CUT_OVER;
+     * ENTITLED → TRIAL, ACTIVE_&lt;SOURCE&gt;, GRANDFATHERED, PAST_DUE_IN_GRACE or DOWNGRADE_DUE; REFUSED → NO_PLAN, PLAN_ENDED,
+     * CANCELLATION_DUE or the effective-state reason (TRIAL_ENDED, GRACE_ENDED, GRANDFATHERING_ENDED, …).
+     * {@code entitledOnlyBecausePeriodEndOff}: entitled now, but not with period-end processing on (D-2 review list).
+     */
+    public record Evaluation(Decision decision, String reason, boolean entitledOnlyBecausePeriodEndOff) {
+    }
+
     public Decision decide(String businessId) {
         Business business = businesses.findById(businessId).orElseThrow(() -> new NotFoundException("Business not found"));
         Market market = Market.fromCountry(business.getCountry()).orElse(null);
         if (market == null || !gateOn(market)) return Decision.NOT_GATED;
+        BusinessSubscription row = subscriptions.findCurrentByBusinessId(businessId).orElse(null);
+        MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElse(null);
+        Instant now = clock.now();
+        ScheduledChange due = row == null || config == null ? null : subscriptions.findDueScheduledChange(row.getId(), now).orElse(null);
+        return evaluate(business.getCreatedAt(), row, due, config, false, now).decision();
+    }
+
+    /**
+     * The gate's rule for one restaurant, as if the gate were on in its market (BE-4; shared with the BE-6 dry run so the two
+     * can never differ). {@code due}: the row's due scheduled change, if any; {@code hadAnyRow} only shapes the reason.
+     */
+    public Evaluation evaluate(Instant createdAt, BusinessSubscription row, ScheduledChange due, MonetizationConfig config, boolean hadAnyRow, Instant now) {
         Instant from = cutOver.from(); // never null while a gate is on (startup check); a test that clears it fails closed
-        if (from != null && business.getCreatedAt() != null && business.getCreatedAt().isBefore(from)) return Decision.EXEMPT; // P-6, B-1
-        return entitled(businessId) ? Decision.ENTITLED : Decision.REFUSED;
+        if (from != null && createdAt != null && createdAt.isBefore(from)) return new Evaluation(Decision.EXEMPT, "CREATED_BEFORE_CUT_OVER", false); // P-6, B-1
+        if (row == null) return new Evaluation(Decision.REFUSED, hadAnyRow ? "PLAN_ENDED" : "NO_PLAN", false);
+        // AGF SUB-R2-11 (as entitlements): from effective_at a cancellation counts as applied, a Free downgrade keeps a plan
+        if (due != null && config != null && ScheduledChangeRules.stillApplies(due, config)) {
+            return due.getTargetPlanCode() != null ? new Evaluation(Decision.ENTITLED, "DOWNGRADE_DUE", false) : new Evaluation(Decision.REFUSED, "CANCELLATION_DUE", false);
+        }
+        boolean grandfatheringEnded = config != null && grandfathering.effectivelyEnded(row, config);
+        EffectiveView view = evaluator.view(row, grandfatheringEnded, now);
+        if (!view.entitledToPlan()) return new Evaluation(Decision.REFUSED, view.reasonCode(), false);
+        boolean onlyBecausePeriodEndOff = !evaluator.isPeriodEndEnabled() && !row.isTrial()
+                && !EffectiveState.of(row, GraceSettings.ofSnapshot(row.getGraceDays()), true, grandfatheringEnded, now).entitledToPlan();
+        String reason = switch (view.status()) {
+            case TRIAL -> "TRIAL";
+            case GRANDFATHERED -> "GRANDFATHERED";
+            case PAST_DUE -> "PAST_DUE_IN_GRACE";
+            default -> "ACTIVE_" + row.getSource();
+        };
+        return new Evaluation(Decision.ENTITLED, reason, onlyBecausePeriodEndOff);
     }
 
     /** Throws {@link PlanRequiredToPublishException} when this restaurant may not publish now. */
@@ -94,19 +134,5 @@ public class PublishEligibility {
         if (decision.allowed()) return;
         log.info("event=publish_gate.refused businessId={}", businessId);
         throw new PlanRequiredToPublishException();
-    }
-
-    private boolean entitled(String businessId) {
-        BusinessSubscription row = subscriptions.findCurrentByBusinessId(businessId).orElse(null);
-        if (row == null) return false;
-        MonetizationConfig config = configs.findTopByOrderByVersionDesc().orElse(null);
-        Instant now = clock.now();
-        // AGF SUB-R2-11 (as entitlements): from effective_at a cancellation counts as applied, a Free downgrade keeps a plan
-        if (config != null) {
-            ScheduledChange due = subscriptions.findDueScheduledChange(row.getId(), now).orElse(null);
-            if (due != null && ScheduledChangeRules.stillApplies(due, config)) return due.getTargetPlanCode() != null;
-        }
-        boolean grandfatheringEnded = config != null && grandfathering.effectivelyEnded(row, config);
-        return evaluator.view(row, grandfatheringEnded, now).entitledToPlan();
     }
 }

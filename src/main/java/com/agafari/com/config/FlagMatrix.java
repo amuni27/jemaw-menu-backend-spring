@@ -35,8 +35,10 @@ public final class FlagMatrix {
         }
         if (m.publishRequiresPlan()) {
             String flag = "publish-requires-plan (" + name + ") requires ";
-            if (!flags.periodEndEnabled()) found.add(flag + "period-end-enabled");
-            if (!facts.dryRunSignedOff()) found.add(flag + "a signed dry run");
+            // AGF BE-6 (register §56 D-2): period-end only while billing is on in this market
+            if (m.billingEnabled() && !flags.periodEndEnabled()) found.add(flag + "period-end-enabled while billing is enabled");
+            if (!facts.dryRunSignedOffIn(name)) found.add(flag + "a signed dry run for this market"); // D-3
+            if (!facts.ownerPlansReady()) found.add(flag + "owner plans visible with a monetization configuration"); // D-5, F-3
             if (!facts.postgres()) found.add(flag + "PostgreSQL");
         }
         if (m.guestEnforcement()) {

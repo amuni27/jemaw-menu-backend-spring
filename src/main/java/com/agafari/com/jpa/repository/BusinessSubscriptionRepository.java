@@ -33,6 +33,10 @@ public interface BusinessSubscriptionRepository extends Repository<BusinessSubsc
     @Query("select c from ScheduledChange c where c.fromSubscriptionId = :subscriptionId and c.status = 'PENDING' and c.effectiveAt <= :now and c.targetPriceId is null")
     Optional<ScheduledChange> findDueScheduledChange(String subscriptionId, Instant now);
 
+    /** AGF BE-6: {@link #findDueScheduledChange} for many rows at once (the publishing dry run). */
+    @Query("select c from ScheduledChange c where c.fromSubscriptionId in :subscriptionIds and c.status = 'PENDING' and c.effectiveAt <= :now and c.targetPriceId is null")
+    List<ScheduledChange> findDueScheduledChanges(Collection<String> subscriptionIds, Instant now);
+
     @Query("select c from MonetizationConfig c order by c.version desc")
     List<MonetizationConfig> findLatestConfig(Limit limit);
 

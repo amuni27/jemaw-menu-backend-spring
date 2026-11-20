@@ -85,6 +85,13 @@ public class ApiExceptionHandler {
                 .body(ApiError.of(HttpStatus.BAD_REQUEST, EmailVerificationLinkException.CODE, e.getMessage()));
     }
 
+    /** AGF BE-4 (register §52 B-8). */
+    @ExceptionHandler(PlanRequiredToPublishException.class)
+    public ResponseEntity<ApiError> planRequiredToPublish(PlanRequiredToPublishException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiError.of(HttpStatus.CONFLICT, PlanRequiredToPublishException.CODE, e.getMessage()));
+    }
+
     @ExceptionHandler(EmailNotVerifiedException.class)
     public ResponseEntity<ApiError> emailNotVerified(EmailNotVerifiedException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN)

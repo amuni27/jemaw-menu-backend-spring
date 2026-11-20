@@ -13,16 +13,18 @@ import java.util.List;
  * ({@code app.monetization.plan-selection-required-from}) is configured. True only for a restaurant created at or after it
  * that has never had a subscription or trial, has no pending plan request and no payment under review. Navigation only:
  * nothing (publishing, drafts, requests, trials) is restricted by it.
+ * <p>AGF BE-4/BE-5b (register §52 B-7): {@code publishAllowed} is present only while the publish gate is on for the
+ * restaurant's market, and is exactly the gate's decision (email verification is checked separately).
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record OwnerPlanView(boolean visible, String setting, Integer configVersion, List<Plan> plans, Subscription current,
                             PlanRequestSummary pendingRequest, Boolean canRequest, Boolean trialAvailable, Boolean featuresUnaffected,
                             Trial trial, EndedPlan endedPlan, SelfService selfService, List<Price> prices,
                             PaymentUnderReview paymentUnderReview, Boolean trialEligible,
-                            Boolean selectionRequired) {
+                            Boolean selectionRequired, Boolean publishAllowed) {
 
     public static OwnerPlanView hidden() {
-        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**

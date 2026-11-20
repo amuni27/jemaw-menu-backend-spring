@@ -45,6 +45,8 @@ class FinancialExceptionTest extends PaymentOutcomeTestBase {
 
     @Autowired private ExceptionService exceptionService;
     @Autowired private PlanRequestService planRequests;
+    @Autowired private com.agafari.com.service.PublishEligibility publishGate;
+    @Autowired private com.agafari.com.service.RestaurantCutOver cutOver;
     @Autowired private NotificationOutbox outbox;
     @Autowired private NotificationSendHandler sender;
     @Autowired private ObjectMapper mapper;
@@ -271,6 +273,35 @@ class FinancialExceptionTest extends PaymentOutcomeTestBase {
         } finally {
             planRequests.setSelectionRequiredFrom(null);
         }
+    }
+
+    /** AGF BE-4 (register §52, policy 6): an open checkout and a payment under review grant no publishing rights. */
+    @Test
+    void anOpenCheckoutOrAPaymentUnderReviewDoesNotAllowPublishing() throws Exception {
+        cutOver.setFrom(Instant.EPOCH);
+        publishGate.setGate(Market.ET, true);
+        try {
+            jdbc.update("update users set email_verified_at = now() where id = ?", owner.owner().getId());
+            checkout(owner, CheckoutKind.NEW, null);
+            assertPublishRefused(owner);
+
+            Tenant reviewed = data.tenant("exception-publish-review");
+            jdbc.update("update users set email_verified_at = now() where id = ?", reviewed.owner().getId());
+            row0(reviewed, null);
+            assertThat(planView(reviewed).path("paymentUnderReview").isMissingNode()).isFalse();
+            assertPublishRefused(reviewed);
+        } finally {
+            publishGate.setGate(Market.ET, false);
+            cutOver.setFrom(null);
+        }
+    }
+
+    private void assertPublishRefused(Tenant t) throws Exception {
+        org.springframework.mock.web.MockHttpServletResponse r = mockMvc.perform(post("/api/menus").header("Authorization", data.bearer(t))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Lunch\",\"menuTypeId\":\"" + data.menuType("Lunch").getId() + "\",\"isActive\":true}"))
+                .andReturn().getResponse();
+        assertThat(r.getStatus()).isEqualTo(409);
+        assertThat(r.getContentAsString()).contains("PLAN_REQUIRED_TO_PUBLISH");
     }
 
     @Test

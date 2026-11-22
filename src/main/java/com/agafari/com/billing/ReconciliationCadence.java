@@ -32,6 +32,13 @@ public class ReconciliationCadence {
         queue.enqueue(RenewalSweep.PLAN_TYPE, bucket, new RenewalSweep.PlanPayload(bucket));
     }
 
+    /** AGF SUB-R5-03-D: plans the renewal notices once per hour. */
+    @Scheduled(cron = "${app.jobs.renewal-notices-cron:0 5 * * * *}", zone = "UTC")
+    public void renewalNotices() {
+        String bucket = Instant.now().truncatedTo(ChronoUnit.HOURS).toString();
+        queue.enqueue(RenewalNotices.PLAN_TYPE, bucket, new RenewalNotices.PlanPayload(bucket));
+    }
+
     @Scheduled(cron = "${app.jobs.reconcile-daily-cron:0 40 3 * * *}", zone = "UTC")
     public void daily() {
         String bucket = Instant.now().truncatedTo(ChronoUnit.DAYS).toString();

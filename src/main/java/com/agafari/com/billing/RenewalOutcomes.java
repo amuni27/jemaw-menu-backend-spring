@@ -101,11 +101,13 @@ public class RenewalOutcomes {
     private final RefundService refunds;
     private final InboxService inbox;
     private final JobQueue jobs; // AGF SUB-R5-03-C: the paid-after-expiry cancel
+    private final RenewalNotices notices; // AGF SUB-R5-03-D; null: no owner notices
 
     public RenewalOutcomes(JdbcTemplate jdbc, MonetizationLocks locks, SubscriptionLifecycle lifecycle, BusinessSubscriptionRepository subscriptions, MonetizationClock clock,
                            PlatformTransactionManager transactions, AdminAuditService audit, ExceptionService exceptions, RefundService refunds, InboxService inbox,
-                           JobQueue jobs) {
+                           JobQueue jobs, @org.springframework.context.annotation.Lazy RenewalNotices notices) {
         this.jobs = jobs;
+        this.notices = notices;
         this.jdbc = jdbc;
         this.locks = locks;
         this.lifecycle = lifecycle;
@@ -188,26 +190,35 @@ public class RenewalOutcomes {
             case EXCEPTION -> {
                 String paymentId = insertCharge(e, strategy.provider(), verified, businessId, null, tPay, now);
                 exception(businessId, decision.code(), paymentId, e.id(), null, verified, "OPEN", snapshot, now);
-                if ("R8".equals(decision.row())) cancelOrReview(b, capabilities, paymentId, "paid after the row ended (" + decision.cause() + ")");
+                if ("R8".equals(decision.row())) {
+                    cancelOrReview(b, capabilities, paymentId, "paid after the row ended (" + decision.cause() + ")");
+                    if (notices != null) notices.planEndedRefund(businessId, paymentId, row.getPlanCode(), row.getEndedAt(), verified.amount());
+                }
                 yield finish(e, "PROCESSED", decision.code(), PaymentOutcomeService.Result.PROCESSED);
             }
             case AUTO_REFUND -> {
                 String paymentId = insertCharge(e, strategy.provider(), verified, businessId, null, tPay, now);
                 String refundId = refunds.request(businessId, paymentId, decision.cause(), "renewal:" + decision.cause()); // B3 checks
                 exception(businessId, decision.code(), paymentId, e.id(), refundId, verified, "AUTO_HANDLING", snapshot, now);
-                if ("R8".equals(decision.row())) cancelOrReview(b, capabilities, paymentId, "paid after the row ended; refund requested");
+                if ("R8".equals(decision.row())) {
+                    cancelOrReview(b, capabilities, paymentId, "paid after the row ended; refund requested");
+                    if (notices != null) notices.planEndedRefund(businessId, paymentId, row.getPlanCode(), row.getEndedAt(), verified.amount());
+                }
                 yield finish(e, "PROCESSED", decision.code(), PaymentOutcomeService.Result.PROCESSED);
             }
             case EXTEND -> {
-                extend(e, strategy, verified, row, price, start, end, tPay, now, businessId);
+                // §6: a recovery (the owner saw the plan past due) gets a "payment received" notice; an ordinary renewal doesn't
+                boolean recovering = LifecycleStatus.of(row.getStatus()) == LifecycleStatus.PAST_DUE || (row.getPeriodEnd() != null && !now.isBefore(row.getPeriodEnd()));
+                String paymentId = extend(e, strategy, verified, row, price, start, end, tPay, now, businessId);
+                if (recovering && notices != null) notices.paymentReceived(businessId, paymentId, row.getPlanCode(), end, verified.amount());
                 yield finish(e, "PROCESSED", null, PaymentOutcomeService.Result.PROCESSED);
             }
         };
     }
 
     /** R9: the invoice and the charge, then the lifecycle renews the same row with a pointer to both (the database re-checks at commit). */
-    private void extend(EventRef e, BillingStrategy strategy, VerifiedPayment verified, BusinessSubscription row, Map<String, Object> price, Instant start, Instant end,
-                        Instant tPay, Instant now, String businessId) {
+    private String extend(EventRef e, BillingStrategy strategy, VerifiedPayment verified, BusinessSubscription row, Map<String, Object> price, Instant start, Instant end,
+                          Instant tPay, Instant now, String businessId) {
         try {
             String invoiceId = UUID.randomUUID().toString();
             jdbc.update("insert into billing_invoice (id, business_id, checkout_session_id, price_id, period_start, period_end, amount_minor, currency, status, provider_invoice_ref) "
@@ -215,6 +226,7 @@ public class RenewalOutcomes {
                     price.get("amount_minor"), price.get("currency"), verified.billing().invoiceRef());
             String paymentId = insertCharge(e, strategy.provider(), verified, businessId, invoiceId, tPay, now);
             lifecycle.renew(row.getId(), new PeriodExtension(start, end, new VerifiedPaymentRef(paymentId, invoiceId), now), tPay);
+            return paymentId;
         } catch (EvidenceInvalidException x) {
             throw new Refused(PaymentOutcomeService.EVIDENCE_INVALID, x.code().name(), x);
         } catch (ExpectedSubscriptionChangedException | IllegalTransitionException x) {

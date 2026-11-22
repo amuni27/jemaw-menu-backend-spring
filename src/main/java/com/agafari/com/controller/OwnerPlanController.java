@@ -31,6 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class OwnerPlanController {
 
     private final CurrentUser currentUser;
+    private final com.agafari.com.notifications.OwnerNotices ownerNotices; // AGF SUB-R5-03-D
     private final PlanRequestService service;
     private final SelfServiceActivationService selfService;
     private final OwnerTrialService ownerTrial;
@@ -66,5 +67,17 @@ public class OwnerPlanController {
     @PatchMapping("/requests/current")
     public ResponseEntity<PlanRequestResponse> withdraw(@RequestBody PlanRequestWithdrawRequest request) {
         return ResponseEntity.ok(service.withdraw(currentUser.businessId(), request, currentUser.userId(), currentUser.email()));
+    }
+
+    /** AGF SUB-R5-03-D (N2): the owner's in-app notices, newest first (renewal reminders, payment received, plan ended). */
+    @GetMapping("/notices")
+    public ResponseEntity<java.util.List<com.agafari.com.notifications.OwnerNotices.Notice>> notices() {
+        return ResponseEntity.ok(ownerNotices.list(currentUser.businessId()));
+    }
+
+    /** AGF SUB-R5-03-D: marks one of the owner's own notices read; 404 for any other id. */
+    @PostMapping("/notices/{id}/read")
+    public ResponseEntity<Void> readNotice(@org.springframework.web.bind.annotation.PathVariable String id) {
+        return ownerNotices.markRead(currentUser.businessId(), id) ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
     }
 }

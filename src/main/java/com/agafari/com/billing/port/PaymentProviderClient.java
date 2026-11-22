@@ -46,6 +46,11 @@ public interface PaymentProviderClient {
         throw new UnsupportedOperationException("This provider can't report a subscription's state");
     }
 
+    /** AGF SUB-R5-03-E: a hosted card-update page for the provider customer {@code customerRef} (the restaurant's stored one). */
+    default ProviderPortalSession createPortalSession(String customerRef) {
+        throw new UnsupportedOperationException("This provider has no hosted card-update page");
+    }
+
     /** AGF SUB-R5-02 (D4): cancels immediately, with no final invoice, proration, refund or credit. */
     default SubscriptionCancelResult cancelSubscription(String subscriptionRef) {
         throw new UnsupportedOperationException("This provider can't cancel a subscription");

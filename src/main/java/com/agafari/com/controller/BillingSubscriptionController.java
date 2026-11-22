@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class BillingSubscriptionController {
 
     private final CurrentUser currentUser;
+    private final com.agafari.com.billing.BillingPortalService portal; // AGF SUB-R5-03-E
     private final ScheduledChangeService service;
 
     private void requireBilling() {
@@ -44,5 +45,11 @@ public class BillingSubscriptionController {
         requireBilling();
         service.cancelPending(currentUser.businessId(), currentUser.userId(), currentUser.email());
         return ResponseEntity.noContent().build();
+    }
+
+    /** AGF SUB-R5-03-E (N5): the provider's hosted card-update page for the owner's own plan; never cached. */
+    @PostMapping("/portal-session")
+    public ResponseEntity<java.util.Map<String, String>> portalSession() {
+        return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore()).body(java.util.Map.of("url", portal.open(currentUser.businessId())));
     }
 }

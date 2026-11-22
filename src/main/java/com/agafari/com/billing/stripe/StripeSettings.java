@@ -15,8 +15,20 @@ public final class StripeSettings {
     private final String successUrl;
     private final String cancelUrl;
     private final List<String> trustedOrigins;
+    private final String portalReturnUrl;
+    private final String portalConfiguration;
 
     public StripeSettings(String successUrl, String cancelUrl, String trustedOrigins) {
+        this(successUrl, cancelUrl, trustedOrigins, null, null);
+    }
+
+    /**
+     * AGF SUB-R5-03-E (N5): {@code app.billing.stripe.portal-return-url} (where the owner returns, on a trusted origin) and
+     * {@code app.billing.stripe.portal-configuration} (the PO-created, card-update-only {@code bpc_…} configuration); no defaults.
+     */
+    public StripeSettings(String successUrl, String cancelUrl, String trustedOrigins, String portalReturnUrl, String portalConfiguration) {
+        this.portalReturnUrl = blankToNull(portalReturnUrl);
+        this.portalConfiguration = blankToNull(portalConfiguration);
         this.successUrl = blankToNull(successUrl);
         this.cancelUrl = blankToNull(cancelUrl);
         this.trustedOrigins = trustedOrigins == null ? List.of()
@@ -29,6 +41,22 @@ public final class StripeSettings {
 
     String cancelUrl() {
         return cancelUrl;
+    }
+
+    String portalReturnUrl() {
+        return portalReturnUrl;
+    }
+
+    String portalConfiguration() {
+        return portalConfiguration;
+    }
+
+    /** AGF SUB-R5-03-E: null when a portal session can be created; otherwise why not (names the setting, never more). */
+    public String portalProblem() {
+        if (portalConfiguration == null) return "app.billing.stripe.portal-configuration is not configured";
+        if (!portalConfiguration.matches("bpc_[A-Za-z0-9]+")) return "app.billing.stripe.portal-configuration is not a portal configuration id";
+        if (trustedOrigins.isEmpty()) return "app.billing.stripe.trusted-origins is not configured";
+        return check("app.billing.stripe.portal-return-url", portalReturnUrl);
     }
 
     /** Null when both URLs are usable; otherwise why not (names the setting, never more). */

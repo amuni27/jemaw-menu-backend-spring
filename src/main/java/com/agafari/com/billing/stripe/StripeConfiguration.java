@@ -34,8 +34,10 @@ public class StripeConfiguration {
     /** AGF SUB-R5-02 (PO D7): environment-specific, no defaults; validated when a checkout is attempted. */
     @Bean
     StripeSettings stripeSettings(@Value("${app.billing.stripe.success-url:}") String successUrl, @Value("${app.billing.stripe.cancel-url:}") String cancelUrl,
-                                  @Value("${app.billing.stripe.trusted-origins:}") String trustedOrigins) {
-        return new StripeSettings(successUrl, cancelUrl, trustedOrigins);
+                                  @Value("${app.billing.stripe.trusted-origins:}") String trustedOrigins,
+                                  @Value("${app.billing.stripe.portal-return-url:}") String portalReturnUrl,
+                                  @Value("${app.billing.stripe.portal-configuration:}") String portalConfiguration) {
+        return new StripeSettings(successUrl, cancelUrl, trustedOrigins, portalReturnUrl, portalConfiguration); // AGF SUB-R5-03-E
     }
 
     @Bean

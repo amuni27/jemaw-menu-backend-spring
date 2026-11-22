@@ -85,7 +85,8 @@ class BillingPortsTest {
                 Map.entry("subscriptionOfPayment", c -> c.subscriptionOfPayment("p")), // AGF SUB-R5-02 (D4)
                 Map.entry("cancelSubscription", c -> c.cancelSubscription("s")),
                 Map.entry("invoiceState", c -> c.invoiceState("in_1")), // AGF SUB-R5-03
-                Map.entry("subscriptionState", c -> c.subscriptionState("sub_1"))
+                Map.entry("subscriptionState", c -> c.subscriptionState("sub_1")),
+                Map.entry("createPortalSession", c -> c.createPortalSession("cus_1")) // AGF SUB-R5-03-E
         ).map(e -> Arguments.of(e.getKey(), e.getValue()));
     }
 

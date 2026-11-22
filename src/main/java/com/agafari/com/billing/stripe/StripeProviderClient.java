@@ -9,6 +9,7 @@ import com.agafari.com.billing.port.GuardedProviderClient;
 import com.agafari.com.billing.port.ProviderBilling;
 import com.agafari.com.billing.port.ProviderCapabilities;
 import com.agafari.com.billing.port.ProviderInvoiceState;
+import com.agafari.com.billing.port.ProviderPortalSession;
 import com.agafari.com.billing.port.ProviderSubscriptionSnapshot;
 import com.agafari.com.billing.port.ProviderPaymentStatus;
 import com.agafari.com.billing.port.ProviderRecord;
@@ -428,6 +429,25 @@ public final class StripeProviderClient extends GuardedProviderClient {
         return new ProviderSubscriptionSnapshot(subscriptionRef, sub.getCustomer(), status,
                 status == ProviderSubscriptionState.Status.CANCELED || status == ProviderSubscriptionState.Status.INCOMPLETE_EXPIRED ? (ended == null ? null : Instant.ofEpochSecond(ended)) : null,
                 sub.getLatestInvoice(), Boolean.TRUE.equals(sub.getLivemode()));
+    }
+
+    /**
+     * AGF SUB-R5-03-E (N5): {@code POST /v1/billing_portal/sessions} for the stored customer, with the PO-created,
+     * card-update-only configuration and the configured return URL, nothing else. Settings are checked first; a live-mode
+     * session is refused while the R5 gates are open. The URL is never logged (see {@link ProviderPortalSession}).
+     */
+    @Override
+    protected ProviderPortalSession doCreatePortalSession(String customerRef) {
+        String misconfigured = settings.portalProblem();
+        if (misconfigured != null) throw new ProviderRejectedException("The Stripe Customer Portal is not configured: " + misconfigured);
+        if (customerRef == null || !customerRef.startsWith("cus_")) throw new ProviderRejectedException("A portal session needs a Stripe customer");
+        com.stripe.param.billingportal.SessionCreateParams params = com.stripe.param.billingportal.SessionCreateParams.builder()
+                .setCustomer(customerRef).setConfiguration(settings.portalConfiguration()).setReturnUrl(settings.portalReturnUrl()).build();
+        com.stripe.model.billingportal.Session session = call("portal session creation",
+                () -> stripe.v1().billingPortal().sessions().create(params, idempotent(java.util.UUID.randomUUID().toString())));
+        if (Boolean.TRUE.equals(session.getLivemode())) throw new ProviderRejectedException("A live-mode portal session is refused while the R5 gates are open");
+        if (session.getUrl() == null || !customerRef.equals(session.getCustomer())) throw new ProviderRejectedException("Stripe returned no portal session for this customer");
+        return new ProviderPortalSession(session.getUrl());
     }
 
     @Override

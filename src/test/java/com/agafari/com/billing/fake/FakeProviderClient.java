@@ -230,6 +230,8 @@ public final class FakeProviderClient extends GuardedProviderClient {
     }
 
     public synchronized void reset() {
+        portalCustomers.clear();
+        portalFailure = null;
         subscriptionsOfPayments.clear();
         cancelled.clear();
         invoiceStates.clear();
@@ -287,6 +289,29 @@ public final class FakeProviderClient extends GuardedProviderClient {
         synchronized (cancelled) {
             return List.copyOf(cancelled);
         }
+    }
+
+    // AGF SUB-R5-03-E: Customer Portal sessions asked for (SYNTHETIC URLs), and an optional failure
+    private final List<String> portalCustomers = java.util.Collections.synchronizedList(new ArrayList<>());
+    private volatile RuntimeException portalFailure;
+
+    public List<String> portalCustomers() {
+        synchronized (portalCustomers) {
+            return List.copyOf(portalCustomers);
+        }
+    }
+
+    public FakeProviderClient portalFailure(RuntimeException failure) {
+        portalFailure = failure;
+        return this;
+    }
+
+    @Override
+    protected com.agafari.com.billing.port.ProviderPortalSession doCreatePortalSession(String customerRef) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) throw new IllegalStateException("portal session inside a transaction");
+        portalCustomers.add(customerRef);
+        if (portalFailure != null) throw portalFailure;
+        return new com.agafari.com.billing.port.ProviderPortalSession("https://fake.test/portal/" + customerRef);
     }
 
     /** AGF SUB-R5-02: unscripted, the fake has no provider subscriptions (one-off payments); it reports none. */

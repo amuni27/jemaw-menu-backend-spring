@@ -95,6 +95,17 @@ public abstract class GuardedProviderClient implements PaymentProviderClient {
         throw new UnsupportedOperationException("This provider can't report a subscription's state");
     }
 
+    /** AGF SUB-R5-03-E. */
+    @Override
+    public final ProviderPortalSession createPortalSession(String customerRef) {
+        ProviderCallGuard.assertNoTransaction();
+        return doCreatePortalSession(customerRef);
+    }
+
+    protected ProviderPortalSession doCreatePortalSession(String customerRef) {
+        throw new UnsupportedOperationException("This provider has no hosted card-update page");
+    }
+
     /** Not abstract: providers without the capability (the fakes, Chapa) need nothing. */
     protected ProviderSubscriptionState doSubscriptionOfPayment(String providerPaymentRef) {
         throw new UnsupportedOperationException("This provider can't report a payment's subscription");

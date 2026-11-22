@@ -40,7 +40,8 @@ import java.util.Set;
  *   coming from the ledger row itself (G1). A timeout or a pending answer is not evidence and is only recorded.</li>
  * </ul>
  * Provider renewal state and invoice or subscription comparison are out of scope (G2): {@code PeriodEndJob} keeps PROVIDER
- * transitions, and a failed renewal is never inferred from missing data. Quarantined events are never replayed (G5).
+ * transitions, and a failed renewal is never inferred from missing data. AGF SUB-R5-03-A only <b>reports</b> a PROVIDER period
+ * that ended without a renewal decision (an audited finding; the renewal sweep and the outcome path decide). Quarantined events are never replayed (G5).
  * Refund settlement is untouched.
  */
 @Slf4j
@@ -50,6 +51,9 @@ public class ReconciliationService {
     public static final String CHARGE_UNACCOUNTED = "RECONCILIATION_CHARGE_UNACCOUNTED";
     public static final String PERIOD_WITHOUT_PAID_INVOICE = "RECONCILIATION_PERIOD_WITHOUT_PAID_INVOICE";
     public static final String LEDGER_UNCONFIRMED = "RECONCILIATION_LEDGER_UNCONFIRMED";
+    /** AGF SUB-R5-03-A (addendum §10): a PROVIDER period ended without a renewal decision; a non-financial, audited finding. */
+    public static final String RENEWAL_UNDECIDED = "RECONCILIATION_RENEWAL_UNDECIDED";
+    private static final Duration RENEWAL_DECISION_WINDOW = Duration.ofHours(24);
     static final String RECONCILED = "BILLING_RECONCILED";
     private static final Duration STALE_CREATING = Duration.ofMinutes(10);
     private static final Duration LOOKBACK = Duration.ofDays(3);
@@ -58,7 +62,8 @@ public class ReconciliationService {
     public record HourlyResult(int checkoutsRecovered, int checkoutsRefusedUnderReview, int checkoutsExpired) {
     }
 
-    public record DailyResult(int eventsCreated, int exceptionsCreated, int unverifiable) {
+    /** @param renewalFindings AGF SUB-R5-03-A: new "period ended without a renewal decision" findings */
+    public record DailyResult(int eventsCreated, int exceptionsCreated, int unverifiable, int renewalFindings) {
     }
 
     private final JdbcTemplate jdbc;
@@ -150,7 +155,7 @@ public class ReconciliationService {
         int[] confirmation = confirmLedger(since);
         flagged += confirmation[0];
         unverifiable += confirmation[1];
-        return new DailyResult(created, flagged, unverifiable);
+        return new DailyResult(created, flagged, unverifiable, renewalsUndecided(now));
     }
 
     /** G1: a verified charge consumed by no period and linked to no refund request or exception. */
@@ -230,6 +235,45 @@ public class ReconciliationService {
         if (v.amount().minor() != ((Number) p.get("amount_minor")).longValue() || !v.amount().currency().name().equals(p.get("currency"))) return "amount or currency";
         if (!v.paidAt().truncatedTo(java.time.temporal.ChronoUnit.MICROS).equals(((Timestamp) p.get("occurred_at")).toInstant())) return "payment time";
         return null;
+    }
+
+    // ---- AGF SUB-R5-03-A: renewal decisions (addendum §10) ----
+
+    /**
+     * A current PROVIDER row whose period ended more than a day ago is still ACTIVE (no renewal, no failure, no past-due), or
+     * is PAST_DUE past its recorded grace end and still current. Either means no job or event has decided the renewal. Each
+     * becomes one audited finding per row, period and kind; nothing is changed (the period-end job and the outcome path
+     * decide), and no exception is opened (no money is involved). Only for markets whose billing is active.
+     */
+    private int renewalsUndecided(Instant now) {
+        int n = 0;
+        // provider is set only on PROVIDER rows
+        for (Map<String, Object> r : jdbc.queryForList("""
+                select id, business_id, provider, status, period_end, grace_days from business_subscription
+                where provider is not null and status in ('ACTIVE', 'PAST_DUE') and period_end is not null and period_end <= ?
+                order by period_end, id limit ?""", Timestamp.from(now.minus(RENEWAL_DECISION_WINDOW)), BATCH)) {
+            if (!active((String) r.get("provider"))) continue;
+            Instant periodEnd = ((Timestamp) r.get("period_end")).toInstant();
+            Instant graceEnd = periodEnd.plus(Duration.ofDays(r.get("grace_days") == null ? 0 : ((Number) r.get("grace_days")).intValue()));
+            String kind = "ACTIVE".equals(r.get("status")) ? "ACTIVE_AFTER_PERIOD_END" : !now.isBefore(graceEnd) ? "PAST_DUE_AFTER_GRACE" : null;
+            if (kind != null && renewalFinding(r, kind, periodEnd, graceEnd)) n++;
+        }
+        return n;
+    }
+
+    private boolean renewalFinding(Map<String, Object> r, String kind, Instant periodEnd, Instant graceEnd) {
+        String businessId = (String) r.get("business_id"), subscriptionId = (String) r.get("id");
+        String detail = "kind=" + kind + " periodEnd=" + periodEnd + " graceEnd=" + graceEnd + " provider=" + r.get("provider");
+        Boolean created = transaction.execute(s -> {
+            locks.configShared();
+            locks.restaurant(businessId);
+            if (jdbc.queryForObject("select exists (select 1 from admin_audit_event where action = ? and target_id = ? and detail = ?)", Boolean.class, RENEWAL_UNDECIDED,
+                    subscriptionId, detail)) return false;
+            audit.success(RENEWAL_UNDECIDED, null, AdminAuditService.SYSTEM, "BUSINESS_SUBSCRIPTION", subscriptionId, detail);
+            return true;
+        });
+        if (Boolean.TRUE.equals(created)) log.warn("event=billing.reconcile_renewal_undecided subscriptionId={} kind={} periodEnd={}", subscriptionId, kind, periodEnd);
+        return Boolean.TRUE.equals(created);
     }
 
     // ---- shared ----

@@ -93,6 +93,7 @@ public class PlanRequestService {
     private final SubscriptionLifecycle lifecycle;
     private final PlanPriceService planPrices;
     private final com.agafari.com.billing.PaymentReview paymentReview;
+    private final com.agafari.com.billing.RenewalStatus renewalStatus; // AGF SUB-R5-03-B
     private final TrialService trials;
     private final RestaurantCutOver cutOver;
     private final PublishEligibility publishEligibility;
@@ -105,7 +106,8 @@ public class PlanRequestService {
                               GrandfatheringService grandfathering, EmailVerificationService emailVerification,
                               @Value("${app.monetization.self-service-enabled:false}") boolean selfServiceEnabled, SubscriptionLifecycle lifecycle, PlanPriceService planPrices,
                               com.agafari.com.billing.PaymentReview paymentReview, TrialService trials,
-                              RestaurantCutOver cutOver, PublishEligibility publishEligibility) {
+                              RestaurantCutOver cutOver, PublishEligibility publishEligibility, com.agafari.com.billing.RenewalStatus renewalStatus) {
+        this.renewalStatus = renewalStatus;
         this.cutOver = cutOver;
         this.publishEligibility = publishEligibility;
         this.trials = trials;
@@ -188,7 +190,7 @@ public class PlanRequestService {
         OwnerPlanView.Subscription current = currentRow == null || currentRow.isTrial() ? null
                 : new OwnerPlanView.Subscription(currentRow.getPlanCode(), currentRow.getStatus(), currentRow.getPeriodEnd(),
                         ownerSourceLabel(currentRow), outside(config, currentRow.getPlanCode()),
-                        ownerGrandfathering(currentRow, config, now, timeZone));
+                        ownerGrandfathering(currentRow, config, now, timeZone), renewalStatus.graceUntil(currentRow), renewalStatus.pastDueSince(currentRow));
         OwnerPlanView.EndedPlan endedPlan = currentRow != null ? null : grandfathering.endedPlan(businessId, config)
                 .map(e -> new OwnerPlanView.EndedPlan(e.planCode(), e.endedAt(), timeZone)).orElse(null);
         OwnerPlanView.Trial trial = current != null ? null : subscriptions.findFirstByBusinessIdAndSourceOrderByCreatedAtDesc(businessId, BusinessSubscription.TRIAL)
@@ -204,7 +206,8 @@ public class PlanRequestService {
                 // AGF BE-1: present only while trials are enabled, so the response is unchanged with the flag off
                 trials.isEnabled() ? trials.eligibleForOwner(businessId, config, currentRow != null, pending != null) : null,
                 selectionRequired(businessId, currentRow != null || pending != null || review != null),
-                publishAllowed(businessId));
+                publishAllowed(businessId),
+                renewalStatus.of(businessId, currentRow, timeZone, now).orElse(null)); // AGF SUB-R5-03-B
     }
 
     /**

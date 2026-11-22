@@ -21,10 +21,25 @@ public record OwnerPlanView(boolean visible, String setting, Integer configVersi
                             PlanRequestSummary pendingRequest, Boolean canRequest, Boolean trialAvailable, Boolean featuresUnaffected,
                             Trial trial, EndedPlan endedPlan, SelfService selfService, List<Price> prices,
                             PaymentUnderReview paymentUnderReview, Boolean trialEligible,
-                            Boolean selectionRequired, Boolean publishAllowed) {
+                            Boolean selectionRequired, Boolean publishAllowed, Renewal renewal) {
 
     public static OwnerPlanView hidden() {
-        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    /**
+     * AGF SUB-R5-03-B (addendum §13 "Owner sees"): present only while a PROVIDER subscription's renewal needs the owner's
+     * attention. {@code state}: {@code PAST_DUE} (payment failed; access continues until {@code graceUntil}),
+     * {@code ENDED_PAYMENT_FAILED} (the plan ended at {@code endedAt} for non-payment) or {@code REFUND_PENDING} (a renewal charge
+     * Agafari didn't apply will be refunded). {@code refund} accompanies any state while such a refund is unresolved. Dates are
+     * shown in {@code timeZone}, the restaurant's.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record Renewal(String state, Instant periodEnd, Instant graceUntil, Instant endedAt, RefundPending refund, String timeZone) {
+    }
+
+    /** @param reason {@code PAID_AFTER_EXPIRY} or {@code RENEWAL_DUPLICATE_PERIOD} */
+    public record RefundPending(Long amountMinor, String currency, String reason) {
     }
 
     /**
@@ -69,7 +84,16 @@ public record OwnerPlanView(boolean visible, String setting, Integer configVersi
 
     /** The current subscription as the owner sees it: no admin identity, no configuration version. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
+    /**
+     * AGF SUB-R5-03-B: {@code graceUntil} ({@code period_end} + the recorded grace) and {@code pastDueSince} exist only for a
+     * PROVIDER row (with recorded grace; while past due) and are omitted otherwise, so every other row's JSON is unchanged.
+     */
     public record Subscription(String planCode, String status, Instant periodEnd, String sourceLabel, boolean outsideCurrentConfiguration,
-                               Grandfathering grandfathering) {
+                               Grandfathering grandfathering, @JsonInclude(JsonInclude.Include.NON_NULL) Instant graceUntil,
+                               @JsonInclude(JsonInclude.Include.NON_NULL) Instant pastDueSince) {
+
+        public Subscription(String planCode, String status, Instant periodEnd, String sourceLabel, boolean outsideCurrentConfiguration, Grandfathering grandfathering) {
+            this(planCode, status, periodEnd, sourceLabel, outsideCurrentConfiguration, grandfathering, null, null);
+        }
     }
 }

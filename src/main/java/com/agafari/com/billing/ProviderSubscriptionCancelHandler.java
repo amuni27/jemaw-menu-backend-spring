@@ -32,6 +32,10 @@ import java.util.Set;
  * that fails, or an outcome that stays uncertain, hands the payment's existing exception back to an operator. Refunds stay
  * with the matrix and {@link RefundService}: cancelling creates no refund, credit or final invoice.
  *
+ * <p>AGF SUB-R5-03-C (addendum §7, N6): also a renewal paid after its PROVIDER row ended (renewal row R8). Such a payment has
+ * no Agafari checkout, so C2 and C4 become the renewal ownership proof; C1, C3, C5 and C6 and the re-fetch on every attempt
+ * are unchanged.
+ *
  * <p>The {@code checkout.} prefix makes this a financial job (72 h cap, never pruned). Its provider comes from the payment
  * row, so the per-provider pause applies (R4-16-D1).
  */
@@ -48,8 +52,16 @@ public class ProviderSubscriptionCancelHandler implements JobHandler<ProviderSub
     public record Payload(String paymentId) {
     }
 
-    private record Paid(String id, String businessId, String provider, String ref, String checkoutId, boolean verifiedCharge, Integer row) {
+    /** @param renewalRow AGF SUB-R5-03-C: the renewal row (R1–R9) of a payment without a checkout; null for a checkout payment */
+    private record Paid(String id, String businessId, String provider, String ref, String checkoutId, boolean verifiedCharge, Integer row, String renewalRow) {
+
+        boolean renewal() {
+            return checkoutId == null;
+        }
     }
+
+    /** AGF SUB-R5-03-C (addendum §7): a payment made after its PROVIDER row ended. */
+    static final String PAID_AFTER_EXPIRY_ROW = "R8";
 
     private final JdbcTemplate jdbc;
     private final BillingStrategyRegistry registry;
@@ -91,9 +103,11 @@ public class ProviderSubscriptionCancelHandler implements JobHandler<ProviderSub
         Paid paid = load(payload.paymentId());
         if (paid == null) throw new PermanentJobException("No payment " + payload.paymentId() + " with an outcome exception", null);
 
-        // C1: a verified charge of this provider, decided as a terminal non-activation (rows 2–5)
-        if (!paid.verifiedCharge() || paid.row() == null || !TERMINAL_ROWS.contains(paid.row())) {
-            handBack(paid, "C1_NOT_A_TERMINAL_VERIFIED_CHARGE", "row=" + paid.row());
+        // C1: a verified charge of this provider, decided as a terminal non-activation (rows 2–5), or (SUB-R5-03-C) a
+        // renewal paid after its row ended (R8)
+        if (paid.renewal() ? !paid.verifiedCharge() || !PAID_AFTER_EXPIRY_ROW.equals(paid.renewalRow())
+                : !paid.verifiedCharge() || paid.row() == null || !TERMINAL_ROWS.contains(paid.row())) {
+            handBack(paid, "C1_NOT_A_TERMINAL_VERIFIED_CHARGE", paid.renewal() ? "renewalRow=" + paid.renewalRow() : "row=" + paid.row());
             return;
         }
         BillingStrategy strategy = billingGate.billingActive(paid.businessId()) ? registry.forProvider(paid.provider()).orElse(null) : null;
@@ -127,19 +141,39 @@ public class ProviderSubscriptionCancelHandler implements JobHandler<ProviderSub
             handBack(paid, "PROVIDER_SUBSCRIPTION_NOT_FOUND", "");
             return;
         }
-        // C2: the provider's own checkout record names this payment's checkout and restaurant
-        if (!paid.checkoutId().equals(state.agafariCheckoutId()) || !paid.businessId().equals(state.agafariBusinessId())) {
-            handBack(paid, "C2_OWNERSHIP_NOT_PROVEN", "subscription=" + state.subscriptionRef());
-            return;
-        }
-        // C4: never cancel a subscription that backs an Agafari entitlement (checked under the restaurant lock)
-        boolean activated = Boolean.TRUE.equals(transaction.execute(s -> {
-            locks.restaurant(paid.businessId());
-            return jdbc.queryForObject("select count(*) from business_subscription where provider_subscription_ref = ?", Integer.class, state.subscriptionRef()) > 0;
-        }));
-        if (activated) {
-            handBack(paid, "C4_SUBSCRIPTION_IS_ACTIVATED", "subscription=" + state.subscriptionRef());
-            return;
+        if (paid.renewal()) {
+            // AGF SUB-R5-03-C, N6 (register §69): C2/C4 for a payment without a checkout. The re-fetched subscription is the
+            // restaurant's own ended row's, no current row holds it, and its customer is the restaurant's stored customer.
+            String refused = transaction.execute(s -> {
+                locks.restaurant(paid.businessId());
+                if (jdbc.queryForObject("select count(*) from business_subscription where provider_subscription_ref = ? and status <> 'EXPIRED'", Integer.class,
+                        state.subscriptionRef()) > 0) return "C4_SUBSCRIPTION_IS_ACTIVATED";
+                boolean ownEndedRow = jdbc.queryForObject("select count(*) from business_subscription where business_id = ? and provider = ? and provider_subscription_ref = ? "
+                        + "and status = 'EXPIRED'", Integer.class, paid.businessId(), paid.provider(), state.subscriptionRef()) == 1;
+                List<String> customer = jdbc.queryForList("select provider_customer_ref from billing_account where business_id = ? and provider = ?", String.class,
+                        paid.businessId(), paid.provider());
+                boolean ownCustomer = customer.size() == 1 && customer.get(0) != null && customer.get(0).equals(state.customerRef());
+                return ownEndedRow && ownCustomer ? null : "N6_OWNERSHIP_NOT_PROVEN";
+            });
+            if (refused != null) {
+                handBack(paid, refused, "subscription=" + state.subscriptionRef());
+                return;
+            }
+        } else {
+            // C2: the provider's own checkout record names this payment's checkout and restaurant
+            if (!paid.checkoutId().equals(state.agafariCheckoutId()) || !paid.businessId().equals(state.agafariBusinessId())) {
+                handBack(paid, "C2_OWNERSHIP_NOT_PROVEN", "subscription=" + state.subscriptionRef());
+                return;
+            }
+            // C4: never cancel a subscription that backs an Agafari entitlement (checked under the restaurant lock)
+            boolean activated = Boolean.TRUE.equals(transaction.execute(s -> {
+                locks.restaurant(paid.businessId());
+                return jdbc.queryForObject("select count(*) from business_subscription where provider_subscription_ref = ?", Integer.class, state.subscriptionRef()) > 0;
+            }));
+            if (activated) {
+                handBack(paid, "C4_SUBSCRIPTION_IS_ACTIVATED", "subscription=" + state.subscriptionRef());
+                return;
+            }
         }
         // C6: already ended → nothing to do; otherwise only a cancellable status
         if (state.ended()) {
@@ -176,13 +210,16 @@ public class ProviderSubscriptionCancelHandler implements JobHandler<ProviderSub
     private Paid load(String paymentId) {
         List<Paid> rows = jdbc.query("""
                 select p.id, p.business_id, p.provider, p.provider_payment_ref, p.checkout_session_id,
-                       (p.kind = 'CHARGE' and p.status = 'SUCCEEDED' and p.verified_at is not null) as verified_charge, e.facts->>'row' as decided_row
+                       (p.kind = 'CHARGE' and p.status = 'SUCCEEDED' and p.verified_at is not null) as verified_charge, e.facts->>'row' as decided_row,
+                       e.facts->>'renewalRow' as renewal_row
                 from payment p join billing_exception e on e.payment_id = p.id and e.code <> 'LEDGER_FACTS_MISMATCH'
                 where p.id = ? order by e.created_at limit 1""",
                 (rs, n) -> new Paid(rs.getString("id"), rs.getString("business_id"), rs.getString("provider"), rs.getString("provider_payment_ref"),
-                        rs.getString("checkout_session_id"), rs.getBoolean("verified_charge"), rs.getString("decided_row") == null ? null : Integer.valueOf(rs.getString("decided_row"))),
+                        rs.getString("checkout_session_id"), rs.getBoolean("verified_charge"), rs.getString("decided_row") == null ? null : Integer.valueOf(rs.getString("decided_row")),
+                        rs.getString("renewal_row")),
                 paymentId);
-        return rows.isEmpty() || rows.get(0).checkoutId() == null ? null : rows.get(0);
+        // a checkout payment, or (SUB-R5-03-C) a renewal payment decided by the renewal rows
+        return rows.isEmpty() || (rows.get(0).checkoutId() == null && rows.get(0).renewalRow() == null) ? null : rows.get(0);
     }
 
     private void handBack(Paid paid, String reason, String detail) {

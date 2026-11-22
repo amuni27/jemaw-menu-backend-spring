@@ -10,6 +10,7 @@ import com.agafari.com.billing.port.ProviderTimeoutException;
 import com.agafari.com.billing.port.StateTrigger;
 import com.agafari.com.billing.port.VerifiedPayment;
 import com.agafari.com.billing.webhook.InboxService;
+import com.agafari.com.jobs.JobQueue;
 import com.agafari.com.jobs.ProviderCallGuard;
 import com.agafari.com.jobs.TransientJobException;
 import com.agafari.com.jpa.entity.BusinessSubscription;
@@ -99,9 +100,12 @@ public class RenewalOutcomes {
     private final ExceptionService exceptions;
     private final RefundService refunds;
     private final InboxService inbox;
+    private final JobQueue jobs; // AGF SUB-R5-03-C: the paid-after-expiry cancel
 
     public RenewalOutcomes(JdbcTemplate jdbc, MonetizationLocks locks, SubscriptionLifecycle lifecycle, BusinessSubscriptionRepository subscriptions, MonetizationClock clock,
-                           PlatformTransactionManager transactions, AdminAuditService audit, ExceptionService exceptions, RefundService refunds, InboxService inbox) {
+                           PlatformTransactionManager transactions, AdminAuditService audit, ExceptionService exceptions, RefundService refunds, InboxService inbox,
+                           JobQueue jobs) {
+        this.jobs = jobs;
         this.jdbc = jdbc;
         this.locks = locks;
         this.lifecycle = lifecycle;
@@ -184,14 +188,14 @@ public class RenewalOutcomes {
             case EXCEPTION -> {
                 String paymentId = insertCharge(e, strategy.provider(), verified, businessId, null, tPay, now);
                 exception(businessId, decision.code(), paymentId, e.id(), null, verified, "OPEN", snapshot, now);
-                if ("R8".equals(decision.row())) review(b, paymentId, "paid after the row ended (" + decision.cause() + ")");
+                if ("R8".equals(decision.row())) cancelOrReview(b, capabilities, paymentId, "paid after the row ended (" + decision.cause() + ")");
                 yield finish(e, "PROCESSED", decision.code(), PaymentOutcomeService.Result.PROCESSED);
             }
             case AUTO_REFUND -> {
                 String paymentId = insertCharge(e, strategy.provider(), verified, businessId, null, tPay, now);
                 String refundId = refunds.request(businessId, paymentId, decision.cause(), "renewal:" + decision.cause()); // B3 checks
                 exception(businessId, decision.code(), paymentId, e.id(), refundId, verified, "AUTO_HANDLING", snapshot, now);
-                if ("R8".equals(decision.row())) review(b, paymentId, "paid after the row ended; refund requested");
+                if ("R8".equals(decision.row())) cancelOrReview(b, capabilities, paymentId, "paid after the row ended; refund requested");
                 yield finish(e, "PROCESSED", decision.code(), PaymentOutcomeService.Result.PROCESSED);
             }
             case EXTEND -> {
@@ -381,7 +385,19 @@ public class RenewalOutcomes {
                 status, facts, now);
     }
 
-    /** §7: an operator decides about the provider subscription (an automatic cancel for renewal payments isn't implemented). */
+    /**
+     * §7, SUB-R5-03-C (N6): a provider subscription that may still charge is cancelled through the existing cancel job (which
+     * re-fetches and proves ownership); without a confirmed cancel capability an operator decides.
+     */
+    private void cancelOrReview(ProviderBilling b, ProviderCapabilities capabilities, String paymentId, String why) {
+        if (capabilities.cancelSubscription() && jobs != null) {
+            jobs.enqueue(ProviderSubscriptionCancelHandler.TYPE, "payment:" + paymentId, new ProviderSubscriptionCancelHandler.Payload(paymentId));
+            return;
+        }
+        review(b, paymentId, why + ", cancellation capability not confirmed");
+    }
+
+    /** §7: an operator decides about the provider subscription. */
     private void review(ProviderBilling b, String paymentId, String why) {
         String target = b.subscriptionRef() != null ? b.subscriptionRef() : b.invoiceRef();
         audit.success(REVIEW_REQUIRED, null, AdminAuditService.SYSTEM, TARGET_PROVIDER_SUBSCRIPTION, target,

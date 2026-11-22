@@ -230,6 +230,8 @@ public final class FakeProviderClient extends GuardedProviderClient {
     }
 
     public synchronized void reset() {
+        subscriptionsOfPayments.clear();
+        cancelled.clear();
         invoiceStates.clear();
         subscriptionStates.clear();
         script = Script.SUCCESS;
@@ -272,14 +274,42 @@ public final class FakeProviderClient extends GuardedProviderClient {
         return nextSession;
     }
 
-    /** AGF SUB-R5-02: the fake has no provider subscriptions (one-off payments); it reports none and cancels nothing. */
-    @Override
-    protected com.agafari.com.billing.port.ProviderSubscriptionState doSubscriptionOfPayment(String providerPaymentRef) {
-        return new com.agafari.com.billing.port.ProviderSubscriptionState(null, null, com.agafari.com.billing.port.ProviderSubscriptionState.Status.NOT_FOUND, null, null, false, false);
+    // AGF SUB-R5-03-C: a scripted subscription behind a payment (SYNTHETIC), and the cancellations asked for
+    private final Map<String, com.agafari.com.billing.port.ProviderSubscriptionState> subscriptionsOfPayments = new java.util.concurrent.ConcurrentHashMap<>();
+    private final List<String> cancelled = java.util.Collections.synchronizedList(new ArrayList<>());
+
+    public FakeProviderClient subscriptionOfPayment(String providerPaymentRef, com.agafari.com.billing.port.ProviderSubscriptionState state) {
+        subscriptionsOfPayments.put(providerPaymentRef, state);
+        return this;
     }
 
+    public List<String> cancelled() {
+        synchronized (cancelled) {
+            return List.copyOf(cancelled);
+        }
+    }
+
+    /** AGF SUB-R5-02: unscripted, the fake has no provider subscriptions (one-off payments); it reports none. */
+    @Override
+    protected com.agafari.com.billing.port.ProviderSubscriptionState doSubscriptionOfPayment(String providerPaymentRef) {
+        var scripted = subscriptionsOfPayments.get(providerPaymentRef);
+        return scripted != null ? scripted
+                : new com.agafari.com.billing.port.ProviderSubscriptionState(null, null, com.agafari.com.billing.port.ProviderSubscriptionState.Status.NOT_FOUND, null, null, false, false);
+    }
+
+    /** Unscripted: nothing to cancel. Scripted: cancels once (the re-fetch then reports it CANCELED), as the provider would. */
     @Override
     protected com.agafari.com.billing.port.SubscriptionCancelResult doCancelSubscription(String subscriptionRef) {
+        cancelled.add(subscriptionRef);
+        for (var e : subscriptionsOfPayments.entrySet()) {
+            var st = e.getValue();
+            if (subscriptionRef.equals(st.subscriptionRef())) {
+                if (st.ended()) return com.agafari.com.billing.port.SubscriptionCancelResult.ALREADY_CANCELLED;
+                e.setValue(new com.agafari.com.billing.port.ProviderSubscriptionState(st.subscriptionRef(), st.customerRef(),
+                        com.agafari.com.billing.port.ProviderSubscriptionState.Status.CANCELED, st.agafariCheckoutId(), st.agafariBusinessId(), st.otherOpenInvoices(), st.livemode()));
+                return com.agafari.com.billing.port.SubscriptionCancelResult.CANCELLED;
+            }
+        }
         return com.agafari.com.billing.port.SubscriptionCancelResult.ALREADY_CANCELLED;
     }
 

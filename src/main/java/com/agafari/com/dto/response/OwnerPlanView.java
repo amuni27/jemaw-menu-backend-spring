@@ -15,16 +15,19 @@ import java.util.List;
  * nothing (publishing, drafts, requests, trials) is restricted by it.
  * <p>AGF BE-4/BE-5b (register §52 B-7): {@code publishAllowed} is present only while the publish gate is on for the
  * restaurant's market, and is exactly the gate's decision (email verification is checked separately).
+ * <p>AGF BE-F0 (register §84 D2): {@code checkoutAvailable} is whether a paid checkout can be started for the restaurant's
+ * market now (its billing is on); the frontend offers "Subscribe" only then. Present only together with {@code prices}
+ * (billing can only be on where prices are visible), so the response is unchanged while prices are hidden.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record OwnerPlanView(boolean visible, String setting, Integer configVersion, List<Plan> plans, Subscription current,
                             PlanRequestSummary pendingRequest, Boolean canRequest, Boolean trialAvailable, Boolean featuresUnaffected,
                             Trial trial, EndedPlan endedPlan, SelfService selfService, List<Price> prices,
                             PaymentUnderReview paymentUnderReview, Boolean trialEligible,
-                            Boolean selectionRequired, Boolean publishAllowed, Renewal renewal) {
+                            Boolean selectionRequired, Boolean publishAllowed, Renewal renewal, Boolean checkoutAvailable) {
 
     public static OwnerPlanView hidden() {
-        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new OwnerPlanView(false, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**

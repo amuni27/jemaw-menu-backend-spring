@@ -94,10 +94,21 @@ public class CheckoutService {
     private final PaymentReview review;
     private final Set<Market> enabled = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
+    private final com.agafari.com.security.EmailVerificationService emailVerification; // AGF BE-F0 (SS-2); null: no verification check
+
     public CheckoutService(JdbcTemplate jdbc, BillingStrategyRegistry registry, MonetizationLocks locks, PlanPriceRepository prices, MonetizationConfigRepository configs,
                            BusinessSubscriptionRepository subscriptions, PlanRequestRepository planRequests, JobQueue jobs, MonetizationClock clock,
                            PlatformTransactionManager transactions, BillingFlags flags, CheckoutCancellation cancellation,
                            PaymentReview review) {
+        this(jdbc, registry, locks, prices, configs, subscriptions, planRequests, jobs, clock, transactions, flags, cancellation, review, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public CheckoutService(JdbcTemplate jdbc, BillingStrategyRegistry registry, MonetizationLocks locks, PlanPriceRepository prices, MonetizationConfigRepository configs,
+                           BusinessSubscriptionRepository subscriptions, PlanRequestRepository planRequests, JobQueue jobs, MonetizationClock clock,
+                           PlatformTransactionManager transactions, BillingFlags flags, CheckoutCancellation cancellation,
+                           PaymentReview review, com.agafari.com.security.EmailVerificationService emailVerification) {
+        this.emailVerification = emailVerification;
         this.review = review;
         this.jdbc = jdbc;
         this.registry = registry;
@@ -126,6 +137,7 @@ public class CheckoutService {
 
     public Outcome create(String businessId, String ownerId, String priceId, String idempotencyKey, String replaceCheckoutId, Integer replaceRowVersion) {
         requireAnyMarketEnabled();
+        requireVerifiedEmail(businessId); // AGF BE-F0 (D4, SS-2)
         if (priceId == null || priceId.isBlank()) throw new FieldValidationException(Map.of("priceId", "A price is required"));
         if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > MAX_KEY_LENGTH) {
             throw new FieldValidationException(Map.of("Idempotency-Key", "An Idempotency-Key of up to 255 characters is required"));
@@ -144,6 +156,36 @@ public class CheckoutService {
         if (rows.isEmpty()) throw new NotFoundException("Checkout not found");
         return response(rows.get(0));
     }
+
+    /**
+     * AGF BE-F0 (register §84 D2): whether a paid checkout would be accepted for this restaurant's market: its billing is on
+     * (which the startup readiness check only allows once every activation gate is closed) and a provider serves it. Reveals
+     * nothing else; the plan view shows it as {@code checkoutAvailable}.
+     */
+    public boolean checkoutAvailable(String businessId) {
+        if (enabled.isEmpty()) return false;
+        List<String> countries = jdbc.queryForList("select country from business where id = ?", String.class, businessId);
+        Market market = countries.isEmpty() ? null : Market.fromCountry(countries.get(0)).orElse(null);
+        if (market == null || !enabled.contains(market)) return false;
+        try {
+            registry.forMarket(market);
+            return true;
+        } catch (IllegalStateException none) {
+            return false;
+        }
+    }
+
+    /** AGF BE-F0 (register §84 D4, SS-2): while email verification is operational, the restaurant's owner must have verified their email. */
+    private void requireVerifiedEmail(String businessId) {
+        if (emailVerification == null || !emailVerification.operational()) return;
+        List<String> owners = jdbc.queryForList("select owner_user_id from business where id = ?", String.class, businessId);
+        boolean verified = !owners.isEmpty() && owners.get(0) != null
+                && jdbc.queryForObject("select count(*) from users where id = ? and email_verified_at is not null", Integer.class, owners.get(0)) == 1;
+        if (!verified) throw new CheckoutRefusedException(HttpStatus.FORBIDDEN, EMAIL_NOT_VERIFIED, "Verify your email to subscribe to a paid plan.");
+    }
+
+    /** AGF BE-F0: the stable code of the SS-2 refusal (the same code the other owner actions use). */
+    public static final String EMAIL_NOT_VERIFIED = "EMAIL_NOT_VERIFIED";
 
     private void requireAnyMarketEnabled() {
         if (enabled.isEmpty()) throw new NotFoundException("Not found");

@@ -94,6 +94,7 @@ public class PlanRequestService {
     private final PlanPriceService planPrices;
     private final com.agafari.com.billing.PaymentReview paymentReview;
     private final com.agafari.com.billing.RenewalStatus renewalStatus; // AGF SUB-R5-03-B
+    private final com.agafari.com.billing.CheckoutService checkouts; // AGF BE-F0
     private final TrialService trials;
     private final RestaurantCutOver cutOver;
     private final PublishEligibility publishEligibility;
@@ -106,7 +107,9 @@ public class PlanRequestService {
                               GrandfatheringService grandfathering, EmailVerificationService emailVerification,
                               @Value("${app.monetization.self-service-enabled:false}") boolean selfServiceEnabled, SubscriptionLifecycle lifecycle, PlanPriceService planPrices,
                               com.agafari.com.billing.PaymentReview paymentReview, TrialService trials,
-                              RestaurantCutOver cutOver, PublishEligibility publishEligibility, com.agafari.com.billing.RenewalStatus renewalStatus) {
+                              RestaurantCutOver cutOver, PublishEligibility publishEligibility, com.agafari.com.billing.RenewalStatus renewalStatus,
+                              com.agafari.com.billing.CheckoutService checkouts) {
+        this.checkouts = checkouts;
         this.renewalStatus = renewalStatus;
         this.cutOver = cutOver;
         this.publishEligibility = publishEligibility;
@@ -200,14 +203,17 @@ public class PlanRequestService {
         OwnerPlanView.SelfService selfService = !selfServiceEnabled ? null : new OwnerPlanView.SelfService(
                 setting2 && currentRow == null && eligible.stream().anyMatch(p -> !p.paid()), verificationRequired(businessId));
         OwnerPlanView.PaymentUnderReview review = paymentReview.current(businessId).orElse(null);
+        List<OwnerPlanView.Price> prices = priceView(businessId, config, now);
         return new OwnerPlanView(true, config.getSetting().name(), config.getVersion(), eligible, current, pending,
-                setting2 && currentRow == null && pending == null, trial != null, true, trial, endedPlan, selfService, priceView(businessId, config, now),
+                setting2 && currentRow == null && pending == null, trial != null, true, trial, endedPlan, selfService, prices,
                 review,
                 // AGF BE-1: present only while trials are enabled, so the response is unchanged with the flag off
                 trials.isEnabled() ? trials.eligibleForOwner(businessId, config, currentRow != null, pending != null) : null,
                 selectionRequired(businessId, currentRow != null || pending != null || review != null),
                 publishAllowed(businessId),
-                renewalStatus.of(businessId, currentRow, timeZone, now).orElse(null)); // AGF SUB-R5-03-B
+                renewalStatus.of(businessId, currentRow, timeZone, now).orElse(null), // AGF SUB-R5-03-B
+                // AGF BE-F0: only beside the prices (billing-enabled requires prices-visible), so the view is unchanged while they're hidden
+                prices == null ? null : checkouts.checkoutAvailable(businessId));
     }
 
     /**

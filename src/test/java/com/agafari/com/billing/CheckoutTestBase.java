@@ -36,6 +36,8 @@ abstract class CheckoutTestBase extends AbstractIntegrationTest {
     protected static final long ET_AMOUNT = 2500;
 
     @Autowired protected JdbcTemplate jdbc;
+
+    @Autowired private com.agafari.com.support.RecordingEmailVerificationMailer verificationMailer;
     @Autowired protected CheckoutService checkouts;
     @Autowired protected FakeProviderClient fakeEt;
     @Autowired protected FakeProviderClient fakeUs;
@@ -48,6 +50,7 @@ abstract class CheckoutTestBase extends AbstractIntegrationTest {
 
     @BeforeEach
     void setUpCheckout() {
+        verificationMailer.setOperational(false); // AGF BE-F0 (register §84 D4): checkouts here run before D5 (email verification not operational); SS-2 itself is CheckoutAvailabilityTest
         fakeEt.reset();
         fakeUs.reset();
         clock.reset();
@@ -62,6 +65,7 @@ abstract class CheckoutTestBase extends AbstractIntegrationTest {
 
     @AfterEach
     void tearDownCheckout() {
+        verificationMailer.setOperational(true);
         checkouts.setBillingEnabled(Market.ET, false);
         checkouts.setBillingEnabled(Market.US, false);
         clock.reset();

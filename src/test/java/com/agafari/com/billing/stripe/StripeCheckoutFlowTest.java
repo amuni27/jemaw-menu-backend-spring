@@ -59,6 +59,8 @@ class StripeCheckoutFlowTest extends AbstractIntegrationTest {
     private static final String PRICE_REF = "price_synthetic_m4";
 
     @Autowired private JdbcTemplate jdbc;
+
+    @Autowired private com.agafari.com.support.RecordingEmailVerificationMailer verificationMailer;
     @Autowired private StripeStub stub;
     @Autowired private CheckoutService checkouts;
     @Autowired private PaymentOutcomeService outcomes;
@@ -74,6 +76,7 @@ class StripeCheckoutFlowTest extends AbstractIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        verificationMailer.setOperational(false); // AGF BE-F0 (register §84 D4): checkouts here run before D5 (email verification not operational); SS-2 itself is CheckoutAvailabilityTest
         stub.reset();
         checkouts.setBillingEnabled(Market.US, true);
         outcomes.setBillingEnabled(Market.US, true);
@@ -88,6 +91,7 @@ class StripeCheckoutFlowTest extends AbstractIntegrationTest {
 
     @AfterEach
     void tearDown() {
+        verificationMailer.setOperational(true);
         checkouts.setBillingEnabled(Market.US, false);
         outcomes.setBillingEnabled(Market.US, false);
         webhooks.setBillingEnabled(Market.US, false);

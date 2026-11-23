@@ -9,11 +9,13 @@ import java.util.List;
  * AGF SUB-R4-10 (PO ruling R3): an intentional restriction on real PROVIDER activation, independent of provider secrets or
  * adapter beans. Each entry is a release gate the Product Owner has kept open. While any remains, {@code billing-enabled}
  * is refused at startup and the payment outcome path ignores the flag. Only a separately authorized change may remove one.
+ *
+ * <p>Closed gates (register): "AD-7 grace duration", closed by the PO's gate-1 approval after verification (§88): AD-7 is
+ * decided (§63) and implemented ({@code ProviderGrace}, R5-03 accepted).
  */
 public final class ProviderActivationReadiness {
 
     private static final List<String> OPEN_GATES = List.of(
-            "AD-7 grace duration",
             "R7b escalation of an unresolved payment at the retry ceiling (PAYMENT_OUTCOME_PENDING_REVIEW)",
             "Ownership of an exception for an unattributable payment",
             "SUB-R4-11 financial exception handling and payment-under-review block",

@@ -131,8 +131,9 @@ class ProviderActivationUnavailableTest {
     @Test
     void activationReadinessIsAnIntentionalRestrictionWithTheOpenGatesNamed() {
         assertThat(ProviderActivationReadiness.ready()).isFalse();
-        assertThat(String.join("|", ProviderActivationReadiness.openGates())).contains("AD-7").contains("R7b").contains("SUB-R4-11").contains("SUB-R4-13")
-                .contains("SUB-R4-14").contains("SUB-R4-16").contains("unattributable").contains("Full mutation");
+        assertThat(String.join("|", ProviderActivationReadiness.openGates())).contains("R7b").contains("SUB-R4-11").contains("SUB-R4-13")
+                .contains("SUB-R4-14").contains("SUB-R4-16").contains("unattributable").contains("identity").contains("Full mutation")
+                .as("AD-7 closed (register §88)").doesNotContain("AD-7");
     }
 
     @Test
@@ -142,7 +143,7 @@ class ProviderActivationUnavailableTest {
 
         assertThat(FlagMatrix.violations(flags, true, everything)).as("the flag matrix alone would allow it").isEmpty();
         assertThat(FlagMatrixValidator.violations(flags, true, everything)).hasSize(2)
-                .allMatch(v -> v.contains("billing-enabled") && v.contains("provider activation readiness") && v.contains("AD-7"));
+                .allMatch(v -> v.contains("billing-enabled") && v.contains("provider activation readiness") && v.contains("R7b") && !v.contains("AD-7"));
     }
 
     @Test

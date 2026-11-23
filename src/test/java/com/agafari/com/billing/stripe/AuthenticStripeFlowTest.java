@@ -173,7 +173,8 @@ class AuthenticStripeFlowTest extends AbstractIntegrationTest {
         assertThat(((Timestamp) inv.get("period_end")).toInstant()).isEqualTo(epoch(p + "_invoice_verify", "lines.data[0].period.end"));
         Map<String, Object> sub = jdbc.queryForMap("select * from business_subscription where business_id = ? and status <> 'EXPIRED'", t.businessId());
         assertThat(sub).containsEntry("source", "PROVIDER").containsEntry("provider", "STRIPE").containsEntry("plan_code", "MODEL_4")
-                .containsEntry("provider_subscription_ref", rk.id(str(p + "_subscription", "id")));
+                .containsEntry("provider_subscription_ref", rk.id(str(p + "_subscription", "id")))
+                .as("AD-7 in the US market too (gate 1 review, register §88)").containsEntry("grace_days", 7);
         assertThat(jdbc.queryForObject("select provider_customer_ref from billing_account where business_id = ? and provider = 'STRIPE'", String.class, t.businessId()))
                 .as("U5: stored once").isEqualTo(rk.id(str(p + "_subscription", "customer")));
         assertThat(count("select count(*) from billing_exception where business_id = ?", t.businessId())).isZero();

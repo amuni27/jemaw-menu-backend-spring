@@ -63,7 +63,7 @@ public class ExceptionService {
             (Long) rs.getObject("amount_minor"), rs.getString("currency"), instant(rs.getTimestamp("paid_at")), rs.getBoolean("involves_customer_funds"),
             rs.getString("owner_user_id"), instant(rs.getTimestamp("claimed_at")), instant(rs.getTimestamp("escalated_at")), rs.getString("escalation_reason"),
             rs.getString("escalated_to"), rs.getString("resolution"), rs.getString("resolution_note"), rs.getString("resolved_by"), instant(rs.getTimestamp("resolved_at")),
-            instant(rs.getTimestamp("created_at")), rs.getInt("row_version"), instant(rs.getTimestamp("due_at")), null, null, null);
+            instant(rs.getTimestamp("created_at")), rs.getInt("row_version"), instant(rs.getTimestamp("due_at")), null, null, null, rs.getString("source_job_id"));
 
     private final JdbcTemplate jdbc;
     private final MonetizationLocks locks;
@@ -92,20 +92,38 @@ public class ExceptionService {
      */
     boolean create(String businessId, String code, String paymentId, String checkoutId, String providerEventId, String refundRequestId, Long amountMinor, String currency,
                    Instant paidAt, boolean involvesCustomerFunds, String status, Map<String, Object> facts, Instant now) {
+        return create(businessId, code, paymentId, checkoutId, providerEventId, refundRequestId, amountMinor, currency, paidAt, involvesCustomerFunds, status, facts, now, null);
+    }
+
+    /**
+     * AGF EX-F (register §91): as above, optionally identified by the financial job that failed ({@code sourceJobId}, unique
+     * per code). {@code businessId} may be null only for a platform code; the database enforces the rest (no restaurant
+     * links, a durable source, and a source job's own restaurant). A platform deadline is 24 elapsed hours (G3-E).
+     */
+    boolean create(String businessId, String code, String paymentId, String checkoutId, String providerEventId, String refundRequestId, Long amountMinor, String currency,
+                   Instant paidAt, boolean involvesCustomerFunds, String status, Map<String, Object> facts, Instant now, String sourceJobId) {
         String id = UUID.randomUUID().toString();
         Instant created = now.truncatedTo(ChronoUnit.MICROS);
         // AGF SUB-R4-12 (R-3, I2): a customer-funds exception gets its deadline now; its basis is kept with the facts
         ExceptionSla.Due due = involvesCustomerFunds ? sla.compute(businessId, created) : null;
         Map<String, Object> recorded = new java.util.LinkedHashMap<>(facts);
         if (due != null) recorded.put("sla", due.facts());
+        if (businessId == null) recorded.put("slaBasis", "24 elapsed hours (no restaurant, register §89 G3-E)");
         int inserted = jdbc.update("insert into billing_exception (id, business_id, code, payment_id, checkout_id, provider_event_id, refund_request_id, amount_minor, currency, "
-                        + "paid_at, involves_customer_funds, facts, status, created_at, due_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?) on conflict do nothing",
+                        + "paid_at, involves_customer_funds, facts, status, created_at, due_at, source_job_id) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?) "
+                        + "on conflict do nothing",
                 id, businessId, code, paymentId, checkoutId, providerEventId, refundRequestId, amountMinor, currency, timestamp(paidAt), involvesCustomerFunds,
-                mapper.writeValueAsString(recorded), status, timestamp(created), due == null ? null : timestamp(due.dueAt()));
+                mapper.writeValueAsString(recorded), status, timestamp(created), due == null ? null : timestamp(due.dueAt()), sourceJobId);
         if (inserted == 1) {
             String deadline = due == null ? "" : " due=" + due.dueAt() + " immediate=" + due.immediate() + " calendarIncomplete=" + due.calendarIncomplete()
                     + " graceUnknown=" + due.graceUnknown();
             audit.success(OPENED, null, AdminAuditService.SYSTEM, TARGET, id, "code=" + code + " status=" + status + deadline);
+            // AGF EX-F (G3-B): every new exception is a log event for alerting; one without a restaurant is an error
+            org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ExceptionService.class);
+            String restaurant = businessId == null ? "none" : businessId;
+            Object dueAt = due == null ? "none" : due.dueAt();
+            if (businessId == null) log.error("event=billing.exception_opened id={} code={} restaurant={} due={}", id, code, restaurant, dueAt);
+            else log.warn("event=billing.exception_opened id={} code={} restaurant={} due={}", id, code, restaurant, dueAt);
             if (due != null && due.immediate()) org.slf4j.LoggerFactory.getLogger(ExceptionService.class).warn("event=billing.exception_immediate id={} due={}", id, due.dueAt());
             if (due != null && due.calendarIncomplete()) {
                 org.slf4j.LoggerFactory.getLogger(ExceptionService.class).warn("event=billing.calendar_incomplete id={} market={}", id, due.market());
@@ -154,18 +172,83 @@ public class ExceptionService {
     }
 
     public BillingExceptionView get(String id) {
+        if (!onPostgres()) throw new NotFoundException("Exception not found"); // AGF EX-F: no billing tables outside PostgreSQL
         return derive(load(id).orElseThrow(() -> new NotFoundException("Exception not found")));
     }
 
     /** AGF SUB-R4-12 (G3): conditions derived from stored data, never stored themselves. */
     private BillingExceptionView derive(BillingExceptionView v) {
-        if (v.involvesCustomerFunds() == false || v.dueAt() == null) return v;
+        if (!v.involvesCustomerFunds() || v.dueAt() == null) return v;
         boolean open = Set.of("AUTO_HANDLING", "OPEN", "IN_REVIEW").contains(v.status());
         ExceptionSla.Due current = sla.compute(v.businessId(), v.createdAt());
         return new BillingExceptionView(v.id(), v.businessId(), v.code(), v.status(), v.paymentId(), v.checkoutId(), v.providerEventId(), v.refundRequestId(), v.amountMinor(),
                 v.currency(), v.paidAt(), v.involvesCustomerFunds(), v.ownerUserId(), v.claimedAt(), v.escalatedAt(), v.escalationReason(), v.escalatedTo(), v.resolution(),
                 v.resolutionNote(), v.resolvedBy(), v.resolvedAt(), v.createdAt(), v.rowVersion(), v.dueAt(), v.dueAt().equals(v.createdAt()),
-                open && !v.dueAt().isAfter(clock.now()), current != null && current.calendarIncomplete());
+                open && !v.dueAt().isAfter(clock.now()), current != null && current.calendarIncomplete(), v.sourceJobId());
+    }
+
+    // ---- AGF EX-F (register §91): the Super Admin list, badge counts and history ----
+
+    private static final String OPEN_STATE_SQL = "('AUTO_HANDLING', 'OPEN', 'IN_REVIEW')";
+    private volatile Boolean postgres;
+
+    /** The billing tables exist only on PostgreSQL (the in-memory demo builds its schema from entities): elsewhere there are none. */
+    private boolean onPostgres() {
+        Boolean known = postgres;
+        if (known == null) {
+            known = Boolean.TRUE.equals(jdbc.execute((org.springframework.jdbc.core.ConnectionCallback<Boolean>) c ->
+                    c.getMetaData().getDatabaseProductName().toLowerCase(java.util.Locale.ROOT).contains("postgresql")));
+            postgres = known;
+        }
+        return known;
+    }
+    private static final int MAX_PAGE = 100;
+
+    /** {@code state}: UNRESOLVED (default), RESOLVED or ALL. Unresolved first by deadline (none last), then newest. */
+    public com.agafari.com.dto.response.BillingExceptionPage list(String state, int page, int size) {
+        String where = switch (state == null ? "UNRESOLVED" : state) {
+            case "UNRESOLVED" -> "e.status <> 'RESOLVED'";
+            case "RESOLVED" -> "e.status = 'RESOLVED'";
+            case "ALL" -> "true";
+            default -> throw new com.agafari.com.exception.BadRequestException("state must be UNRESOLVED, RESOLVED or ALL");
+        };
+        if (page < 0 || size < 1 || size > MAX_PAGE) throw new com.agafari.com.exception.BadRequestException("page must be 0 or more and size between 1 and " + MAX_PAGE);
+        if (!onPostgres()) return new com.agafari.com.dto.response.BillingExceptionPage(List.of(), page, size, 0);
+        Timestamp now = timestamp(clock.now());
+        long total = jdbc.queryForObject("select count(*) from billing_exception e where " + where, Long.class);
+        List<com.agafari.com.dto.response.BillingExceptionPage.Item> items = jdbc.query("""
+                select e.*, b.name as business_name, u.email as owner_email,
+                       (e.status in %s and e.due_at is not null and e.due_at <= ?) as is_overdue
+                from billing_exception e left join business b on b.id = e.business_id left join users u on u.id = e.owner_user_id
+                where %s order by (e.status = 'RESOLVED'), e.due_at asc nulls last, e.created_at desc, e.id limit ? offset ?
+                """.formatted(OPEN_STATE_SQL, where), (rs, n) -> new com.agafari.com.dto.response.BillingExceptionPage.Item(rs.getString("id"), rs.getString("code"),
+                rs.getString("status"), rs.getString("business_id"), rs.getString("business_name"), (Long) rs.getObject("amount_minor"), rs.getString("currency"),
+                rs.getBoolean("involves_customer_funds"), instant(rs.getTimestamp("created_at")), instant(rs.getTimestamp("due_at")), rs.getBoolean("is_overdue"),
+                rs.getString("owner_email") == null ? null : LogMasking.maskEmail(rs.getString("owner_email")), rs.getString("escalated_to"),
+                rs.getString("provider_event_id"), rs.getString("source_job_id")), now, size, (long) page * size);
+        return new com.agafari.com.dto.response.BillingExceptionPage(items, page, size, total);
+    }
+
+    /** PO F-2: each unresolved record counted once; open, escalated and automatic handling split it; overdue is separate. */
+    public com.agafari.com.dto.response.BillingExceptionSummary summary() {
+        if (!onPostgres()) return new com.agafari.com.dto.response.BillingExceptionSummary(0, 0, 0, 0, 0);
+        return jdbc.queryForObject("""
+                select count(*) filter (where status <> 'RESOLVED') as unresolved,
+                       count(*) filter (where status in ('OPEN', 'IN_REVIEW')) as open,
+                       count(*) filter (where status = 'ESCALATED') as escalated,
+                       count(*) filter (where status = 'AUTO_HANDLING') as auto_handling,
+                       count(*) filter (where status in %s and due_at is not null and due_at <= ?) as overdue
+                from billing_exception
+                """.formatted(OPEN_STATE_SQL), (rs, n) -> new com.agafari.com.dto.response.BillingExceptionSummary(rs.getLong("unresolved"), rs.getLong("open"),
+                rs.getLong("escalated"), rs.getLong("auto_handling"), rs.getLong("overdue")), timestamp(clock.now()));
+    }
+
+    /** The exception's own audit entries, newest first (who did what, with notes). */
+    public List<com.agafari.com.dto.response.AdminAuditPage.Item> history(String id) {
+        if (!onPostgres() || load(id).isEmpty()) throw new NotFoundException("Exception not found");
+        return jdbc.query("select * from admin_audit_event where target_type = ? and target_id = ? order by occurred_at desc, id desc",
+                (rs, n) -> new com.agafari.com.dto.response.AdminAuditPage.Item(rs.getString("id"), instant(rs.getTimestamp("occurred_at")), rs.getString("actor_label"),
+                        rs.getString("action"), rs.getString("target_type"), rs.getString("target_id"), rs.getString("outcome"), rs.getString("detail")), TARGET, id);
     }
 
     public BillingExceptionView claim(String id, BillingExceptionActionRequest request, String adminId, String adminEmail) {
@@ -227,10 +310,11 @@ public class ExceptionService {
                                         String auditAction, String set, List<Object> setArgs, String detail) {
         String actor = LogMasking.maskEmail(adminEmail);
         if (request == null || request.rowVersion() == null) throw new FieldValidationException(Map.of("rowVersion", "Reload and try again"));
-        String businessId = jdbc.queryForList("select business_id from billing_exception where id = ?", String.class, id).stream().findFirst()
-                .orElseThrow(() -> new NotFoundException("Exception not found"));
+        List<Map<String, Object>> found = jdbc.queryForList("select business_id from billing_exception where id = ?", id);
+        if (found.isEmpty()) throw new NotFoundException("Exception not found");
+        String businessId = (String) found.get(0).get("business_id"); // AGF EX-F: null for a platform exception
         return transaction.execute(s -> {
-            locks.restaurant(businessId);
+            if (businessId != null) locks.restaurant(businessId); // a platform exception touches no restaurant: its row lock (below) is enough
             Map<String, Object> row = jdbc.queryForMap("select status, row_version from billing_exception where id = ? for update", id);
             if (((Number) row.get("row_version")).intValue() != request.rowVersion()) {
                 throw rejected(adminId, actor, id, action + ":version_conflict", HttpStatus.CONFLICT, BillingExceptionRefusedException.VERSION_CONFLICT,

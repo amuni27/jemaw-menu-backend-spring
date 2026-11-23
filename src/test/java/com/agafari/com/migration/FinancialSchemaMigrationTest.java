@@ -517,7 +517,7 @@ class FinancialSchemaMigrationTest extends AbstractIntegrationTest {
     @Test
     void noForeignKeyCanCascadeIntoTheseTables() {
         assertThat(jdbc.queryForObject("select count(*) from pg_constraint where contype = 'f' and confdeltype <> 'a' and conrelid::regclass::text in ('billing_exception', 'refund_request')", Integer.class)).isZero();
-        assertThat(jdbc.queryForObject("select count(*) from pg_constraint where contype = 'f' and conrelid::regclass::text in ('billing_exception', 'refund_request')", Integer.class)).isEqualTo(7);
+        assertThat(jdbc.queryForObject("select count(*) from pg_constraint where contype = 'f' and conrelid::regclass::text in ('billing_exception', 'refund_request')", Integer.class)).as("AGF EX-F adds fk_billing_exception_job (no cascade)").isEqualTo(8);
     }
 
     @Test

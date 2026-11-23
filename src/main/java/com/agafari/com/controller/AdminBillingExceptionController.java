@@ -26,6 +26,25 @@ public class AdminBillingExceptionController {
     private final CurrentUser currentUser;
     private final ExceptionService exceptions;
 
+    /** AGF EX-F: the list (UNRESOLVED by default), newest deadlines first. */
+    @GetMapping
+    public ResponseEntity<com.agafari.com.dto.response.BillingExceptionPage> list(@org.springframework.web.bind.annotation.RequestParam(defaultValue = "UNRESOLVED") String state,
+                                                                                @org.springframework.web.bind.annotation.RequestParam(defaultValue = "0") int page,
+                                                                                @org.springframework.web.bind.annotation.RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(exceptions.list(state, page, size));
+    }
+
+    /** AGF EX-F (F-2): the badge counts. */
+    @GetMapping("/summary")
+    public ResponseEntity<com.agafari.com.dto.response.BillingExceptionSummary> summary() {
+        return ResponseEntity.ok(exceptions.summary());
+    }
+
+    @GetMapping("/{id}/history")
+    public ResponseEntity<java.util.List<com.agafari.com.dto.response.AdminAuditPage.Item>> history(@PathVariable String id) {
+        return ResponseEntity.ok(exceptions.history(id));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<BillingExceptionView> get(@PathVariable String id) {
         return ResponseEntity.ok(exceptions.get(id));

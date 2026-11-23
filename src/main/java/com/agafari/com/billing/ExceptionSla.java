@@ -32,6 +32,8 @@ import java.util.Map;
 public class ExceptionSla {
 
     static final String OVERDUE = "BILLING_EXCEPTION_OVERDUE";
+    /** AGF EX-F (register §89 G3-E): the review deadline of an exception without a restaurant. */
+    public static final Duration PLATFORM_REVIEW = Duration.ofHours(24);
     static final String RECOMPUTED = "BILLING_EXCEPTION_DUE_RECOMPUTED";
     static final String CALENDAR_INCOMPLETE = "MARKET_CALENDAR_INCOMPLETE";
     static final String OPEN_STATUSES = "('AUTO_HANDLING', 'OPEN', 'IN_REVIEW')"; // ESCALATED meets R-3; RESOLVED is done
@@ -85,6 +87,8 @@ public class ExceptionSla {
 
     /** The deadline of an exception of this restaurant created at {@code created}; null if the restaurant has no market. */
     public Due compute(String businessId, Instant created) {
+        // AGF EX-F (G3-E): a platform exception has no restaurant, so no market calendar: 24 elapsed hours
+        if (businessId == null) return new Due(created.plus(PLATFORM_REVIEW).truncatedTo(ChronoUnit.MICROS), false, false, null, false, null, "UTC");
         Market market = marketOf(businessId);
         if (market == null) return null;
         ZoneId zone = zoneOf(businessId, market);

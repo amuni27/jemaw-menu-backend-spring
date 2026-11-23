@@ -177,9 +177,10 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
         if (sandbox != null && sandbox.active() && usFlag) enabled.add(Market.US);
     }
 
+    /** AGF §94: payment evidence is applied until the end of an active local sandbox's drain (never in Ethiopia). */
     private boolean open(Market market) {
         LocalSandboxActivation sandbox = localSandbox;
-        return enabled.contains(market) && (sandbox == null || !sandbox.blocks(market));
+        return enabled.contains(market) && (sandbox == null || !sandbox.blocksEvidence(market));
     }
 
     /** Tests only: the flag itself comes from configuration, and readiness from {@link ProviderActivationReadiness}. */
@@ -246,6 +247,14 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
             case SUCCEEDED -> {
                 // continued below
             }
+        }
+
+        // AGF B-L1 (register §94): under a local sandbox, only a payment verified as made inside its window is applied; any
+        // other is recorded (quarantined with the reason) for reconciliation, never applied
+        LocalSandboxActivation sandbox = localSandbox;
+        if (sandbox != null && sandbox.paidOutsideWindow(verified.paidAt())) {
+            return quarantine(event, "LOCAL_SANDBOX_WINDOW_ENDED: the verified payment was made at " + verified.paidAt() + ", not inside the local sandbox window ending "
+                    + sandbox.until() + "; recorded for reconciliation, not applied");
         }
 
         // AGF SUB-R5-03 (§37 Q7/F2): a provider-initiated renewal is matched by its verified subscription, never by a checkout

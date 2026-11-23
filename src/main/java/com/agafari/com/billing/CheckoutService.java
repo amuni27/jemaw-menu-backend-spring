@@ -95,15 +95,25 @@ public class CheckoutService {
     private final Set<Market> enabled = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private volatile LocalSandboxActivation localSandbox; // AGF B-L1
 
-    /** AGF B-L1 (register §93): an active local sandbox refuses Ethiopia and, from its acknowledged time, the US. */
+    /**
+     * AGF B-L1 (register §93, §94): an active local sandbox refuses Ethiopia; in the US it stops new checkouts at its cutoff,
+     * caps every checkout at its end, and still lets an owner read or cancel an existing checkout during its drain.
+     */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setLocalSandbox(LocalSandboxActivation sandbox) {
         this.localSandbox = sandbox;
     }
 
+    /** New paid operations. */
     private boolean open(Market market) {
         LocalSandboxActivation sandbox = localSandbox;
-        return enabled.contains(market) && (sandbox == null || !sandbox.blocks(market));
+        return enabled.contains(market) && (sandbox == null || !sandbox.blocksNewCheckouts(market));
+    }
+
+    /** Reading or cancelling an existing checkout (never a new payment). */
+    private boolean openForExisting(Market market) {
+        LocalSandboxActivation sandbox = localSandbox;
+        return enabled.contains(market) && (sandbox == null || !sandbox.blocksEvidence(market));
     }
 
     private final com.agafari.com.security.EmailVerificationService emailVerification; // AGF BE-F0 (SS-2); null: no verification check
@@ -163,7 +173,7 @@ public class CheckoutService {
 
     public CheckoutResponse get(String businessId, String id) {
         requireAnyMarketEnabled();
-        enabledMarketOf(businessId);
+        existingMarketOf(businessId);
         List<Row> rows = jdbc.query("select " + COLUMNS + " from checkout_session where id = ? and business_id = ?", MAPPER, id, businessId);
         if (rows.isEmpty()) throw new NotFoundException("Checkout not found");
         return response(rows.get(0));
@@ -207,6 +217,14 @@ public class CheckoutService {
         String country = jdbc.queryForObject("select country from business where id = ?", String.class, businessId);
         Market market = Market.fromCountry(country).orElseThrow(() -> new NotFoundException("Not found"));
         if (!open(market)) throw new NotFoundException("Not found");
+        return market;
+    }
+
+    /** AGF §94: as {@link #enabledMarketOf} for reading or cancelling an existing checkout (allowed during a local sandbox drain). */
+    private Market existingMarketOf(String businessId) {
+        String country = jdbc.queryForObject("select country from business where id = ?", String.class, businessId);
+        Market market = Market.fromCountry(country).orElseThrow(() -> new NotFoundException("Not found"));
+        if (!openForExisting(market)) throw new NotFoundException("Not found");
         return market;
     }
 
@@ -274,6 +292,8 @@ public class CheckoutService {
                 UUID.randomUUID().toString(), businessId, market.name(), strategy.provider());
         String id = UUID.randomUUID().toString();
         Instant expiresAt = now.plus(QUOTE_LIFETIME);
+        LocalSandboxActivation sandbox = localSandbox;
+        if (sandbox != null) expiresAt = sandbox.capCheckoutExpiry(expiresAt); // AGF §94: never payable after the local sandbox window
         // The amount comes from plan_price only (the story's rule); the strategy decides the kind and what it replaces.
         Money expected = new Money(price.getAmountMinor(), Currency.valueOf(price.getCurrency()));
         // AGF SUB-R4-15 (P2): a downgrade-renewal checkout names the exact open, unfunded change it pays for
@@ -376,7 +396,7 @@ public class CheckoutService {
     /** AGF SUB-R4-06: one transaction under the locks; the provider is asked later, by the job. */
     public CheckoutResponse cancel(String businessId, String id) {
         requireAnyMarketEnabled();
-        enabledMarketOf(businessId);
+        existingMarketOf(businessId);
         return response(transaction.execute(s -> {
             locks.configShared();
             locks.restaurant(businessId);

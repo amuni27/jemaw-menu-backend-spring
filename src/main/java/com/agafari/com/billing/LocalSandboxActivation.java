@@ -41,8 +41,13 @@ import java.util.function.Function;
  *   <li>the datasource is PostgreSQL on loopback, in a database named {@value #DATABASE_PREFIX}…;</li>
  *   <li>no hosting marker is in the environment;</li>
  *   <li>Ethiopian billing is off (US only);</li>
- *   <li>the acknowledged time is in the future and at most seven days ahead; at that time the exception ends, without a restart.</li>
+ *   <li>the acknowledged time is at least one hour and at most seven days ahead.</li>
  * </ol>
+ *
+ * <p>AGF §94, expiry in phases, without a restart: new checkouts stop {@link #CHECKOUT_CUTOFF} before the end, and no
+ * checkout outlives the end, so nothing started can be paid after it. During the following {@link #DRAIN}, webhooks for
+ * payments made inside the window are still verified and applied (a delayed webhook), and a payment made after the end is
+ * quarantined. Afterwards nothing is applied. Webhooks are always recorded durably, for reconciliation.
  */
 public final class LocalSandboxActivation {
 
@@ -51,6 +56,15 @@ public final class LocalSandboxActivation {
     public static final String UNTIL = "app.billing.local-sandbox.acknowledged-until";
     public static final String DATABASE_PREFIX = "agafari_sandbox_";
     static final Duration MAX_WINDOW = Duration.ofDays(7);
+    /** AGF §94: at least this long before the end, or no checkout could be started and paid inside the window. */
+    static final Duration MIN_LEAD = Duration.ofHours(1);
+    /**
+     * AGF §94: new checkouts stop this long before the end. Stripe needs a session to live at least 30 minutes, and a
+     * checkout never outlives the window ({@link #capCheckoutExpiry}), so nothing started can be paid after the end.
+     */
+    public static final Duration CHECKOUT_CUTOFF = Duration.ofMinutes(45);
+    /** AGF §94: after the end, evidence of payments made inside the window (delayed webhooks) is still applied for this long. */
+    public static final Duration DRAIN = Duration.ofHours(24);
     static final Set<String> FORBIDDEN_PROFILES = Set.of("prod", "production", "staging", "demo");
     static final List<String> HOSTING_MARKERS = List.of("RENDER", "RENDER_SERVICE_ID", "DYNO", "KUBERNETES_SERVICE_HOST", "FLY_APP_NAME", "RAILWAY_ENVIRONMENT",
             "AWS_EXECUTION_ENV", "ECS_CONTAINER_METADATA_URI", "WEBSITE_SITE_NAME", "K_SERVICE");
@@ -140,13 +154,37 @@ public final class LocalSandboxActivation {
         return until;
     }
 
+    // ---- AGF §94: expiry in phases. An inactive exception never changes anything ----
+
+    private boolean governs() {
+        return active && !ProviderActivationReadiness.ready();
+    }
+
+    /** New paid operations (checkout availability, creation and its provider session): always outside the US; in the US from the cutoff. */
+    public boolean blocksNewCheckouts(Market market) {
+        if (!governs()) return false;
+        return market != Market.US || !clock.now().isBefore(until.minus(CHECKOUT_CUTOFF));
+    }
+
     /**
-     * True when this active exception must stop billing in {@code market}: always outside the US, and in the US from its
-     * acknowledged time. An inactive exception never blocks anything (and allows nothing): normal behaviour is unchanged.
+     * Applying payment evidence (webhook processing) and owner actions that reduce risk (reading or cancelling an existing
+     * checkout): always outside the US; in the US from the end of the drain. Webhooks are recorded durably regardless.
      */
-    public boolean blocks(Market market) {
-        if (!active || ProviderActivationReadiness.ready()) return false;
-        return market != Market.US || !clock.now().isBefore(until);
+    public boolean blocksEvidence(Market market) {
+        if (!governs()) return false;
+        return market != Market.US || !clock.now().isBefore(until.plus(DRAIN));
+    }
+
+    /** True when a verified payment was not made inside the window (or its time is unknown): it is recorded, never applied. */
+    public boolean paidOutsideWindow(Instant paidAt) {
+        if (!governs()) return false;
+        return paidAt == null || !paidAt.isBefore(until);
+    }
+
+    /** A new checkout (and so its Stripe session) never outlives the window. */
+    public Instant capCheckoutExpiry(Instant expiresAt) {
+        if (!governs() || expiresAt == null || !expiresAt.isAfter(until)) return expiresAt;
+        return until;
     }
 
     static List<String> problems(Inputs in, Instant now) {
@@ -187,6 +225,7 @@ public final class LocalSandboxActivation {
         Instant until = parse(in.acknowledgedUntil());
         if (until == null) p.add(UNTIL + " must be an ISO-8601 instant (e.g. 2026-11-25T18:00:00Z)");
         else if (!until.isAfter(now)) p.add(UNTIL + " has passed");
+        else if (until.isBefore(now.plus(MIN_LEAD))) p.add(UNTIL + " must be at least " + MIN_LEAD.toMinutes() + " minutes ahead");
         else if (until.isAfter(now.plus(MAX_WINDOW))) p.add(UNTIL + " must be at most " + MAX_WINDOW.toDays() + " days ahead");
         return p;
     }

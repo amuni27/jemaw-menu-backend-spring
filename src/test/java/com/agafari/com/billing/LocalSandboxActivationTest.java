@@ -93,8 +93,8 @@ class LocalSandboxActivationTest {
     void offByDefaultAndWithTheProfileAloneNothingChanges() {
         LocalSandboxActivation none = new Setup().with(s -> { s.commandLine.clear(); s.profiles = new String[0]; }).build();
         assertThat(none.active()).isFalse();
-        assertThat(none.blocks(Market.US)).as("an inactive sandbox never changes anything").isFalse();
-        assertThat(none.blocks(Market.ET)).isFalse();
+        assertThat(none.blocksNewCheckouts(Market.US)).as("an inactive sandbox never changes anything").isFalse();
+        assertThat(none.blocksEvidence(Market.ET)).isFalse();
         assertThat(new Setup().with(s -> s.commandLine.clear()).build().active()).as("the profile without the opt-in").isFalse();
         assertThat(new Setup().with(s -> s.commandLine.put("app.billing.local-sandbox.enabled", "false")).build().active()).isFalse();
     }
@@ -103,8 +103,10 @@ class LocalSandboxActivationTest {
     void aCompleteLocalSetupActivatesForTheUsMarketOnlyAndTheGatesStayOpen() {
         LocalSandboxActivation sandbox = new Setup().build();
         assertThat(sandbox.active()).isTrue();
-        assertThat(sandbox.blocks(Market.US)).isFalse();
-        assertThat(sandbox.blocks(Market.ET)).as("US only").isTrue();
+        assertThat(sandbox.blocksNewCheckouts(Market.US)).isFalse();
+        assertThat(sandbox.blocksEvidence(Market.US)).isFalse();
+        assertThat(sandbox.blocksNewCheckouts(Market.ET)).as("US only").isTrue();
+        assertThat(sandbox.blocksEvidence(Market.ET)).isTrue();
         assertThat(ProviderActivationReadiness.ready()).as("the gates never change").isFalse();
         assertThat(ProviderActivationReadiness.openGates()).hasSize(8);
         assertThat(new Setup().with(s -> s.os.put("STRIPE_SECRET_KEY", RESTRICTED_TEST_KEY)).build().active()).as("a restricted test key").isTrue();
@@ -116,10 +118,56 @@ class LocalSandboxActivationTest {
     void theExceptionEndsAtItsAcknowledgedTimeWithoutARestart() {
         MonetizationClock clock = clockAt(NOW);
         LocalSandboxActivation sandbox = new LocalSandboxActivation(new Setup().inputs(), clock);
-        clock.setOffset(Duration.between(Instant.now(), NOW.plus(Duration.ofDays(3)).minusSeconds(1)));
-        assertThat(sandbox.blocks(Market.US)).isFalse();
-        clock.setOffset(Duration.between(Instant.now(), NOW.plus(Duration.ofDays(3))));
-        assertThat(sandbox.blocks(Market.US)).as("expired").isTrue();
+        Instant until = NOW.plus(Duration.ofDays(3));
+        clock.setOffset(Duration.between(Instant.now(), until.minusSeconds(1)));
+        assertThat(sandbox.paidOutsideWindow(clock.now())).isFalse();
+        clock.setOffset(Duration.between(Instant.now(), until.plus(LocalSandboxActivation.DRAIN)));
+        assertThat(sandbox.blocksNewCheckouts(Market.US)).as("expired").isTrue();
+        assertThat(sandbox.blocksEvidence(Market.US)).isTrue();
+    }
+
+    // ---- expiry in phases (register §94): new checkouts stop first; evidence of earlier payments is still applied ----
+
+    @Test
+    void newCheckoutsStopAtTheCutoffBeforeTheAcknowledgedTime() {
+        MonetizationClock clock = clockAt(NOW);
+        LocalSandboxActivation sandbox = new LocalSandboxActivation(new Setup().inputs(), clock);
+        Instant until = NOW.plus(Duration.ofDays(3));
+        clock.setOffset(Duration.between(Instant.now(), until.minus(LocalSandboxActivation.CHECKOUT_CUTOFF).minusSeconds(1)));
+        assertThat(sandbox.blocksNewCheckouts(Market.US)).isFalse();
+        clock.setOffset(Duration.between(Instant.now(), until.minus(LocalSandboxActivation.CHECKOUT_CUTOFF)));
+        assertThat(sandbox.blocksNewCheckouts(Market.US)).as("no checkout can be started that could be paid after the window").isTrue();
+        assertThat(sandbox.blocksEvidence(Market.US)).as("evidence still flows").isFalse();
+        assertThat(sandbox.blocksNewCheckouts(Market.ET)).isTrue();
+        assertThat(sandbox.blocksEvidence(Market.ET)).isTrue();
+    }
+
+    @Test
+    void aCheckoutNeverOutlivesTheWindow() {
+        LocalSandboxActivation sandbox = new Setup().build();
+        Instant until = NOW.plus(Duration.ofDays(3));
+        assertThat(sandbox.capCheckoutExpiry(until.plus(Duration.ofHours(5)))).isEqualTo(until);
+        assertThat(sandbox.capCheckoutExpiry(until.minus(Duration.ofHours(5)))).isEqualTo(until.minus(Duration.ofHours(5)));
+        LocalSandboxActivation off = new Setup().with(s -> s.commandLine.clear()).build();
+        assertThat(off.capCheckoutExpiry(until.plus(Duration.ofHours(5)))).as("inactive: unchanged").isEqualTo(until.plus(Duration.ofHours(5)));
+    }
+
+    @Test
+    void evidenceOfPaymentsMadeInsideTheWindowIsAppliedDuringTheDrainOnly() {
+        MonetizationClock clock = clockAt(NOW);
+        LocalSandboxActivation sandbox = new LocalSandboxActivation(new Setup().inputs(), clock);
+        Instant until = NOW.plus(Duration.ofDays(3));
+        assertThat(sandbox.paidOutsideWindow(until.minusSeconds(1))).isFalse();
+        assertThat(sandbox.paidOutsideWindow(until)).as("paid at or after the end").isTrue();
+        assertThat(sandbox.paidOutsideWindow(null)).as("no payment time: not provably inside").isTrue();
+        clock.setOffset(Duration.between(Instant.now(), until.plus(LocalSandboxActivation.DRAIN).minusSeconds(1)));
+        assertThat(sandbox.blocksEvidence(Market.US)).isFalse();
+        clock.setOffset(Duration.between(Instant.now(), until.plus(LocalSandboxActivation.DRAIN)));
+        assertThat(sandbox.blocksEvidence(Market.US)).as("after the drain nothing is applied").isTrue();
+        LocalSandboxActivation off = new Setup().with(s -> s.commandLine.clear()).build();
+        assertThat(off.paidOutsideWindow(until.plus(Duration.ofDays(30)))).as("inactive: never").isFalse();
+        assertThat(off.blocksNewCheckouts(Market.US)).isFalse();
+        assertThat(off.blocksEvidence(Market.US)).isFalse();
     }
 
     @Test
@@ -128,6 +176,8 @@ class LocalSandboxActivationTest {
         refused(new Setup().with(s -> s.commandLine.put("app.billing.local-sandbox.acknowledged-until", "next tuesday")), "malformed");
         refused(new Setup().with(s -> s.commandLine.put("app.billing.local-sandbox.acknowledged-until", NOW.minusSeconds(1).toString())), "expired");
         refused(new Setup().with(s -> s.commandLine.put("app.billing.local-sandbox.acknowledged-until", NOW.toString())), "ends now");
+        refused(new Setup().with(s -> s.commandLine.put("app.billing.local-sandbox.acknowledged-until", NOW.plus(Duration.ofMinutes(59)).toString())),
+                "less than an hour: no usable checkout window");
         refused(new Setup().with(s -> s.commandLine.put("app.billing.local-sandbox.acknowledged-until", NOW.plus(Duration.ofDays(7)).plusSeconds(1).toString())), "over 7 days");
         assertThat(new Setup().with(s -> s.commandLine.put("app.billing.local-sandbox.acknowledged-until", NOW.plus(Duration.ofDays(7)).toString())).build().active()).isTrue();
     }

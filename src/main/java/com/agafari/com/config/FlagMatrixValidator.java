@@ -28,9 +28,11 @@ public class FlagMatrixValidator implements SmartInitializingSingleton {
     private final boolean jobsEnabled;
     private final ObjectProvider<PriceAvailability> prices;
     private final ObjectProvider<PublishGateReadiness> publishReadiness;
+    private final ObjectProvider<com.agafari.com.billing.LocalSandboxActivation> sandbox; // AGF B-L1
 
     public FlagMatrixValidator(BillingFlags flags, DataSource dataSource, @Value("${app.jobs.enabled:false}") boolean jobsEnabled, ObjectProvider<PriceAvailability> prices,
-                               ObjectProvider<PublishGateReadiness> publishReadiness) {
+                               ObjectProvider<PublishGateReadiness> publishReadiness, ObjectProvider<com.agafari.com.billing.LocalSandboxActivation> sandbox) {
+        this.sandbox = sandbox;
         this.prices = prices;
         this.publishReadiness = publishReadiness;
         this.flags = flags;
@@ -48,11 +50,14 @@ public class FlagMatrixValidator implements SmartInitializingSingleton {
         // AGF BE-6: the publishing-gate facts are read only when a market asks for the gate (no queries otherwise)
         boolean anyGate = candidate.us().publishRequiresPlan() || candidate.et().publishRequiresPlan();
         PublishGateReadiness readiness = anyGate ? publishReadiness.getIfAvailable() : null;
+        // AGF B-L1: only an active local sandbox (which requires a test-mode Stripe key) counts provider secrets as present
+        com.agafari.com.billing.LocalSandboxActivation local = sandbox.getIfAvailable();
+        boolean localSandbox = local != null && local.active();
         List<String> violations = violations(candidate, candidateJobsEnabled, new FlagFacts(postgres(),
-                candidate.us().pricesVisible() && available(Market.US), candidate.et().pricesVisible() && available(Market.ET), false,
+                candidate.us().pricesVisible() && available(Market.US), candidate.et().pricesVisible() && available(Market.ET), localSandbox,
                 candidate.us().publishRequiresPlan() && readiness != null && readiness.dryRunSignedOff(Market.US),
                 candidate.et().publishRequiresPlan() && readiness != null && readiness.dryRunSignedOff(Market.ET),
-                false, false, readiness != null && readiness.ownerPlansReady()));
+                false, false, readiness != null && readiness.ownerPlansReady()), localSandbox);
         if (!violations.isEmpty()) throw new FlagMatrixViolationException(violations);
     }
 
@@ -61,8 +66,19 @@ public class FlagMatrixValidator implements SmartInitializingSingleton {
      * refused even when every other requirement, provider secrets included, is met.
      */
     public static List<String> violations(BillingFlags candidate, boolean candidateJobsEnabled, FlagFacts facts) {
+        return violations(candidate, candidateJobsEnabled, facts, false);
+    }
+
+    /**
+     * AGF B-L1 (register §93): with an active local sandbox exception, only the US readiness violation is lifted; every other
+     * prerequisite, and Ethiopian readiness, still applies. The gates themselves are unchanged.
+     */
+    public static List<String> violations(BillingFlags candidate, boolean candidateJobsEnabled, FlagFacts facts, boolean activeLocalSandbox) {
         List<String> found = new java.util.ArrayList<>(FlagMatrix.violations(candidate, candidateJobsEnabled, facts));
-        found.addAll(ProviderActivationReadiness.violations(candidate));
+        for (String v : ProviderActivationReadiness.violations(candidate)) {
+            if (activeLocalSandbox && v.startsWith("billing-enabled (US) ")) continue;
+            found.add(v);
+        }
         return found;
     }
 

@@ -93,6 +93,18 @@ public class CheckoutService {
     private final CheckoutCancellation cancellation;
     private final PaymentReview review;
     private final Set<Market> enabled = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private volatile LocalSandboxActivation localSandbox; // AGF B-L1
+
+    /** AGF B-L1 (register §93): an active local sandbox refuses Ethiopia and, from its acknowledged time, the US. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setLocalSandbox(LocalSandboxActivation sandbox) {
+        this.localSandbox = sandbox;
+    }
+
+    private boolean open(Market market) {
+        LocalSandboxActivation sandbox = localSandbox;
+        return enabled.contains(market) && (sandbox == null || !sandbox.blocks(market));
+    }
 
     private final com.agafari.com.security.EmailVerificationService emailVerification; // AGF BE-F0 (SS-2); null: no verification check
 
@@ -166,7 +178,7 @@ public class CheckoutService {
         if (enabled.isEmpty()) return false;
         List<String> countries = jdbc.queryForList("select country from business where id = ?", String.class, businessId);
         Market market = countries.isEmpty() ? null : Market.fromCountry(countries.get(0)).orElse(null);
-        if (market == null || !enabled.contains(market)) return false;
+        if (market == null || !open(market)) return false;
         try {
             registry.forMarket(market);
             return true;
@@ -194,7 +206,7 @@ public class CheckoutService {
     private Market enabledMarketOf(String businessId) {
         String country = jdbc.queryForObject("select country from business where id = ?", String.class, businessId);
         Market market = Market.fromCountry(country).orElseThrow(() -> new NotFoundException("Not found"));
-        if (!enabled.contains(market)) throw new NotFoundException("Not found");
+        if (!open(market)) throw new NotFoundException("Not found");
         return market;
     }
 
@@ -411,7 +423,7 @@ public class CheckoutService {
             return;
         }
         BillingStrategy strategy = registry.forBusiness(row.businessId());
-        if (!enabled.contains(strategy.market())) {
+        if (!open(strategy.market())) {
             markCreateFailed(row, "BILLING_DISABLED");
             return;
         }

@@ -161,6 +161,25 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
         // PO ruling R3: the flag alone never opens this path while activation isn't ready.
         if (ProviderActivationReadiness.ready() && flags.us().billingEnabled()) enabled.add(Market.US);
         if (ProviderActivationReadiness.ready() && flags.et().billingEnabled()) enabled.add(Market.ET);
+        this.usFlag = flags.us().billingEnabled();
+    }
+
+    private final boolean usFlag;
+    private volatile LocalSandboxActivation localSandbox; // AGF B-L1
+
+    /**
+     * AGF B-L1 (register §93): an active local sandbox opens the US path while the gates are open, and only until its
+     * acknowledged time ({@link #billingActive}); never Ethiopia. Without one, nothing changes.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setLocalSandbox(LocalSandboxActivation sandbox) {
+        this.localSandbox = sandbox;
+        if (sandbox != null && sandbox.active() && usFlag) enabled.add(Market.US);
+    }
+
+    private boolean open(Market market) {
+        LocalSandboxActivation sandbox = localSandbox;
+        return enabled.contains(market) && (sandbox == null || !sandbox.blocks(market));
     }
 
     /** Tests only: the flag itself comes from configuration, and readiness from {@link ProviderActivationReadiness}. */
@@ -170,7 +189,7 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
     }
 
     public boolean billingActive(Market market) {
-        return enabled.contains(market);
+        return open(market);
     }
 
     public Result process(String providerEventId) {
@@ -194,7 +213,7 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
         if (!replay && !"PENDING".equals(event.status())) return Result.ALREADY_DONE;
         if (replay && "IGNORED".equals(event.status())) return Result.ALREADY_DONE;
 
-        BillingStrategy strategy = registry.forProvider(event.provider()).filter(s -> enabled.contains(s.market())).orElse(null);
+        BillingStrategy strategy = registry.forProvider(event.provider()).filter(s -> open(s.market())).orElse(null);
         if (strategy == null) throw unprocessed(event, "billing is not active for provider " + event.provider());
         PaymentProviderClient client = strategy.client();
         byte[] body = event.payload().getBytes(StandardCharsets.UTF_8);

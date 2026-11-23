@@ -45,7 +45,33 @@ class StripeConfigurationTest {
     }
 
     private ApplicationContextRunner enabledWith(Map<String, Object> env) {
-        return runner.withPropertyValues("app.billing.stripe.enabled=true").withInitializer(osEnvironment(env)::accept);
+        return runner.withPropertyValues("app.billing.stripe.enabled=true", "app.billing.stripe.expected-account-id=" + StripeStub.ACCOUNT)
+                .withInitializer(osEnvironment(env)::accept);
+    }
+
+    // ---- AGF gate 8 (register §89, G8-B): the expected Stripe account is required configuration (not a secret) ----
+
+    @Test
+    void enabledWithoutAValidExpectedAccountIdIsRefusedAtStartup() {
+        for (String bad : new String[] {null, "", "cus_Synthetic1", "acct_has space"}) {
+            ApplicationContextRunner r = runner.withPropertyValues("app.billing.stripe.enabled=true")
+                    .withInitializer(osEnvironment(env(TEST_KEY, WEBHOOK, null))::accept);
+            if (bad != null) r = r.withPropertyValues("app.billing.stripe.expected-account-id=" + bad);
+            r.run(ctx -> {
+                assertThat(ctx).as(String.valueOf(bad)).hasFailed();
+                StringBuilder all = new StringBuilder();
+                for (Throwable t = ctx.getStartupFailure(); t != null; t = t.getCause()) all.append(t.getMessage()).append('\n');
+                assertThat(all.toString()).contains("app.billing.stripe.expected-account-id");
+            });
+        }
+    }
+
+    @Test
+    void theExpectedAccountIdReachesTheClient() {
+        enabledWith(env(TEST_KEY, WEBHOOK, null)).run(ctx -> {
+            assertThat(ctx).hasNotFailed();
+            assertThat(ctx.getBean(StripeProviderClient.class).expectedAccountId()).isEqualTo(StripeStub.ACCOUNT);
+        });
     }
 
     private static Map<String, Object> env(String key, String webhook, String previous) {

@@ -30,7 +30,7 @@ public class StripeStubBillingConfig {
         StripeCredentials credentials = StripeCredentials.fromEnvironment(Map.of(StripeCredentials.ENV_SECRET_KEY, SECRET_KEY, StripeCredentials.ENV_WEBHOOK_SECRET, WEBHOOK_SECRET,
                 StripeCredentials.ENV_WEBHOOK_SECRET_PREVIOUS, WEBHOOK_SECRET_PREVIOUS)::get);
         StripeSettings settings = new StripeSettings(ORIGIN + "/billing/return?session={CHECKOUT_SESSION_ID}", ORIGIN + "/billing/cancelled", ORIGIN);
-        return new StripeProviderClient(credentials, settings, stub, Clock.systemUTC());
+        return new StripeProviderClient(credentials, settings, StripeStub.ACCOUNT, stub, Clock.systemUTC());
     }
 
     @Bean

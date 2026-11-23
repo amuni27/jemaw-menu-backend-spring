@@ -32,7 +32,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  * environment. No credential value appears in health, actuator, error or webhook responses, or in the log; billing stays
  * refused; the US market resolves to the Stripe scaffolding, which calls nothing.
  */
-@TestPropertySource(properties = "app.billing.stripe.enabled=true")
+@TestPropertySource(properties = {"app.billing.stripe.enabled=true", "app.billing.stripe.expected-account-id=" + StripeStub.ACCOUNT}) // AGF gate 8
 @ContextConfiguration(initializers = StripeSecretExposureTest.SyntheticStripeEnvironment.class)
 @ExtendWith(OutputCaptureExtension.class)
 class StripeSecretExposureTest extends AbstractIntegrationTest {

@@ -229,6 +229,31 @@ public final class StripeFixtures {
         return json(e);
     }
 
+    /** AGF gate 8: a recurring per-unit Price as the account returns it (synthetic); tests change one field to make it wrong. */
+    public static Map<String, Object> price(String ref, long amountMinor, String currency, String interval) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", ref);
+        m.put("object", "price");
+        m.put("active", true);
+        m.put("livemode", false);
+        m.put("type", "recurring");
+        m.put("billing_scheme", "per_unit");
+        m.put("currency", currency.toLowerCase(java.util.Locale.ROOT));
+        m.put("unit_amount", amountMinor);
+        m.put("tax_behavior", "unspecified");
+        Map<String, Object> recurring = new LinkedHashMap<>();
+        recurring.put("interval", interval);
+        recurring.put("interval_count", 1L);
+        recurring.put("usage_type", "licensed");
+        m.put("recurring", recurring);
+        return m;
+    }
+
+    /** Answers {@code GET /v1/prices/{ref}} with a valid Price for this amount, currency and interval. */
+    public static void registerPrice(StripeStub stub, String ref, long amountMinor, String currency, String interval) {
+        stub.on("GET", "/v1/prices/" + ref, c -> StripeStub.ok(json(price(ref, amountMinor, currency, interval))));
+    }
+
     public static String createdSession(String sessionRef) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", sessionRef);

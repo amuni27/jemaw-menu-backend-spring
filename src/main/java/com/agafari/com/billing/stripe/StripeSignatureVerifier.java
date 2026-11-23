@@ -29,9 +29,17 @@ final class StripeSignatureVerifier implements SignatureVerifier {
     private final String secret;
     private final Clock clock;
 
+    private final String expectedAccountId;
+
     StripeSignatureVerifier(String secret, Clock clock) {
+        this(secret, clock, null);
+    }
+
+    /** @param expectedAccountId AGF gate 8: an event that names another account (a Connect event) is refused */
+    StripeSignatureVerifier(String secret, Clock clock, String expectedAccountId) {
         this.secret = secret;
         this.clock = clock;
+        this.expectedAccountId = expectedAccountId;
     }
 
     @Override
@@ -50,6 +58,8 @@ final class StripeSignatureVerifier implements SignatureVerifier {
         JsonNode event = parse(rawBody);
         String id = event.path("id").asString(""), type = event.path("type").asString("");
         if (!id.startsWith("evt_") || type.isBlank()) throw new IllegalArgumentException("Not a Stripe event");
+        String account = event.path("account").asString("");
+        if (!account.isEmpty() && !account.equals(expectedAccountId)) throw new IllegalArgumentException("An event of another Stripe account"); // AGF gate 8
         return new InboundEvent(id, type);
     }
 

@@ -27,7 +27,7 @@ class StripePortalSessionTest {
     private StripeProviderClient client(String returnUrl, String configuration) {
         StripeCredentials credentials = StripeCredentials.fromEnvironment(Map.of(StripeCredentials.ENV_SECRET_KEY, "sk_" + "test_" + "SyntheticR503Portal0000001",
                 StripeCredentials.ENV_WEBHOOK_SECRET, "whsec_" + "SyntheticR503Portal0000002")::get);
-        return new StripeProviderClient(credentials, new StripeSettings(ORIGIN + "/billing/return", ORIGIN + "/billing/cancelled", ORIGIN, returnUrl, configuration), stub,
+        return new StripeProviderClient(credentials, new StripeSettings(ORIGIN + "/billing/return", ORIGIN + "/billing/cancelled", ORIGIN, returnUrl, configuration), StripeStub.ACCOUNT, stub,
                 Clock.systemUTC());
     }
 

@@ -40,9 +40,11 @@ public class StripeConfiguration {
         return new StripeSettings(successUrl, cancelUrl, trustedOrigins, portalReturnUrl, portalConfiguration); // AGF SUB-R5-03-E
     }
 
+    /** AGF gate 8 (G8-B): the expected Stripe account; required, refused at startup when missing or malformed. */
     @Bean
-    StripeProviderClient stripeProviderClient(StripeCredentials credentials, StripeSettings settings) {
-        return new StripeProviderClient(credentials, settings, null, Clock.systemUTC());
+    StripeProviderClient stripeProviderClient(StripeCredentials credentials, StripeSettings settings,
+                                              @Value("${" + StripeAccountIdentity.PROPERTY + ":}") String expectedAccountId) {
+        return new StripeProviderClient(credentials, settings, StripeAccountIdentity.require(expectedAccountId), null, Clock.systemUTC());
     }
 
     @Bean

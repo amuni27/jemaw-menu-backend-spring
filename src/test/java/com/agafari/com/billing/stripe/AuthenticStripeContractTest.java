@@ -77,7 +77,7 @@ class AuthenticStripeContractTest {
                 StripeCredentials.ENV_WEBHOOK_SECRET, WEBHOOK, StripeCredentials.ENV_WEBHOOK_SECRET_PREVIOUS, PREVIOUS)::get);
         // the adapter's clock at the authentic session-creation time, so the 30 min – 24 h expiry window is checked as it was
         Clock atCapture = Clock.fixed(Instant.ofEpochSecond(num("a_session_create", "created")), ZoneOffset.UTC);
-        client = new StripeProviderClient(credentials, new StripeSettings(ORIGIN + "/billing/return", ORIGIN + "/billing/cancelled", ORIGIN), stub, atCapture);
+        client = new StripeProviderClient(credentials, new StripeSettings(ORIGIN + "/billing/return", ORIGIN + "/billing/cancelled", ORIGIN), StripeStub.ACCOUNT, stub, atCapture);
     }
 
     private static StripeResponse ok(String fixture) {
@@ -244,6 +244,7 @@ class AuthenticStripeContractTest {
     @Test
     void a7_theAdaptersSessionRequestIsTheOneStripeAcceptedAndItsResponseMaps() {
         stub.on("POST", "/v1/checkout/sessions", c -> ok("a_session_create"));
+        stub.on("GET", "/v1/prices/" + str("price_m4_month", "id"), c -> ok("price_m4_month")); // AGF gate 8: the authentic captured Price
         String chk = fixtureId("CHK_A"), biz = fixtureId("BIZ_A");
         Instant expires = Instant.ofEpochSecond(num("a_session_create", "expires_at"));
         ProviderSession s = client.createSession(new ProviderSessionRequest(chk, biz, new Money(2500, Currency.USD), expires, PriceInterval.MONTH,

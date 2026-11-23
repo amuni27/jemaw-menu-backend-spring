@@ -77,6 +77,8 @@ import java.util.Optional;
  */
 public final class StripeProviderClient extends GuardedProviderClient {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(StripeProviderClient.class);
+
     public static final String PROVIDER = "STRIPE";
     static final Duration MIN_SESSION_LIFETIME = Duration.ofMinutes(30); // Stripe: expires_at 30 min .. 24 h from creation
     static final Duration MAX_SESSION_LIFETIME = Duration.ofHours(24);
@@ -89,22 +91,29 @@ public final class StripeProviderClient extends GuardedProviderClient {
     private final StripeSettings settings;
     private final Clock clock;
     private final SignatureVerifier verifier;
+    private final String expectedAccountId; // AGF gate 8: null or malformed refuses every Stripe call
+    private volatile boolean accountVerified;
+    private volatile String accountMismatch; // set once; final until a restart (fail-closed)
 
     StripeProviderClient(StripeCredentials credentials) {
-        this(credentials, new StripeSettings(null, null, null), null, Clock.systemUTC());
+        this(credentials, new StripeSettings(null, null, null), null, null, Clock.systemUTC());
     }
 
-    /** @param http null for Stripe's own HTTP client; tests pass a stub so no network call is ever made */
-    StripeProviderClient(StripeCredentials credentials, StripeSettings settings, HttpClient http, Clock clock) {
+    /**
+     * @param expectedAccountId the Stripe account the key must belong to (gate 8); checked lazily before the first Stripe call
+     * @param http null for Stripe's own HTTP client; tests pass a stub so no network call is ever made
+     */
+    StripeProviderClient(StripeCredentials credentials, StripeSettings settings, String expectedAccountId, HttpClient http, Clock clock) {
         this.credentials = credentials;
         this.settings = settings;
+        this.expectedAccountId = expectedAccountId;
         this.clock = clock;
         StripeClient.StripeClientBuilder builder = StripeClient.builder().setApiKey(credentials.secretKey()).setMaxNetworkRetries(0) // the job runner retries
                 .setConnectTimeout(10_000).setReadTimeout(30_000);
         if (http != null) builder.setHttpClient(http);
         this.stripe = builder.build();
-        SignatureVerifier previous = credentials.previousWebhookSecret().map(s -> (SignatureVerifier) new StripeSignatureVerifier(s, clock)).orElse(null);
-        this.verifier = new RotatingSignatureVerifier(new StripeSignatureVerifier(credentials.webhookSecret(), clock), previous);
+        SignatureVerifier previous = credentials.previousWebhookSecret().map(s -> (SignatureVerifier) new StripeSignatureVerifier(s, clock, expectedAccountId)).orElse(null);
+        this.verifier = new RotatingSignatureVerifier(new StripeSignatureVerifier(credentials.webhookSecret(), clock, expectedAccountId), previous);
     }
 
     /** The Stripe API version this SDK release is pinned to (a plain string; no SDK type escapes). */
@@ -123,6 +132,85 @@ public final class StripeProviderClient extends GuardedProviderClient {
 
     StripeSettings settings() {
         return settings;
+    }
+
+    String expectedAccountId() {
+        return expectedAccountId;
+    }
+
+    // ---- AGF gate 8: account identity (G8-A) and the configured price (G8-C) ----
+
+    /**
+     * Before any Stripe operation: the key must belong to the expected account. Checked once (GET /v1/account) and remembered
+     * only when it matches. A mismatch refuses every later call until a restart; a failed check refuses this call and is tried
+     * again next time (a network failure stays retryable). Fail-closed throughout: nothing else reaches Stripe unverified.
+     */
+    private void requireAccount() {
+        if (accountVerified) return;
+        String mismatch = accountMismatch;
+        if (mismatch != null) throw new ProviderRejectedException(mismatch);
+        if (StripeAccountIdentity.problem(expectedAccountId) != null) {
+            throw new ProviderRejectedException("No valid expected Stripe account is configured (" + StripeAccountIdentity.PROPERTY + "); every Stripe call is refused");
+        }
+        synchronized (this) {
+            if (accountVerified) return;
+            if (accountMismatch != null) throw new ProviderRejectedException(accountMismatch);
+            com.stripe.model.Account account;
+            try {
+                account = stripe.v1().accounts().retrieveCurrent();
+            } catch (StripeException e) {
+                RuntimeException mapped = map("account verification", e);
+                if (mapped instanceof ProviderTimeoutException) throw mapped;
+                throw new ProviderRejectedException("The Stripe account couldn't be verified (" + e.getClass().getSimpleName()
+                        + (e.getCode() == null ? "" : ", " + e.getCode()) + "); the call is refused");
+            }
+            String actual = account == null ? null : account.getId();
+            if (actual == null || actual.isBlank()) throw new ProviderRejectedException("Stripe returned no account id; the account couldn't be verified and the call is refused");
+            if (!expectedAccountId.equals(actual)) {
+                accountMismatch = "The Stripe key belongs to account " + actual + ", not the expected account " + expectedAccountId
+                        + "; every Stripe call is refused until the configuration is corrected and the service restarted";
+                log.error("event=billing.stripe_account_mismatch expected={} actual={}", expectedAccountId, actual);
+                throw new ProviderRejectedException(accountMismatch);
+            }
+            accountVerified = true;
+            log.info("event=billing.stripe_account_verified account={}", actual);
+        }
+    }
+
+    /** G8-C: the session's Price must be in this account and match the server's amount, currency and interval exactly. */
+    private void requirePrice(ProviderSessionRequest r) {
+        String ref = r.providerPriceRef();
+        com.stripe.model.Price price;
+        try {
+            price = stripe.v1().prices().retrieve(ref);
+        } catch (StripeException e) {
+            RuntimeException mapped = map("price lookup", e);
+            if (mapped instanceof ProviderTimeoutException) throw mapped;
+            throw new ProviderRejectedException("The configured Stripe price " + ref + " isn't available in the expected account (" + e.getClass().getSimpleName()
+                    + (e.getCode() == null ? "" : ", " + e.getCode()) + "); no session is created");
+        }
+        String problem = priceProblem(price, ref, r);
+        if (problem != null) {
+            log.error("event=billing.stripe_price_mismatch price={} problem={}", ref, problem);
+            throw new ProviderRejectedException("The configured Stripe price " + ref + " doesn't match the server's price: " + problem + "; no session is created");
+        }
+    }
+
+    private static String priceProblem(com.stripe.model.Price p, String ref, ProviderSessionRequest r) {
+        if (p == null || !ref.equals(p.getId())) return "Stripe returned another price";
+        if (Boolean.TRUE.equals(p.getLivemode())) return "it is a live-mode price";
+        if (!Boolean.TRUE.equals(p.getActive())) return "it is archived";
+        if (!"recurring".equals(p.getType()) || p.getRecurring() == null) return "it isn't a recurring price";
+        // the authentic 2026-10-28.endive Price omits billing_scheme; a tiered price says so and has no unit_amount (refused below)
+        if (p.getBillingScheme() != null && !"per_unit".equals(p.getBillingScheme())) return "it isn't priced per unit";
+        if ("inclusive".equals(p.getTaxBehavior())) return "it includes tax (tax is off, AD-16)";
+        if (!r.amount().currency().name().equalsIgnoreCase(String.valueOf(p.getCurrency()))) return "another currency";
+        if (!Objects.equals(p.getUnitAmount(), r.amount().minor())) return "another amount";
+        com.stripe.model.Price.Recurring rec = p.getRecurring();
+        String interval = r.interval() == PriceInterval.MONTH ? "month" : r.interval() == PriceInterval.YEAR ? "year" : null;
+        if (interval == null || !interval.equals(rec.getInterval()) || !Objects.equals(rec.getIntervalCount(), 1L)) return "another billing interval";
+        if (rec.getUsageType() != null && !"licensed".equals(rec.getUsageType())) return "it is metered";
+        return null;
     }
 
     @Override
@@ -144,6 +232,8 @@ public final class StripeProviderClient extends GuardedProviderClient {
         if (r.expiresAt().isBefore(now.plus(MIN_SESSION_LIFETIME)) || r.expiresAt().isAfter(now.plus(MAX_SESSION_LIFETIME))) {
             throw new ProviderRejectedException("The checkout's remaining lifetime is outside Stripe's 30 minute to 24 hour window");
         }
+        requireAccount(); // AGF gate 8: after the local checks, before the first Stripe call
+        requirePrice(r); // AGF gate 8 (G8-C)
         SessionCreateParams params = SessionCreateParams.builder()
                 .setMode(SessionCreateParams.Mode.SUBSCRIPTION)
                 .addLineItem(SessionCreateParams.LineItem.builder().setPrice(r.providerPriceRef()).setQuantity(1L).build())
@@ -167,6 +257,7 @@ public final class StripeProviderClient extends GuardedProviderClient {
 
     @Override
     protected ExpireResult doExpireSession(String sessionRef, String idempotencyKey) {
+        requireAccount(); // AGF gate 8: after the local checks, before the first Stripe call
         Session session = call("checkout session lookup", () -> stripe.v1().checkout().sessions().retrieve(sessionRef));
         ExpireResult known = expireResult(session);
         if (known != null) return known;
@@ -201,6 +292,7 @@ public final class StripeProviderClient extends GuardedProviderClient {
     @Override
     protected VerifiedPayment doVerifyPayment(String providerRef) {
         if (providerRef == null || !providerRef.startsWith("in_")) throw new ProviderRejectedException("A Stripe payment is verified by its invoice");
+        requireAccount(); // AGF gate 8: after the local checks, before the first Stripe call
         Invoice invoice = call("invoice lookup", () -> stripe.v1().invoices().retrieve(providerRef,
                 InvoiceRetrieveParams.builder().addExpand("payments").addExpand("amount_paid_off_stripe").build(), RequestOptions.getDefault()));
         if (Boolean.TRUE.equals(invoice.getLivemode())) throw new ProviderRejectedException("A live-mode invoice is refused while the R5 gates are open");
@@ -378,6 +470,7 @@ public final class StripeProviderClient extends GuardedProviderClient {
     protected ProviderSubscriptionState doSubscriptionOfPayment(String providerPaymentRef) {
         Invoice inv;
         try {
+            requireAccount(); // AGF gate 8: after the local checks, before the first Stripe call
             inv = stripe.v1().invoices().retrieve(providerPaymentRef);
         } catch (InvalidRequestException e) {
             if ("resource_missing".equals(e.getCode())) return new ProviderSubscriptionState(null, null, ProviderSubscriptionState.Status.NOT_FOUND, null, null, false, false);
@@ -401,6 +494,7 @@ public final class StripeProviderClient extends GuardedProviderClient {
     @Override
     protected ProviderInvoiceState doInvoiceState(String invoiceRef) {
         if (invoiceRef == null || !invoiceRef.startsWith("in_")) throw new ProviderRejectedException("Not a Stripe invoice");
+        requireAccount(); // AGF gate 8: after the local checks, before the first Stripe call
         Invoice inv = call("invoice lookup", () -> stripe.v1().invoices().retrieve(invoiceRef));
         if (!invoiceRef.equals(inv.getId())) throw new ProviderRejectedException("Stripe returned another invoice");
         List<InvoiceLineItem> lines = inv.getLines() == null ? List.of() : inv.getLines().getData();
@@ -422,6 +516,7 @@ public final class StripeProviderClient extends GuardedProviderClient {
     @Override
     protected ProviderSubscriptionSnapshot doSubscriptionState(String subscriptionRef) {
         if (subscriptionRef == null || !subscriptionRef.startsWith("sub_")) throw new ProviderRejectedException("Not a Stripe subscription");
+        requireAccount(); // AGF gate 8: after the local checks, before the first Stripe call
         Subscription sub = call("subscription lookup", () -> stripe.v1().subscriptions().retrieve(subscriptionRef));
         if (!subscriptionRef.equals(sub.getId())) throw new ProviderRejectedException("Stripe returned another subscription");
         Long ended = sub.getEndedAt() != null ? sub.getEndedAt() : sub.getCanceledAt();
@@ -443,6 +538,7 @@ public final class StripeProviderClient extends GuardedProviderClient {
         if (customerRef == null || !customerRef.startsWith("cus_")) throw new ProviderRejectedException("A portal session needs a Stripe customer");
         com.stripe.param.billingportal.SessionCreateParams params = com.stripe.param.billingportal.SessionCreateParams.builder()
                 .setCustomer(customerRef).setConfiguration(settings.portalConfiguration()).setReturnUrl(settings.portalReturnUrl()).build();
+        requireAccount(); // AGF gate 8: after the local checks, before the first Stripe call
         com.stripe.model.billingportal.Session session = call("portal session creation",
                 () -> stripe.v1().billingPortal().sessions().create(params, idempotent(java.util.UUID.randomUUID().toString())));
         if (Boolean.TRUE.equals(session.getLivemode())) throw new ProviderRejectedException("A live-mode portal session is refused while the R5 gates are open");
@@ -453,6 +549,7 @@ public final class StripeProviderClient extends GuardedProviderClient {
     @Override
     protected SubscriptionCancelResult doCancelSubscription(String subscriptionRef) {
         try {
+            requireAccount(); // AGF gate 8: after the local checks, before the first Stripe call
             Subscription cancelled = stripe.v1().subscriptions().cancel(subscriptionRef,
                     SubscriptionCancelParams.builder().setInvoiceNow(false).setProrate(false).build(), RequestOptions.getDefault()); // DELETE: no idempotency key (Stripe)
             if ("canceled".equals(cancelled.getStatus())) return SubscriptionCancelResult.CANCELLED;

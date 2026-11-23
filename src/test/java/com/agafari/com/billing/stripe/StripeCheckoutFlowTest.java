@@ -78,6 +78,7 @@ class StripeCheckoutFlowTest extends AbstractIntegrationTest {
     void setUp() {
         verificationMailer.setOperational(false); // AGF BE-F0 (register §84 D4): checkouts here run before D5 (email verification not operational); SS-2 itself is CheckoutAvailabilityTest
         stub.reset();
+        StripeFixtures.registerPrice(stub, PRICE_REF, AMOUNT, "USD", "month"); // AGF gate 8 (G8-C)
         checkouts.setBillingEnabled(Market.US, true);
         outcomes.setBillingEnabled(Market.US, true);
         webhooks.setBillingEnabled(Market.US, true);

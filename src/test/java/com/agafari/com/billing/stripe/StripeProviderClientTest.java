@@ -59,12 +59,13 @@ class StripeProviderClientTest {
     }
 
     private StripeProviderClient client(StripeSettings settings) {
-        return new StripeProviderClient(credentials(PREVIOUS), settings, stub, Clock.systemUTC());
+        return new StripeProviderClient(credentials(PREVIOUS), settings, StripeStub.ACCOUNT, stub, Clock.systemUTC());
     }
 
     @BeforeEach
     void setUp() {
         stub.reset();
+        StripeFixtures.registerPrice(stub, "price_synthetic_m4", 2500, "USD", "month"); // AGF gate 8 (G8-C)
         client = client(new StripeSettings(ORIGIN + "/billing/return", ORIGIN + "/billing/cancelled", ORIGIN));
     }
 
@@ -199,7 +200,7 @@ class StripeProviderClientTest {
         assertThat(v.verify(headers("Stripe-Signature", "t=" + (now - 301) + ",v1=" + sig(payload, WEBHOOK, now - 301)), body)).as("outside 300 s").isFalse();
         assertThat(v.verify(headers("Stripe-Signature", "t=" + (now - 290) + ",v1=" + sig(payload, WEBHOOK, now - 290)), body)).as("inside 300 s").isTrue();
         assertThat(v.verify(headers("Other", "x"), body)).as("missing header").isFalse();
-        assertThat(new StripeProviderClient(credentials(null), new StripeSettings(null, null, null), stub, Clock.systemUTC()).signatureVerifier()
+        assertThat(new StripeProviderClient(credentials(null), new StripeSettings(null, null, null), StripeStub.ACCOUNT, stub, Clock.systemUTC()).signatureVerifier()
                 .verify(headers("Stripe-Signature", Webhook.Signature.generateSignatureHeader(payload, PREVIOUS)), body)).as("no rotation: previous refused").isFalse();
     }
 

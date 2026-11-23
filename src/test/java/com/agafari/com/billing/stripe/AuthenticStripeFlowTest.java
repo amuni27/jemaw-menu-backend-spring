@@ -121,6 +121,8 @@ class AuthenticStripeFlowTest extends AbstractIntegrationTest {
     private String checkout(Tenant t, String p) throws Exception {
         rk.value(fixtureId(p.equals("a") ? "BIZ_A" : "BIZ_B"), t.businessId());
         at(epoch(p + "_session_create", "created").minusSeconds(10));
+        // AGF gate 8 (G8-C): the price check is answered by the authentic captured Price (re-keyed)
+        stub.on("GET", "/v1/prices/" + rk.id(str("price_m4_month", "id")), c -> ok("price_m4_month"));
         stub.on("POST", "/v1/checkout/sessions", c -> {
             Map<?, ?> metadata = (Map<?, ?>) c.params().get("metadata");
             rk.value(fixtureId(p.equals("a") ? "CHK_A" : "CHK_B"), String.valueOf(metadata.get("agafari_checkout_id")));

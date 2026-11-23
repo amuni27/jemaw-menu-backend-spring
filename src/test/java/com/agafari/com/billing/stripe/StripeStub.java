@@ -28,6 +28,9 @@ public final class StripeStub extends HttpClient {
         StripeResponse respond(Call call) throws StripeException;
     }
 
+    /** AGF gate 8: the synthetic account every test client expects; {@code GET /v1/account} answers it unless a test routes otherwise. */
+    public static final String ACCOUNT = "acct_" + "SyntheticAgafari0001";
+
     private final List<Call> calls = Collections.synchronizedList(new ArrayList<>());
     private final Map<String, Responder> routes = new ConcurrentHashMap<>();
 
@@ -57,8 +60,14 @@ public final class StripeStub extends HttpClient {
                 request.headers().firstValue("Idempotency-Key").orElse(null), request.headers().firstValue("Stripe-Version").orElse(null));
         calls.add(call);
         Responder r = routes.get(call.method() + " " + call.path());
+        if (r == null && "GET /v1/account".equals(call.method() + " " + call.path())) return account(ACCOUNT);
         if (r == null) return error(404, "invalid_request_error", "resource_missing");
         return r.respond(call);
+    }
+
+    /** The {@code GET /v1/account} answer for {@code id} (synthetic; only the identifying fields). */
+    public static StripeResponse account(String id) {
+        return ok("{\"id\":\"" + id + "\",\"object\":\"account\",\"type\":\"standard\"}");
     }
 
     public static StripeResponse ok(String json) {

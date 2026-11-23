@@ -47,7 +47,7 @@ class AuthenticRenewalContractTest {
         stub = new StripeStub();
         StripeCredentials credentials = StripeCredentials.fromEnvironment(Map.of(StripeCredentials.ENV_SECRET_KEY, "sk_" + "test_" + "SyntheticR503Contract00001",
                 StripeCredentials.ENV_WEBHOOK_SECRET, "whsec_" + "SyntheticR503Contract00002")::get);
-        client = new StripeProviderClient(credentials, new StripeSettings(null, null, null), stub, Clock.systemUTC());
+        client = new StripeProviderClient(credentials, new StripeSettings(null, null, null), StripeStub.ACCOUNT, stub, Clock.systemUTC());
     }
 
     private void serveRecovered(String invoiceJson) {

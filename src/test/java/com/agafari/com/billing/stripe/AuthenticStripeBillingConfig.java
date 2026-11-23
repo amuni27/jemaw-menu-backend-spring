@@ -55,7 +55,7 @@ public class AuthenticStripeBillingConfig {
         StripeCredentials credentials = StripeCredentials.fromEnvironment(Map.of(StripeCredentials.ENV_SECRET_KEY, SECRET_KEY,
                 StripeCredentials.ENV_WEBHOOK_SECRET, WEBHOOK_SECRET)::get);
         StripeSettings settings = new StripeSettings(ORIGIN + "/billing/return?session={CHECKOUT_SESSION_ID}", ORIGIN + "/billing/cancelled", ORIGIN);
-        return new StripeProviderClient(credentials, settings, stub, following(clock));
+        return new StripeProviderClient(credentials, settings, StripeStub.ACCOUNT, stub, following(clock));
     }
 
     @Bean

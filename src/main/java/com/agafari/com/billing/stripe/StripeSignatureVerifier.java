@@ -91,6 +91,18 @@ final class StripeSignatureVerifier implements SignatureVerifier {
         };
     }
 
+    /**
+     * AGF BILLING-UNSUPPORTED-EVENTS (register §96 U-1): the event types Agafari processes, exactly: two payment events
+     * ({@link #paymentReference}) and three state events ({@link #stateTrigger}). Any other type is kept and ignored.
+     */
+    public static final java.util.Set<String> HANDLED_EVENT_TYPES = java.util.Set.of("checkout.session.completed", "invoice.paid", "invoice.payment_failed",
+            "customer.subscription.updated", "customer.subscription.deleted");
+
+    @Override
+    public boolean handlesEventType(String type) {
+        return type != null && HANDLED_EVENT_TYPES.contains(type);
+    }
+
     private static JsonNode parse(byte[] rawBody) {
         try {
             return JSON.readTree(rawBody);

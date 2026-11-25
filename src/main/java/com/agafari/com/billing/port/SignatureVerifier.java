@@ -30,4 +30,13 @@ public interface SignatureVerifier {
     default Optional<StateTrigger> stateTrigger(byte[] rawBody) {
         return Optional.empty();
     }
+
+    /**
+     * AGF BILLING-UNSUPPORTED-EVENTS (register §96 U-1): whether Agafari processes events of this exact type from this
+     * provider. A provider that names its handled types lists them, so any other type, including one the provider adds later,
+     * is ignored, not retried. A provider that names none is treated as before: every type is processed.
+     */
+    default boolean handlesEventType(String type) {
+        return true;
+    }
 }

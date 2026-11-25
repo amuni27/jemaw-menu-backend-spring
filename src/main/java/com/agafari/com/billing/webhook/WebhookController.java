@@ -58,7 +58,8 @@ public class WebhookController {
     @PostMapping("/api/billing/webhooks/{provider}")
     public ResponseEntity<Void> receive(@PathVariable String provider, @RequestHeader Map<String, String> headers, HttpServletRequest http) throws IOException {
         if (enabled.isEmpty()) throw new NotFoundException("Not found");
-        BillingStrategy strategy = registry.forProvider(provider).filter(s -> enabled.contains(s.market())).orElseThrow(() -> new NotFoundException("Not found"));
+        // AGF register §96 U-3: a known provider code in any ASCII case; an unknown one is still no route
+        BillingStrategy strategy = registry.forWebhookRoute(provider).filter(s -> enabled.contains(s.market())).orElseThrow(() -> new NotFoundException("Not found"));
         rateLimiter.countWebhook(http.getRemoteAddr());
         byte[] body = boundedBody(http);
         if (body == null) {

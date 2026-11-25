@@ -35,4 +35,10 @@ public final class RotatingSignatureVerifier implements SignatureVerifier {
     public Optional<StateTrigger> stateTrigger(byte[] rawBody) {
         return current.stateTrigger(rawBody);
     }
+
+    /** AGF register §96 U-1: the handled types are the provider's, whichever secret signed the event. */
+    @Override
+    public boolean handlesEventType(String type) {
+        return current.handlesEventType(type);
+    }
 }

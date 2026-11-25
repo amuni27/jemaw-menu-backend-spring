@@ -217,6 +217,13 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
         BillingStrategy strategy = registry.forProvider(event.provider()).filter(s -> open(s.market())).orElse(null);
         if (strategy == null) throw unprocessed(event, "billing is not active for provider " + event.provider());
         PaymentProviderClient client = strategy.client();
+        if (!event.internal()) {
+            // AGF BILLING-UNSUPPORTED-EVENTS (register §96 U-1): a verified event of a type this provider's events never use is
+            // kept and finished IGNORED on its first run: no retry, no DEAD job, no exception, nothing applied
+            Map<String, Object> stored = jdbc.queryForMap("select type, event_id from provider_event where id = ?", event.id());
+            String type = (String) stored.get("type");
+            if (!client.signatureVerifier().handlesEventType(type)) return ignoreUnsupported(event, type, (String) stored.get("event_id"));
+        }
         byte[] body = event.payload().getBytes(StandardCharsets.UTF_8);
         String ref = event.internal() ? internalReference(event) : client.signatureVerifier().paymentReference(body).orElse(null);
         if (ref == null && !event.internal() && renewals != null) {
@@ -497,6 +504,25 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
     private Result quarantine(Event event, String reason) {
         log.warn("event=billing.event_quarantined eventId={} reason={}", event.id(), reason);
         return finishWithoutOwner(event, "QUARANTINED", reason, Result.QUARANTINED);
+    }
+
+    /** The reason recorded on an ignored event; its prefix is what the repeat count reads. */
+    public static final String UNSUPPORTED_EVENT_TYPE = "UNSUPPORTED_EVENT_TYPE";
+
+    /**
+     * AGF BILLING-UNSUPPORTED-EVENTS (register §96 U-1, U-2): the event row stays (payload, times, attempt) with status
+     * IGNORED and the reason; one INFO line, never the body, counting the ignored events of this provider and type so far, so
+     * a misconfigured endpoint shows as a rising count.
+     */
+    private Result ignoreUnsupported(Event event, String type, String providerEventId) {
+        Result result = finishWithoutOwner(event, "IGNORED", UNSUPPORTED_EVENT_TYPE + ": " + type + " is not an event type Agafari processes for "
+                + event.provider() + "; kept, not processed", Result.PROCESSED);
+        if (result == Result.PROCESSED) {
+            Integer occurrences = jdbc.queryForObject("select count(*) from provider_event where provider = ? and type = ? and status = 'IGNORED' and last_error like ?",
+                    Integer.class, event.provider(), type, UNSUPPORTED_EVENT_TYPE + ":%");
+            log.info("event=billing.webhook_ignored provider={} type={} eventId={} occurrences={}", event.provider(), type, providerEventId, occurrences);
+        }
+        return result;
     }
 
     private Result finishWithoutOwner(Event event, String status, String note, Result result) {

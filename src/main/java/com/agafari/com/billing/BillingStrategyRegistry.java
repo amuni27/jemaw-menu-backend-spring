@@ -37,6 +37,17 @@ public class BillingStrategyRegistry {
         return strategies.values().stream().filter(s -> s.provider().equals(provider)).findFirst();
     }
 
+    /**
+     * AGF BILLING-UNSUPPORTED-EVENTS (register §96 U-3): the strategy a webhook route names, matching a <b>known</b> provider
+     * code in any ASCII case ({@code stripe}, {@code Stripe}, {@code STRIPE}). Only printable ASCII is compared, so a Unicode
+     * lookalike that folds to a code ({@code ſtripe}, {@code STRİPE}) is no provider. Nothing is created from the path; callers
+     * store events under the strategy's own code.
+     */
+    public java.util.Optional<BillingStrategy> forWebhookRoute(String provider) {
+        if (provider == null || provider.isEmpty() || !provider.chars().allMatch(c -> c > 0x20 && c < 0x7f)) return java.util.Optional.empty();
+        return strategies.values().stream().filter(s -> s.provider().equalsIgnoreCase(provider)).findFirst();
+    }
+
     public BillingStrategy forBusiness(String businessId) {
         List<String> markets = jdbc.queryForList("select distinct market from billing_account where business_id = ?", String.class, businessId);
         if (markets.isEmpty()) throw new IllegalStateException("The restaurant has no billing account");

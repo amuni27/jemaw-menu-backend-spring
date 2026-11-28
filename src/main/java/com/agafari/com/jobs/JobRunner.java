@@ -7,6 +7,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 import java.sql.Timestamp;
@@ -49,13 +51,31 @@ public class JobRunner {
     private final AtomicInteger inFlight = new AtomicInteger();
     private final Map<String, AtomicInteger> providerFailures = new ConcurrentHashMap<>();
     private final Map<String, Instant> pausedUntil = new ConcurrentHashMap<>();
+    // AGF gate 2 (register §98 G2-J): told about each DEAD transition inside its transaction; a failed escalation is retried
+    // no more than once per ESCALATION_RETRY for each job, by this runner
+    private final List<DeadJobListener> deadListeners;
+    private final TransactionTemplate deadTransaction;
+    private final Map<String, Instant> escalationRetryAt = new ConcurrentHashMap<>();
+    static final Duration ESCALATION_RETRY = Duration.ofMinutes(1);
+    private static final int RECOVERY_BATCH = 100;
+    private static final String DEAD_RETURNING = "returning id, type, key, payload::text as payload, claims, first_attempt_at, last_error, last_error_kind";
 
     @Autowired
-    public JobRunner(JdbcTemplate jdbc, ObjectProvider<JobHandler<?>> handlers, ObjectMapper mapper, @Value("${app.jobs.workers:4}") int workers) {
-        this(jdbc, handlers.stream().toList(), mapper, workers, Clock.systemUTC());
+    public JobRunner(JdbcTemplate jdbc, ObjectProvider<JobHandler<?>> handlers, ObjectMapper mapper, @Value("${app.jobs.workers:4}") int workers,
+                     ObjectProvider<DeadJobListener> deadListeners, PlatformTransactionManager transactions) {
+        this(jdbc, handlers.stream().toList(), mapper, workers, Clock.systemUTC(), deadListeners.orderedStream().toList(), transactions);
     }
 
     public JobRunner(JdbcTemplate jdbc, List<JobHandler<?>> handlers, ObjectMapper mapper, int workers, Clock clock) {
+        this(jdbc, handlers, mapper, workers, clock, List.of(), null);
+    }
+
+    /** AGF gate 2: with listeners told about each DEAD transition inside its transaction. */
+    public JobRunner(JdbcTemplate jdbc, List<JobHandler<?>> handlers, ObjectMapper mapper, int workers, Clock clock, List<DeadJobListener> deadListeners,
+                     PlatformTransactionManager transactions) {
+        if (!deadListeners.isEmpty() && transactions == null) throw new IllegalArgumentException("Dead-job listeners need a transaction manager");
+        this.deadListeners = List.copyOf(deadListeners);
+        this.deadTransaction = transactions == null ? null : new TransactionTemplate(transactions);
         this.jdbc = jdbc;
         this.handlers = handlers.stream().collect(Collectors.toMap(JobHandler::type, Function.identity()));
         this.mapper = mapper;
@@ -137,13 +157,67 @@ public class JobRunner {
     }
 
     private void recoverExpiredLeases() {
+        if (!deadListeners.isEmpty()) {
+            recoverOneByOne();
+        } else {
+            recoverInBulk();
+        }
+        jdbc.update("update job set status = 'PENDING', claim_token = null, lease_until = null, last_error = ? where status = 'RUNNING' and lease_until < now() and claims < ?", WORKER_LOST, JobFailurePolicy.MAX_CLAIMS);
+    }
+
+    /**
+     * AGF gate 2 (register §98 G2-J): with listeners, each job at the ceiling becomes DEAD in its own transaction together with
+     * what the listeners record. A concurrent runner's update waits for the row and then finds it no longer eligible, so each
+     * job is told once. A failed escalation rolls the job back, is alerted, and is retried later (at most once per
+     * {@link #ESCALATION_RETRY}); the job never runs again because it is at the claim ceiling.
+     */
+    private void recoverOneByOne() {
+        List<String> due = jdbc.queryForList("select id from job where claims >= ? and (status = 'PENDING' or (status = 'RUNNING' and lease_until < now())) order by id limit ?",
+                String.class, JobFailurePolicy.MAX_CLAIMS, RECOVERY_BATCH);
+        Instant now = clock.instant();
+        for (String id : due) {
+            Instant retryAt = escalationRetryAt.get(id);
+            if (retryAt != null && now.isBefore(retryAt)) continue;
+            try {
+                Map<String, Object> dead = deadTransaction.execute(s -> {
+                    List<Map<String, Object>> rows = jdbc.queryForList("""
+                            update job set status = 'DEAD', finished_at = now(), claim_token = null, lease_until = null,
+                                           last_error = case when status = 'RUNNING' then ? else coalesce(last_error, ?) end
+                            where id = ? and claims >= ? and (status = 'PENDING' or (status = 'RUNNING' and lease_until < now())) """ + DEAD_RETURNING,
+                            WORKER_LOST, WORKER_LOST, id, JobFailurePolicy.MAX_CLAIMS);
+                    if (rows.isEmpty()) return null;
+                    tellListeners(rows.get(0), DeadJobListener.Path.LOST_WORKER);
+                    return rows.get(0);
+                });
+                escalationRetryAt.remove(id);
+                if (dead != null) log.error("event=job.dead id={} type={} reason=claims_exhausted", id, dead.get("type"));
+            } catch (RuntimeException e) {
+                escalationFailed(id, DeadJobListener.Path.LOST_WORKER, e, now);
+            }
+        }
+    }
+
+    private void recoverInBulk() {
         List<Map<String, Object>> dead = jdbc.queryForList("""
                 update job set status = 'DEAD', finished_at = now(), claim_token = null, lease_until = null,
                                last_error = case when status = 'RUNNING' then ? else coalesce(last_error, ?) end
                 where claims >= ? and (status = 'PENDING' or (status = 'RUNNING' and lease_until < now())) returning id, type
                 """, WORKER_LOST, WORKER_LOST, JobFailurePolicy.MAX_CLAIMS);
         dead.forEach(d -> log.error("event=job.dead id={} type={} reason=claims_exhausted", d.get("id"), d.get("type")));
-        jdbc.update("update job set status = 'PENDING', claim_token = null, lease_until = null, last_error = ? where status = 'RUNNING' and lease_until < now() and claims < ?", WORKER_LOST, JobFailurePolicy.MAX_CLAIMS);
+    }
+
+    private void tellListeners(Map<String, Object> row, DeadJobListener.Path path) {
+        Timestamp first = (Timestamp) row.get("first_attempt_at");
+        DeadJobListener.DeadJob job = new DeadJobListener.DeadJob((String) row.get("id"), (String) row.get("type"), (String) row.get("key"), (String) row.get("payload"),
+                ((Number) row.get("claims")).intValue(), first == null ? null : first.toInstant(), (String) row.get("last_error"), (String) row.get("last_error_kind"), path);
+        for (DeadJobListener listener : deadListeners) listener.onDead(job);
+    }
+
+    /** The observable alert of a failed escalation; the job is left for a later retry. */
+    private void escalationFailed(String id, DeadJobListener.Path path, RuntimeException e, Instant now) {
+        escalationRetryAt.put(id, now.plus(ESCALATION_RETRY));
+        String type = jdbc.queryForList("select type from job where id = ?", String.class, id).stream().findFirst().orElse("unknown");
+        log.error("event=job.dead_escalation_failed id={} type={} path={} error={}", id, type, path, errorText(e));
     }
 
     /** An Error (a killed worker) deliberately escapes: nothing is recorded and the lease expires. */
@@ -179,7 +253,9 @@ public class JobRunner {
         int claims = ((Number) row.get("claims")).intValue();
         JobFailurePolicy.Decision decision = JobFailurePolicy.decide(kind, claims, ((Timestamp) row.get("first_attempt_at")).toInstant(), now, cap);
         String error = errorText(e);
-        if (decision.dead()) {
+        if (decision.dead() && !deadListeners.isEmpty()) {
+            deadWithListeners(id, token, type, claims, kind, error);
+        } else if (decision.dead()) {
             int updated = jdbc.update("update job set status = 'DEAD', finished_at = now(), lease_until = null, last_error = ?, last_error_kind = ? where id = ? and claim_token = ? and status = 'RUNNING'",
                     error, kind.name(), id, token);
             fenced(updated, id);
@@ -187,6 +263,29 @@ public class JobRunner {
         } else {
             fenced(jdbc.update("update job set status = 'PENDING', run_at = now() + (? * interval '1 second'), claim_token = null, lease_until = null, last_error = ?, last_error_kind = ? "
                     + "where id = ? and claim_token = ? and status = 'RUNNING'", decision.retryAfter().toSeconds(), error, kind.name(), id, token), id);
+        }
+    }
+
+    /**
+     * AGF gate 2 (register §98 G2-J): the DEAD update and the listeners in one transaction. If a listener fails, both roll
+     * back; the job is then parked at the claim ceiling with its own error, so it is never run again, and lost-worker
+     * recovery retries the DEAD transition with its escalation, atomically, until it succeeds. Every failure is alerted.
+     */
+    private void deadWithListeners(String id, String token, String type, int claims, JobFailurePolicy.Kind kind, String error) {
+        try {
+            Boolean dead = deadTransaction.execute(s -> {
+                List<Map<String, Object>> rows = jdbc.queryForList("update job set status = 'DEAD', finished_at = now(), lease_until = null, last_error = ?, last_error_kind = ? "
+                        + "where id = ? and claim_token = ? and status = 'RUNNING' " + DEAD_RETURNING, error, kind.name(), id, token);
+                if (rows.isEmpty()) return false;
+                tellListeners(rows.get(0), DeadJobListener.Path.EXECUTION);
+                return true;
+            });
+            fenced(Boolean.TRUE.equals(dead) ? 1 : 0, id);
+            if (Boolean.TRUE.equals(dead)) log.error("event=job.dead id={} type={} claims={} kind={}", id, type, claims, kind);
+        } catch (RuntimeException e) {
+            fenced(jdbc.update("update job set status = 'PENDING', claims = greatest(claims, ?), claim_token = null, lease_until = null, last_error = ?, last_error_kind = ? "
+                    + "where id = ? and claim_token = ? and status = 'RUNNING'", JobFailurePolicy.MAX_CLAIMS, error, kind.name(), id, token), id);
+            escalationFailed(id, DeadJobListener.Path.EXECUTION, e, clock.instant());
         }
     }
 

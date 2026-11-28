@@ -136,7 +136,9 @@ public class ExceptionSla {
         Integer flagged = transaction.execute(s -> {
             if (!locks.tryJob(SWEEP_LOCK)) return 0;
             int count = 0;
-            for (Map<String, Object> e : jdbc.queryForList("select id, business_id, created_at, due_at, status from billing_exception where involves_customer_funds and status in "
+            // AGF gate 2 (register §98 G2-E): any open deadline is flagged (a failed checkout creation has one without customer
+            // funds); the market calendar check stays with customer-funds deadlines, which follow it
+            for (Map<String, Object> e : jdbc.queryForList("select id, business_id, created_at, due_at, status, involves_customer_funds from billing_exception where status in "
                     + OPEN_STATUSES + " and due_at is not null")) {
                 String id = (String) e.get("id");
                 Instant due = ((Timestamp) e.get("due_at")).toInstant();
@@ -148,6 +150,7 @@ public class ExceptionSla {
                         count++;
                     }
                 }
+                if (!Boolean.TRUE.equals(e.get("involves_customer_funds"))) continue;
                 Due current = compute((String) e.get("business_id"), ((Timestamp) e.get("created_at")).toInstant());
                 if (current != null && current.calendarIncomplete()) {
                     String target = current.market() + "-" + due.atZone(ZoneOffset.UTC).getYear();

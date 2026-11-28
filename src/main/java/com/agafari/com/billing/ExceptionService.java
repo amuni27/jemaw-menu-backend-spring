@@ -102,6 +102,17 @@ public class ExceptionService {
      */
     boolean create(String businessId, String code, String paymentId, String checkoutId, String providerEventId, String refundRequestId, Long amountMinor, String currency,
                    Instant paidAt, boolean involvesCustomerFunds, String status, Map<String, Object> facts, Instant now, String sourceJobId) {
+        return create(businessId, code, paymentId, checkoutId, providerEventId, refundRequestId, amountMinor, currency, paidAt, involvesCustomerFunds, status, facts, now,
+                sourceJobId, null);
+    }
+
+    /**
+     * AGF gate 2 (register §98 G2-E): as above; {@code reviewWithin}, when given for an exception without customer funds,
+     * sets its deadline to that many elapsed hours (a failed checkout creation: 24 h). It never applies to a customer-funds
+     * exception, whose deadline stays the SLA, and it never puts a restaurant under payment review.
+     */
+    boolean create(String businessId, String code, String paymentId, String checkoutId, String providerEventId, String refundRequestId, Long amountMinor, String currency,
+                   Instant paidAt, boolean involvesCustomerFunds, String status, Map<String, Object> facts, Instant now, String sourceJobId, java.time.Duration reviewWithin) {
         String id = UUID.randomUUID().toString();
         Instant created = now.truncatedTo(ChronoUnit.MICROS);
         // AGF SUB-R4-12 (R-3, I2): a customer-funds exception gets its deadline now; its basis is kept with the facts
@@ -109,6 +120,10 @@ public class ExceptionService {
         Map<String, Object> recorded = new java.util.LinkedHashMap<>(facts);
         if (due != null) recorded.put("sla", due.facts());
         if (businessId == null) recorded.put("slaBasis", "24 elapsed hours (no restaurant, register §89 G3-E)");
+        if (!involvesCustomerFunds && reviewWithin != null) {
+            due = new ExceptionSla.Due(created.plus(reviewWithin).truncatedTo(ChronoUnit.MICROS), false, false, null, false, null, "UTC");
+            recorded.put("slaBasis", reviewWithin.toHours() + " elapsed hours (no customer funds; register §98 G2-E)");
+        }
         int inserted = jdbc.update("insert into billing_exception (id, business_id, code, payment_id, checkout_id, provider_event_id, refund_request_id, amount_minor, currency, "
                         + "paid_at, involves_customer_funds, facts, status, created_at, due_at, source_job_id) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?) "
                         + "on conflict do nothing",

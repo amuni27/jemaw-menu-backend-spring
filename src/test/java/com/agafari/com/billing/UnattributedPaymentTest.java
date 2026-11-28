@@ -358,7 +358,7 @@ class UnattributedPaymentTest extends PaymentOutcomeTestBase {
     }
 
     @Test
-    void the48HourEscalationLeavesResolvedRowsAndOtherCodesAlone() throws Exception {
+    void the48HourEscalationLeavesResolvedRowsAloneAndAlsoCoversUnverifiedOutcomes() throws Exception {
         process(event(verified(micros(Instant.now()), Map.of())));
         String resolved = (String) onlyException(UNATTRIBUTED).get("id");
         assertThat(act(resolved, "resolve", "{\"rowVersion\":" + version(resolved) + ",\"resolution\":\"NO_ACTION_REQUIRED\",\"note\":\"Attributed by replay\"}").getStatus()).isEqualTo(200);
@@ -370,7 +370,7 @@ class UnattributedPaymentTest extends PaymentOutcomeTestBase {
         sla.sweep(Instant.now().plus(Duration.ofHours(49)));
 
         assertThat(status(resolved)).isEqualTo("RESOLVED");
-        assertThat(status(review)).as("only UNATTRIBUTED_PAYMENT escalates at 48 h").isEqualTo("OPEN");
+        assertThat(status(review)).as("AGF D-3 (register §107 D3-A): a restaurant-less unverified outcome escalates too").isEqualTo("ESCALATED");
     }
 
     // ---- G3-C: attribution only by replaying Stripe evidence ----

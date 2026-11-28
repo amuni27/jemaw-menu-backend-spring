@@ -170,19 +170,30 @@ public class ExceptionSla {
     public static final Duration UNATTRIBUTED_ESCALATION = Duration.ofHours(48);
     static final String UNATTRIBUTED_ESCALATION_REASON = "48 elapsed hours without resolution (register §89 G3-E); status only: no Finance Operations owner is named yet (G3-A)";
 
+    /** AGF D-3 (register §105, §107 D3-A): a restaurant-less payment review (a DEAD payment-event job, or an unverified outcome). */
+    static final String PAYMENT_REVIEW_ESCALATION_REASON = "48 elapsed hours without resolution (register §105 D-3); status only: the Finance Operations owner is "
+            + "in the operator roster (G3-A, D-2)";
+
     /**
-     * In the sweep's transaction and lock: each still-open {@code UNATTRIBUTED_PAYMENT} older than 48 elapsed hours becomes
-     * ESCALATED, once, with no target assigned (G3-A open); audited by SYSTEM and alerted at ERROR. Resolved or already
-     * escalated rows are never touched; an admin acting on the old version is refused by the row version.
+     * In the sweep's transaction and lock: each still-open {@code UNATTRIBUTED_PAYMENT} (gate 3) and each still-open
+     * <b>restaurant-less</b> {@code PAYMENT_OUTCOME_PENDING_REVIEW} (D-3) older than 48 elapsed hours becomes ESCALATED, once,
+     * with no target assigned; audited by SYSTEM and alerted at ERROR, naming its money state (verified collected, unknown or
+     * unverified), which is never changed. Restaurant-scoped reviews, resolved or already escalated rows are never touched;
+     * an admin acting on the old version is refused by the row version.
      */
     private void escalateUnattributed(Instant now) {
-        for (String id : jdbc.queryForList("select id from billing_exception where code = ? and status in ('OPEN', 'IN_REVIEW') and escalated_at is null and created_at <= ? "
-                + "order by created_at", String.class, UnattributedPayments.UNATTRIBUTED, Timestamp.from(now.minus(UNATTRIBUTED_ESCALATION)))) {
+        for (Map<String, Object> r : jdbc.queryForList("select id, code, coalesce(facts->>'fundsStatus', case when code = ? then 'COLLECTED_VERIFIED' else 'UNKNOWN' end) as funds "
+                        + "from billing_exception where (code = ? or (code = ? and business_id is null)) and status in ('OPEN', 'IN_REVIEW') and escalated_at is null "
+                        + "and created_at <= ? order by created_at",
+                UnattributedPayments.UNATTRIBUTED, UnattributedPayments.UNATTRIBUTED, UnattributedPayments.PENDING_REVIEW, Timestamp.from(now.minus(UNATTRIBUTED_ESCALATION)))) {
+            String id = (String) r.get("id"), code = (String) r.get("code"), funds = (String) r.get("funds");
+            String reason = UnattributedPayments.UNATTRIBUTED.equals(code) ? UNATTRIBUTED_ESCALATION_REASON : PAYMENT_REVIEW_ESCALATION_REASON;
             int moved = jdbc.update("update billing_exception set status = 'ESCALATED', escalated_at = ?, escalation_reason = ?, row_version = row_version + 1 "
-                    + "where id = ? and status in ('OPEN', 'IN_REVIEW') and escalated_at is null", Timestamp.from(now), UNATTRIBUTED_ESCALATION_REASON, id);
+                    + "where id = ? and status in ('OPEN', 'IN_REVIEW') and escalated_at is null", Timestamp.from(now), reason, id);
             if (moved == 1) {
-                audit.success(ExceptionService.ESCALATED, null, AdminAuditService.SYSTEM, "BILLING_EXCEPTION", id, "status-only after 48 elapsed hours; no target (G3-A open)");
-                log.error("event=billing.exception_escalated id={} code={} after={} escalatedTo=none", id, UnattributedPayments.UNATTRIBUTED, UNATTRIBUTED_ESCALATION);
+                audit.success(ExceptionService.ESCALATED, null, AdminAuditService.SYSTEM, "BILLING_EXCEPTION", id,
+                        "status-only after 48 elapsed hours; no target (G3-A open); code=" + code + " fundsStatus=" + funds);
+                log.error("event=billing.exception_escalated id={} code={} fundsStatus={} after={} escalatedTo=none", id, code, funds, UNATTRIBUTED_ESCALATION);
             }
         }
     }

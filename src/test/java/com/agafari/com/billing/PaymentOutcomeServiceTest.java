@@ -181,7 +181,10 @@ class PaymentOutcomeServiceTest extends PaymentOutcomeTestBase {
         assertThat((String) eventRow(e).get("last_error")).isNotBlank();
         assertThat(count("select count(*) from payment")).isZero();
         assertThat(count("select count(*) from billing_invoice")).isZero();
-        assertThat(count("select count(*) from billing_exception")).isZero();
+        // AGF gate 3 (register §102 C-2, K-1): ownership is still never inferred: no restaurant exception; one restaurant-less one
+        assertThat(count("select count(*) from billing_exception where business_id is not null")).isZero();
+        assertThat(jdbc.queryForList("select code from billing_exception where business_id is null and provider_event_id = ?", String.class, e))
+                .containsExactly("refetch-names-another-payment".equals(variant) ? "PAYMENT_OUTCOME_PENDING_REVIEW" : "UNATTRIBUTED_PAYMENT");
         assertThat(count("select count(*) from refund_request")).isZero();
         assertThat(count("select count(*) from business_subscription")).isZero();
         assertThat(checkoutStatus(mine)).isEqualTo("OPEN");

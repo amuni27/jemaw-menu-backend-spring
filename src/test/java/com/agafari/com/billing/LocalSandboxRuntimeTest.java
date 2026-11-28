@@ -217,6 +217,7 @@ class LocalSandboxRuntimeTest extends CheckoutTestBase {
         assertThat(String.valueOf(e.get("last_error"))).contains("LOCAL_SANDBOX");
         assertThat(subscriptions(us)).isZero();
         assertThat(payments(us)).as("no ledger charge from a payment outside the window").isZero();
+        assertThat(jdbc.queryForObject("select count(*) from billing_exception", Integer.class)).as("AGF gate 3 G3-K: an excluded refusal, unchanged").isZero();
     }
 
     @Test

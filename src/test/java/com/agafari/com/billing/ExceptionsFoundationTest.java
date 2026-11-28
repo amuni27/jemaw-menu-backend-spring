@@ -177,7 +177,7 @@ class ExceptionsFoundationTest extends PaymentOutcomeTestBase {
         MockHttpServletResponse escalated = act(id, "escalate", "{\"rowVersion\":" + version(id) + ",\"reason\":\"Needs finance\"}");
         assertThat(escalated.getStatus()).isEqualTo(200);
         assertThat(mapper.readTree(escalated.getContentAsString()).path("escalatedTo").isNull()).as("no target typed: none assigned").isTrue();
-        assertThat(act(id, "resolve", "{\"rowVersion\":" + version(id) + ",\"resolution\":\"FUNDS_HANDLED_EXTERNALLY\",\"note\":\"Refunded in Stripe\"}").getStatus()).isEqualTo(200);
+        assertThat(act(id, "resolve", "{\"rowVersion\":" + version(id) + ",\"resolution\":\"FUNDS_HANDLED_EXTERNALLY\",\"note\":\"Refunded in Stripe: re_SyntheticRefund01\"}") /* gate 3 G3-D */.getStatus()).isEqualTo(200);
         assertThat(jdbc.queryForObject("select status from billing_exception where id = ?", String.class, id)).isEqualTo("RESOLVED");
         assertThat(jdbc.queryForList("select action from admin_audit_event where target_id = ? order by occurred_at", String.class, id))
                 .contains("BILLING_EXCEPTION_OPENED", "BILLING_EXCEPTION_CLAIMED", "BILLING_EXCEPTION_NOTE_ADDED", "BILLING_EXCEPTION_ESCALATED", "BILLING_EXCEPTION_RESOLVED");

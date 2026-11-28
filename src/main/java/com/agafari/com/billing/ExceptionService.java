@@ -48,6 +48,9 @@ public class ExceptionService {
     static final String NOTE_ADDED = "BILLING_EXCEPTION_NOTE_ADDED";
     static final String ESCALATED = "BILLING_EXCEPTION_ESCALATED";
     static final String RESOLVED = "BILLING_EXCEPTION_RESOLVED";
+    static final String EVENT_LINKED = "BILLING_EXCEPTION_EVENT_LINKED";
+    /** AGF gate 3 (G3-D): a Stripe refund ({@code re_…}) or payment-record refund ({@code pyr_…}) reference. */
+    static final java.util.regex.Pattern STRIPE_REFUND = java.util.regex.Pattern.compile("\\b((?:re|pyr)_[A-Za-z0-9]{8,})\\b");
     static final String REPLAYED = "BILLING_EXCEPTION_REPLAYED";
     static final String REJECTED = "BILLING_EXCEPTION_ACTION_REJECTED";
     static final String HANDED_BACK = "BILLING_EXCEPTION_HANDED_BACK";
@@ -113,6 +116,40 @@ public class ExceptionService {
      */
     boolean create(String businessId, String code, String paymentId, String checkoutId, String providerEventId, String refundRequestId, Long amountMinor, String currency,
                    Instant paidAt, boolean involvesCustomerFunds, String status, Map<String, Object> facts, Instant now, String sourceJobId, java.time.Duration reviewWithin) {
+        return insert(businessId, code, paymentId, checkoutId, providerEventId, refundRequestId, amountMinor, currency, paidAt, involvesCustomerFunds, status, facts, now,
+                sourceJobId, reviewWithin, null, null);
+    }
+
+    /**
+     * AGF gate 3 (register §102 M-1): a restaurant-less exception about one verified payment ({@code paymentProvider},
+     * {@code providerPaymentRef}), customer funds, OPEN, linked to the event that delivered it. False when that payment
+     * already has one with this code (unique per provider, payment and code, also under concurrency).
+     */
+    boolean createForPayment(String code, String providerEventId, long amountMinor, String currency, Instant paidAt, Map<String, Object> facts, Instant now,
+                             String paymentProvider, String providerPaymentRef) {
+        return insert(null, code, null, null, providerEventId, null, amountMinor, currency, paidAt, true, "OPEN", facts, now, null, null, paymentProvider, providerPaymentRef);
+    }
+
+    /**
+     * AGF gate 3 (G3-G): another event of a payment that already has its exception: the event is linked by an audit entry
+     * on that exception (the exception itself is immutable), once per event.
+     */
+    void linkEventToPayment(String paymentProvider, String providerPaymentRef, String code, String providerEventId, String source) {
+        String exceptionId = jdbc.queryForObject("select id from billing_exception where payment_provider = ? and provider_payment_ref = ? and code = ?", String.class,
+                paymentProvider, providerPaymentRef, code);
+        boolean own = providerEventId.equals(jdbc.queryForObject("select provider_event_id from billing_exception where id = ?", String.class, exceptionId));
+        String detail = "providerEvent=" + providerEventId + " source=" + source;
+        boolean linked = jdbc.queryForObject("select exists (select 1 from admin_audit_event where action = ? and target_id = ? and detail = ?)", Boolean.class,
+                EVENT_LINKED, exceptionId, detail);
+        if (own || linked) return; // a replay of an event already traced
+        audit.success(EVENT_LINKED, null, AdminAuditService.SYSTEM, TARGET, exceptionId, detail);
+        org.slf4j.LoggerFactory.getLogger(ExceptionService.class).warn("event=billing.exception_event_linked id={} code={} providerEvent={} source={}", exceptionId, code,
+                providerEventId, source);
+    }
+
+    private boolean insert(String businessId, String code, String paymentId, String checkoutId, String providerEventId, String refundRequestId, Long amountMinor,
+                           String currency, Instant paidAt, boolean involvesCustomerFunds, String status, Map<String, Object> facts, Instant now, String sourceJobId,
+                           java.time.Duration reviewWithin, String paymentProvider, String providerPaymentRef) {
         String id = UUID.randomUUID().toString();
         Instant created = now.truncatedTo(ChronoUnit.MICROS);
         // AGF SUB-R4-12 (R-3, I2): a customer-funds exception gets its deadline now; its basis is kept with the facts
@@ -125,10 +162,10 @@ public class ExceptionService {
             recorded.put("slaBasis", reviewWithin.toHours() + " elapsed hours (no customer funds; register §98 G2-E)");
         }
         int inserted = jdbc.update("insert into billing_exception (id, business_id, code, payment_id, checkout_id, provider_event_id, refund_request_id, amount_minor, currency, "
-                        + "paid_at, involves_customer_funds, facts, status, created_at, due_at, source_job_id) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?) "
-                        + "on conflict do nothing",
+                        + "paid_at, involves_customer_funds, facts, status, created_at, due_at, source_job_id, payment_provider, provider_payment_ref) "
+                        + "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?) on conflict do nothing",
                 id, businessId, code, paymentId, checkoutId, providerEventId, refundRequestId, amountMinor, currency, timestamp(paidAt), involvesCustomerFunds,
-                mapper.writeValueAsString(recorded), status, timestamp(created), due == null ? null : timestamp(due.dueAt()), sourceJobId);
+                mapper.writeValueAsString(recorded), status, timestamp(created), due == null ? null : timestamp(due.dueAt()), sourceJobId, paymentProvider, providerPaymentRef);
         if (inserted == 1) {
             String deadline = due == null ? "" : " due=" + due.dueAt() + " immediate=" + due.immediate() + " calendarIncomplete=" + due.calendarIncomplete()
                     + " graceUnknown=" + due.graceUnknown();
@@ -292,9 +329,22 @@ public class ExceptionService {
             throw new FieldValidationException(Map.of("resolution", "One of FUNDS_HANDLED_EXTERNALLY or NO_ACTION_REQUIRED"));
         }
         String note = text(request.note(), "note");
+        String detail = "-> RESOLVED " + request.resolution();
+        // AGF gate 3 (register §101, G3-D): an unattributable payment's money can only be returned in Stripe, outside Agafari;
+        // resolving it as handled externally needs that refund's reference in the audited note
+        if ("FUNDS_HANDLED_EXTERNALLY".equals(request.resolution()) && UnattributedPayments.UNATTRIBUTED.equals(codeOf(id))) {
+            java.util.regex.Matcher refund = STRIPE_REFUND.matcher(note);
+            if (!refund.find()) throw new FieldValidationException(Map.of("note", "Give the Stripe refund reference (re_…) of the money returned in Stripe"));
+            detail += " stripeRefund=" + refund.group(1);
+        }
         return change(id, request, adminId, adminEmail, "resolve", REVIEWABLE, RESOLVED,
                 "status = 'RESOLVED', resolution = ?, resolution_note = ?, resolved_by = ?, resolved_at = now()", List.of(request.resolution(), note, adminId),
-                "-> RESOLVED " + request.resolution());
+                detail);
+    }
+
+    private String codeOf(String id) {
+        if (!onPostgres()) return null;
+        return jdbc.queryForList("select code from billing_exception where id = ?", String.class, id).stream().findFirst().orElse(null);
     }
 
     /**

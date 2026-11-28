@@ -152,7 +152,7 @@ class ReconciliationTest extends PaymentOutcomeTestBase {
     }
 
     @Test
-    void ac4AnUnattributableUnknownPaymentStaysQuarantinedWithoutAnExceptionAndIsNeverReplayed() {
+    void ac4AnUnattributableUnknownPaymentIsQuarantinedWithARestaurantlessExceptionAndIsNeverReplayed() {
         String ref = "pay_unattributable";
         fakeEt.payment(new VerifiedPayment(ref, ProviderPaymentStatus.SUCCEEDED, new Money(ET_AMOUNT, Currency.ETB), soon(), Map.of()));
         listed(ref, soon());
@@ -162,7 +162,9 @@ class ReconciliationTest extends PaymentOutcomeTestBase {
         Map<String, Object> event = jdbc.queryForMap("select id, status, attempts, last_error from provider_event where event_id = ?", InboxService.INTERNAL_PREFIX + ref);
         assertThat(event.get("status")).isEqualTo("QUARANTINED");
         assertThat((String) event.get("last_error")).isNotBlank();
-        assertThat(count("select count(*) from billing_exception")).as("R-A: no restaurant is inferred").isZero();
+        // AGF gate 3 (register §101 G3-I): the payment is now owned by one restaurant-less exception; no restaurant is inferred (R-A)
+        assertThat(count("select count(*) from billing_exception where business_id is not null")).as("R-A: no restaurant is inferred").isZero();
+        assertThat(jdbc.queryForObject("select code from billing_exception where provider_event_id = ?", String.class, event.get("id"))).isEqualTo("UNATTRIBUTED_PAYMENT");
         assertThat(count("select count(*) from payment")).isZero();
         int fetches = fakeEt.verifyCalls();
 

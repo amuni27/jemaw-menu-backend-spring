@@ -160,9 +160,31 @@ public class ExceptionSla {
                     }
                 }
             }
+            escalateUnattributed(now);
             return count;
         });
         return flagged == null ? 0 : flagged;
+    }
+
+    /** AGF gate 3 (register §89 G3-E, §101 G3-A, G3-H): an unattributable payment still open after 48 elapsed hours. */
+    public static final Duration UNATTRIBUTED_ESCALATION = Duration.ofHours(48);
+    static final String UNATTRIBUTED_ESCALATION_REASON = "48 elapsed hours without resolution (register §89 G3-E); status only: no Finance Operations owner is named yet (G3-A)";
+
+    /**
+     * In the sweep's transaction and lock: each still-open {@code UNATTRIBUTED_PAYMENT} older than 48 elapsed hours becomes
+     * ESCALATED, once, with no target assigned (G3-A open); audited by SYSTEM and alerted at ERROR. Resolved or already
+     * escalated rows are never touched; an admin acting on the old version is refused by the row version.
+     */
+    private void escalateUnattributed(Instant now) {
+        for (String id : jdbc.queryForList("select id from billing_exception where code = ? and status in ('OPEN', 'IN_REVIEW') and escalated_at is null and created_at <= ? "
+                + "order by created_at", String.class, UnattributedPayments.UNATTRIBUTED, Timestamp.from(now.minus(UNATTRIBUTED_ESCALATION)))) {
+            int moved = jdbc.update("update billing_exception set status = 'ESCALATED', escalated_at = ?, escalation_reason = ?, row_version = row_version + 1 "
+                    + "where id = ? and status in ('OPEN', 'IN_REVIEW') and escalated_at is null", Timestamp.from(now), UNATTRIBUTED_ESCALATION_REASON, id);
+            if (moved == 1) {
+                audit.success(ExceptionService.ESCALATED, null, AdminAuditService.SYSTEM, "BILLING_EXCEPTION", id, "status-only after 48 elapsed hours; no target (G3-A open)");
+                log.error("event=billing.exception_escalated id={} code={} after={} escalatedTo=none", id, UnattributedPayments.UNATTRIBUTED, UNATTRIBUTED_ESCALATION);
+            }
+        }
     }
 
     private boolean audited(String action, String target, String detail) {

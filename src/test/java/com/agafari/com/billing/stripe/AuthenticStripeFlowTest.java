@@ -252,7 +252,9 @@ class AuthenticStripeFlowTest extends AbstractIntegrationTest {
         String event = deliver("r_event_invoice_paid_cycle");
         assertThat(outcomes.process(event)).isEqualTo(PaymentOutcomeService.Result.QUARANTINED);
         assertThat(count("select count(*) from payment where provider_payment_ref = ?", cycle)).isZero();
-        assertThat(count("select count(*) from billing_exception where provider_event_id = ?", event)).isZero();
+        // AGF gate 3 (register §102 C-1/C-2): a verified renewal payment of an unknown subscription is owned, restaurant-less
+        assertThat(count("select count(*) from billing_exception where provider_event_id = ? and code = 'UNATTRIBUTED_PAYMENT' and business_id is null", event)).isEqualTo(1);
+        assertThat(count("select count(*) from billing_exception where business_id is not null")).isZero();
         assertThat(count("select count(*) from refund_request")).isZero();
         assertThat(count("select count(*) from job where type = ?", ProviderSubscriptionCancelHandler.TYPE)).isZero();
         assertThat(stub.calls("GET", "/v1/checkout/sessions")).as("a renewal is never correlated").isEmpty();

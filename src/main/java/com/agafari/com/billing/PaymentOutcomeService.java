@@ -167,6 +167,14 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
     private final boolean usFlag;
     private volatile LocalSandboxActivation localSandbox; // AGF B-L1
 
+    // AGF gate 3: null in the older constructors (tests built by hand): a quarantine then records no exception, as before
+    private UnattributedPayments unattributed;
+
+    @Autowired(required = false)
+    void setUnattributedPayments(UnattributedPayments unattributed) {
+        this.unattributed = unattributed;
+    }
+
     /**
      * AGF B-L1 (register §93): an active local sandbox opens the US path while the gates are open, and only until its
      * acknowledged time ({@link #billingActive}); never Ethiopia. Without one, nothing changes.
@@ -242,7 +250,7 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
             note(event, "UNRESOLVED: the provider timed out");
             throw new TransientJobException("The provider timed out verifying a payment", e);
         }
-        if (!ref.equals(verified.providerPaymentRef())) return quarantine(event, "VERIFICATION_FAILED: the re-fetch named another payment");
+        if (!ref.equals(verified.providerPaymentRef())) return quarantineUnverified(event, ref, "VERIFICATION_FAILED: the re-fetch named another payment"); // K-1
         switch (verified.status()) {
             case PENDING -> {
                 note(event, "UNRESOLVED: the provider reports the payment pending");
@@ -267,11 +275,11 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
         // AGF SUB-R5-03 (§37 Q7/F2): a provider-initiated renewal is matched by its verified subscription, never by a checkout
         if (renewals != null && verified.billing() != null && verified.billing().renewal()) return renewals.applyPayment(renewalRef(event), strategy, verified, capabilities);
 
-        String mismatch = matchCheckout(event, strategy, verified);
+        UnattributedPayments.Reason mismatch = matchCheckout(event, strategy, verified);
         Checkout checkout = mismatch == null ? loadCheckout(verified.metadata().get(PaymentMetadata.CHECKOUT_ID), false) : null;
         if (checkout == null) {
             PaymentOutcome row1 = PaymentOutcomeMatrix.decide(new OutcomeFacts(PaymentVerification.VERIFIED, false, false, null, null, null, false, null, null, null, capabilities, false));
-            return quarantine(event, row1.code() + ": " + (mismatch == null ? "no checkout" : mismatch));
+            return quarantineUnattributed(event, verified, mismatch == null ? UnattributedPayments.Reason.NO_CHECKOUT : mismatch, row1.code());
         }
         Refused refused;
         try {
@@ -298,25 +306,25 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
         return ref.isBlank() ? null : ref;
     }
 
-    /** PO ruling R4: null when every verified key agrees with Agafari's records; otherwise why it doesn't. */
-    private String matchCheckout(Event event, BillingStrategy strategy, VerifiedPayment verified) {
+    /** PO ruling R4: null when every verified key agrees with Agafari's records; otherwise why it doesn't (a stable reason, gate 3). */
+    private UnattributedPayments.Reason matchCheckout(Event event, BillingStrategy strategy, VerifiedPayment verified) {
         Map<String, String> m = verified.metadata();
         String checkoutId = m.get(PaymentMetadata.CHECKOUT_ID), businessId = m.get(PaymentMetadata.BUSINESS_ID);
-        if (blank(checkoutId) || blank(businessId)) return "the payment carries no checkout or restaurant";
+        if (blank(checkoutId) || blank(businessId)) return UnattributedPayments.Reason.NO_AGAFARI_REFERENCE;
         Checkout c = loadCheckout(checkoutId, false);
-        if (c == null) return "the payment names an unknown checkout";
-        if (!c.businessId().equals(businessId)) return "the checkout belongs to another restaurant";
+        if (c == null) return UnattributedPayments.Reason.UNKNOWN_CHECKOUT;
+        if (!c.businessId().equals(businessId)) return UnattributedPayments.Reason.OTHER_RESTAURANT;
         String checkoutProvider = jdbc.queryForObject("select provider from checkout_session where id = ?", String.class, c.id());
-        if (!event.provider().equals(checkoutProvider) || !strategy.provider().equals(checkoutProvider)) return "the checkout belongs to another provider";
+        if (!event.provider().equals(checkoutProvider) || !strategy.provider().equals(checkoutProvider)) return UnattributedPayments.Reason.OTHER_PROVIDER;
         String recorded = jdbc.queryForObject("select provider_session_ref from checkout_session where id = ?", String.class, c.id());
         String named = m.get(PaymentMetadata.PROVIDER_SESSION_REF);
-        if (recorded != null && !recorded.equals(named)) return "the provider session reference is missing or differs";
+        if (recorded != null && !recorded.equals(named)) return UnattributedPayments.Reason.SESSION_MISMATCH;
         if (recorded == null && named != null
                 && jdbc.queryForObject("select count(*) from checkout_session where provider = ? and provider_session_ref = ?", Integer.class, checkoutProvider, named) > 0) {
-            return "the provider session reference belongs to another checkout";
+            return UnattributedPayments.Reason.SESSION_OF_ANOTHER_CHECKOUT;
         }
         List<String> markets = jdbc.queryForList("select market from billing_account where business_id = ? and provider = ?", String.class, c.businessId(), checkoutProvider);
-        if (markets.size() != 1 || !markets.get(0).equals(strategy.market().name())) return "the restaurant has no billing account in this market";
+        if (markets.size() != 1 || !markets.get(0).equals(strategy.market().name())) return UnattributedPayments.Reason.NO_MARKET_ACCOUNT;
         return null;
     }
 
@@ -523,6 +531,31 @@ public class PaymentOutcomeService implements com.agafari.com.subscription.HeldF
             log.info("event=billing.webhook_ignored provider={} type={} eventId={} occurrences={}", event.provider(), type, providerEventId, occurrences);
         }
         return result;
+    }
+
+    /**
+     * AGF gate 3 (register §101, §102 C-2): a verified successful payment no restaurant can be attributed to is quarantined and
+     * its single {@code UNATTRIBUTED_PAYMENT} recorded in the same transaction: if the exception can't be stored, the event
+     * stays PENDING and is retried by the job rules. Nothing is applied.
+     */
+    private Result quarantineUnattributed(Event event, VerifiedPayment verified, UnattributedPayments.Reason reason, String rowCode) {
+        String text = rowCode + ": " + reason.text();
+        log.warn("event=billing.event_quarantined eventId={} reason={}", event.id(), text);
+        return transaction.execute(s -> {
+            Result result = finish(event, "QUARANTINED", clip(text), Result.QUARANTINED);
+            if (result == Result.QUARANTINED && unattributed != null) unattributed.recordUnattributed(event.id(), event.provider(), verified, reason, rowCode, text);
+            return result;
+        });
+    }
+
+    /** AGF gate 3 K-1: a payment-path verification failure, quarantined with its review exception in one transaction. */
+    private Result quarantineUnverified(Event event, String requestedRef, String reason) {
+        log.warn("event=billing.event_quarantined eventId={} reason={}", event.id(), reason);
+        return transaction.execute(s -> {
+            Result result = finish(event, "QUARANTINED", clip(reason), Result.QUARANTINED);
+            if (result == Result.QUARANTINED && unattributed != null) unattributed.recordUnverified(event.id(), requestedRef, reason);
+            return result;
+        });
     }
 
     private Result finishWithoutOwner(Event event, String status, String note, Result result) {

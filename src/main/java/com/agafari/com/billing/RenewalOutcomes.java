@@ -127,7 +127,12 @@ public class RenewalOutcomes {
         ProviderCallGuard.assertNoTransaction();
         ProviderBilling b = verified.billing();
         String businessId = b.subscriptionRef() == null ? null : ownerOf(strategy.provider(), b.subscriptionRef());
-        if (businessId == null) return quarantine(e, RenewalOutcome.UNKNOWN_SUBSCRIPTION + ": the provider subscription is no Agafari PROVIDER subscription");
+        if (businessId == null) {
+            // AGF gate 3 (C-1): a paid renewal of a genuinely unknown subscription is unattributable
+            String text = RenewalOutcome.UNKNOWN_SUBSCRIPTION + ": " + UnattributedPayments.Reason.UNKNOWN_SUBSCRIPTION.text();
+            log.warn("event=billing.renewal_quarantined eventId={} reason={}", e.id(), text);
+            return transaction.execute(s -> unknownSubscription(e, verified, text));
+        }
         Refused refused;
         try {
             return transaction.execute(s -> applyLocked(e, strategy, verified, capabilities, businessId));
@@ -150,7 +155,7 @@ public class RenewalOutcomes {
         if (!e.status().equals(jdbc.queryForObject("select status from provider_event where id = ? for update", String.class, e.id()))) return PaymentOutcomeService.Result.ALREADY_DONE;
         ProviderBilling b = verified.billing();
         BusinessSubscription row = rowOf(strategy.provider(), b.subscriptionRef(), businessId);
-        if (row == null) return finish(e, "QUARANTINED", RenewalOutcome.UNKNOWN_SUBSCRIPTION + ": the subscription changed owner", PaymentOutcomeService.Result.QUARANTINED);
+        if (row == null) return unknownSubscription(e, verified, RenewalOutcome.UNKNOWN_SUBSCRIPTION + ": the subscription changed owner");
         Instant now = micros(clock.now());
         Instant tPay = micros(verified.paidAt());
         // §6: the payment time decides at the grace boundary; a late payment first lets the stored row reach its real state
@@ -185,7 +190,8 @@ public class RenewalOutcomes {
 
         return switch (decision.action()) {
             case ALREADY_DONE -> finish(e, "PROCESSED", null, PaymentOutcomeService.Result.PROCESSED); // one-time consumption (R2)
-            case QUARANTINE -> finish(e, "QUARANTINED", clip(decision.code()), PaymentOutcomeService.Result.QUARANTINED);
+            case QUARANTINE -> RenewalOutcome.UNKNOWN_SUBSCRIPTION.equals(decision.code()) ? unknownSubscription(e, verified, decision.code())
+                    : finish(e, "QUARANTINED", clip(decision.code()), PaymentOutcomeService.Result.QUARANTINED);
             case RETRY -> throw new Retry("the period starting " + start + " follows " + row.getPeriodEnd() + ", which isn't paid yet");
             case EXCEPTION -> {
                 String paymentId = insertCharge(e, strategy.provider(), verified, businessId, null, tPay, now);
@@ -455,6 +461,27 @@ public class RenewalOutcomes {
         int updated = jdbc.update("update provider_event set status = ?, processed_at = now(), attempts = attempts + 1, last_error = ? where id = ? and status = ?",
                 status, kept, e.id(), e.status());
         return updated == 1 ? result : PaymentOutcomeService.Result.ALREADY_DONE;
+    }
+
+    // AGF gate 3: null when built by hand in older tests: a quarantine then records no exception, as before
+    private UnattributedPayments unattributed;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setUnattributedPayments(UnattributedPayments unattributed) {
+        this.unattributed = unattributed;
+    }
+
+    /**
+     * AGF gate 3 (register §102 C-1, C-2), in the caller's transaction: a verified renewal <b>payment</b> of a subscription that
+     * is no Agafari PROVIDER subscription is quarantined with its single {@code UNATTRIBUTED_PAYMENT}. State events never
+     * come here, and a customer mismatch on a known subscription stays the P-R4 hold.
+     */
+    private PaymentOutcomeService.Result unknownSubscription(EventRef e, VerifiedPayment verified, String text) {
+        PaymentOutcomeService.Result result = finish(e, "QUARANTINED", clip(text), PaymentOutcomeService.Result.QUARANTINED);
+        if (result == PaymentOutcomeService.Result.QUARANTINED && unattributed != null) {
+            unattributed.recordUnattributed(e.id(), e.provider(), verified, UnattributedPayments.Reason.UNKNOWN_SUBSCRIPTION, "R1", text);
+        }
+        return result;
     }
 
     private PaymentOutcomeService.Result quarantine(EventRef e, String reason) {
